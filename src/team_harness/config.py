@@ -4,13 +4,14 @@ import os
 from pathlib import Path
 import tomllib
 
+LOCAL_CONFIG_DIR_NAME = ".team-harness"
 CONFIG_PATH = Path.home() / ".team-harness" / "config.toml"
 RUNS_DIR = Path.home() / ".team-harness" / "runs"
 SKILLS_USER_DIR = Path.home() / ".team-harness" / "skills"
 
 DEFAULT_TEMPLATES: dict[str, str] = {
-    "codex": "codex exec {prompt}",
-    "gemini": "gemini -p {prompt}",
+    "codex": 'codex exec --yolo --model gpt-5.4 PROMPT="{prompt}"',
+    "gemini": 'gemini --approval-mode=yolo -p "{prompt}"',
     "claude": "claude -p --dangerously-skip-permissions {prompt}",
     "opencode": "opencode {prompt}",
     "pi": "pi --print --no-session {prompt}",
@@ -20,7 +21,7 @@ DEFAULT_TEMPLATES: dict[str, str] = {
 
 @dataclass
 class Config:
-    model: str = "openai/gpt-4o"
+    model: str = "gpt-5.4"
     api_base: str = "https://openrouter.ai/api/v1"
     api_key: str = ""
     max_turns: int = 50
@@ -33,12 +34,14 @@ class Config:
     agent_templates: dict[str, str] = field(default_factory=dict)
     cwd: str = "."
     run_dir: Path | None = None
+    global_config_path: Path | None = None
+    local_config_path: Path | None = None
 
 
 def _default_config_text() -> str:
     return """# team-harness configuration
 [coordinator]
-model = "openai/gpt-4o"
+model = "gpt-5.4"
 api_base = "https://openrouter.ai/api/v1"
 api_key = ""
 system_prompt = ""
@@ -47,10 +50,10 @@ system_prompt = ""
 # allowed_agents = ["codex", "gemini"]
 
 [agents.codex]
-template = "codex exec {prompt}"
+template = "codex exec --yolo --model gpt-5.4 PROMPT=\\"{prompt}\\""
 
 [agents.gemini]
-template = "gemini -p {prompt}"
+template = "gemini --approval-mode=yolo -p \\"{prompt}\\""
 
 [agents.claude]
 template = "claude -p --dangerously-skip-permissions {prompt}"
@@ -66,12 +69,19 @@ template = "team-harness run {prompt}"
 """
 
 
-def _create_default_config() -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(_default_config_text())
-    print(
-        "Created default config at ~/.team-harness/config.toml — edit to configure your API key."
-    )
+def _local_config_text() -> str:
+    return """# Project-level team-harness config.
+# Values here override ~/.team-harness/config.toml.
+# Lists replace, they do not extend, the global value.
+# Do not store API keys here; prefer environment variables.
+
+[coordinator]
+# model = "gpt-5.4"
+# allowed_agents = ["codex", "gemini"]
+
+# [agents.codex]
+# template = "codex exec --yolo --model gpt-5.4 PROMPT=\\"{prompt}\\""
+"""
 
 
 def _parse_allowed_agents(raw: str | list[str] | None) -> list[str] | None:
@@ -80,6 +90,39 @@ def _parse_allowed_agents(raw: str | list[str] | None) -> list[str] | None:
     if isinstance(raw, list):
         return [item.strip() for item in raw if item.strip()]
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def find_local_config(start: Path | None = None) -> Path | None:
+    current = (start or Path.cwd()).resolve()
+    while True:
+        candidate = current / LOCAL_CONFIG_DIR_NAME / "config.toml"
+        if candidate.is_file():
+            return candidate
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
+
+
+def _deep_merge(
+    base: dict[str, object], override: dict[str, object]
+) -> dict[str, object]:
+    merged = dict(base)
+    for key, override_value in override.items():
+        base_value = merged.get(key)
+        if isinstance(base_value, dict) and isinstance(override_value, dict):
+            merged[key] = _deep_merge(base_value, override_value)
+            continue
+        merged[key] = override_value
+    return merged
+
+
+def _load_toml_file(path: Path) -> dict[str, object]:
+    try:
+        data = tomllib.loads(path.read_text())
+    except tomllib.TOMLDecodeError as exc:
+        raise SystemExit(f"Invalid TOML in {path}: {exc}") from exc
+    return data
 
 
 def load_config(
@@ -95,11 +138,19 @@ def load_config(
     allowed_agents: str | None = None,
     cwd: str | None = None,
 ) -> Config:
-    config_data: dict[str, object] = {}
-    if not CONFIG_PATH.exists():
-        _create_default_config()
-    if CONFIG_PATH.exists():
-        config_data = tomllib.loads(CONFIG_PATH.read_text())
+    start_dir = Path(cwd).resolve() if cwd else Path.cwd().resolve()
+    global_path = CONFIG_PATH.resolve() if CONFIG_PATH.exists() else None
+    local_path = find_local_config(start_dir)
+    if (
+        global_path is not None
+        and local_path is not None
+        and local_path.resolve() == global_path.resolve()
+    ):
+        local_path = None
+
+    global_data = _load_toml_file(global_path) if global_path else {}
+    local_data = _load_toml_file(local_path) if local_path else {}
+    config_data = _deep_merge(global_data, local_data)
 
     coordinator = config_data.get("coordinator", {})
     if not isinstance(coordinator, dict):
@@ -129,17 +180,27 @@ def load_config(
     env_api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get(
         "OPENAI_API_KEY"
     )
+    cli_allowed_agents = _parse_allowed_agents(allowed_agents)
 
     return Config(
-        model=model or env_model or str(coordinator.get("model", Config.model)),
+        model=model
+        if model is not None
+        else env_model or str(coordinator.get("model", Config.model)),
         api_base=api_base
-        or env_api_base
-        or str(coordinator.get("api_base", Config.api_base)),
-        api_key=api_key or env_api_key or str(coordinator.get("api_key", "")),
-        max_turns=max_turns or int(coordinator.get("max_turns", Config.max_turns)),
+        if api_base is not None
+        else env_api_base or str(coordinator.get("api_base", Config.api_base)),
+        api_key=api_key
+        if api_key is not None
+        else env_api_key or str(coordinator.get("api_key", "")),
+        max_turns=max_turns
+        if max_turns is not None
+        else int(coordinator.get("max_turns", Config.max_turns)),
         max_retries=max_retries
-        or int(coordinator.get("max_retries", Config.max_retries)),
-        max_depth=max_depth or int(coordinator.get("max_depth", Config.max_depth)),
+        if max_retries is not None
+        else int(coordinator.get("max_retries", Config.max_retries)),
+        max_depth=max_depth
+        if max_depth is not None
+        else int(coordinator.get("max_depth", Config.max_depth)),
         system_prompt_extension="\n\n".join(part for part in prompt_parts if part),
         context_limit=(
             int(coordinator["context_limit"])
@@ -149,8 +210,11 @@ def load_config(
         shutdown_timeout_s=float(
             coordinator.get("shutdown_timeout_s", Config.shutdown_timeout_s)
         ),
-        allowed_agents=_parse_allowed_agents(allowed_agents)
-        or _parse_allowed_agents(coordinator.get("allowed_agents")),
+        allowed_agents=cli_allowed_agents
+        if cli_allowed_agents is not None
+        else _parse_allowed_agents(coordinator.get("allowed_agents")),
         agent_templates=agent_templates,
-        cwd=cwd or Config.cwd,
+        cwd=str(start_dir),
+        global_config_path=global_path,
+        local_config_path=local_path,
     )

@@ -6,6 +6,8 @@ import warnings
 from team_harness.config import Config
 from team_harness.config import DEFAULT_TEMPLATES
 
+PROMPT_SENTINEL = "\x00PROMPT\x00"
+
 
 def all_agent_types(config: Config) -> list[str]:
     custom = [
@@ -23,6 +25,13 @@ def resolve_template(agent_type: str, config: Config) -> str:
     return DEFAULT_TEMPLATES[agent_type]
 
 
+def _tokenize_template(template: str) -> list[str]:
+    if "{prompt}" not in template:
+        raise ValueError("Template missing {prompt} placeholder")
+    marked = template.replace("{prompt}", PROMPT_SENTINEL)
+    return shlex.split(marked)
+
+
 def build_command(
     agent_type: str,
     prompt: str,
@@ -33,15 +42,9 @@ def build_command(
     allowed_agents: list[str] | None = None,
 ) -> list[str]:
     template = resolve_template(agent_type, config)
-    if "{prompt}" not in template:
-        raise ValueError(f"Template for {agent_type!r} missing {{prompt}} placeholder")
+    template_tokens = _tokenize_template(template)
+    command = [token.replace(PROMPT_SENTINEL, prompt) for token in template_tokens]
 
-    before, after = template.split("{prompt}", 1)
-    before_args = shlex.split(before.strip())
-    after_args = shlex.split(after.strip()) if after.strip() else []
-    command = list(before_args)
-
-    template_tokens = before_args + after_args
     if model is not None:
         if "--model" in template_tokens:
             warnings.warn(
@@ -50,10 +53,15 @@ def build_command(
                 stacklevel=2,
             )
         else:
-            command.extend(["--model", model])
-
-    command.append(prompt)
-    command.extend(after_args)
+            prompt_index = next(
+                (
+                    index
+                    for index, token in enumerate(template_tokens)
+                    if PROMPT_SENTINEL in token
+                ),
+                len(command),
+            )
+            command[prompt_index:prompt_index] = ["--model", model]
 
     if extra_flags:
         command.extend(extra_flags)
@@ -76,7 +84,7 @@ def get_allowed_types(config: Config) -> list[str]:
 def validate_templates(config: Config, allowed_types: list[str]) -> None:
     for agent_type in allowed_types:
         template = resolve_template(agent_type, config)
-        binary = shlex.split(template)[0]
+        binary = _tokenize_template(template)[0]
         if not shutil.which(binary):
             warnings.warn(
                 f"Agent type '{agent_type}': binary '{binary}' not found on PATH",
