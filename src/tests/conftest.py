@@ -28,12 +28,20 @@ class DummyUI:
         self.warning_count = 0
         self.reset_count = 0
         self.inline_count = 0
+        self.pause_count = 0
+        self.resume_count = 0
 
     def start(self) -> None:
         return None
 
     def stop(self) -> None:
         return None
+
+    def pause_for_input(self) -> None:
+        self.pause_count += 1
+
+    def resume_after_input(self) -> None:
+        self.resume_count += 1
 
     def begin_turn(self, n: int) -> None:
         self.turns.append(n)
