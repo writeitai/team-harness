@@ -37,6 +37,9 @@ class DummyUI:
     def stop(self) -> None:
         return None
 
+    def print_welcome(self, model: str, cwd: str, provider: str) -> None:
+        return None
+
     def pause_for_input(self) -> None:
         self.pause_count += 1
 

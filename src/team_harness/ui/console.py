@@ -2,6 +2,7 @@ from abc import ABC
 from abc import abstractmethod
 from datetime import datetime
 from datetime import timezone
+from importlib.metadata import version as _pkg_version
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,11 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+try:
+    _VERSION = _pkg_version("team-harness")
+except Exception:
+    _VERSION = "dev"
 
 if TYPE_CHECKING:
     from team_harness.agents.manager import AgentManager
@@ -37,6 +43,9 @@ class ConsoleBase(ABC):
 
     @abstractmethod
     def stop(self) -> None: ...
+
+    @abstractmethod
+    def print_welcome(self, model: str, cwd: str, provider: str) -> None: ...
 
     @abstractmethod
     def pause_for_input(self) -> None: ...
@@ -93,6 +102,15 @@ class SilentConsole(ConsoleBase):
         return None
 
     def stop(self) -> None:
+        return None
+
+    def print_welcome(self, model: str, cwd: str, provider: str) -> None:
+        return None
+
+    def pause_for_input(self) -> None:
+        return None
+
+    def resume_after_input(self) -> None:
         return None
 
     def begin_turn(self, n: int) -> None:
@@ -153,6 +171,11 @@ class PlainConsole(ConsoleBase):
 
     def stop(self) -> None:
         return None
+
+    def print_welcome(self, model: str, cwd: str, provider: str) -> None:
+        print(f"th — team-harness (v{_VERSION})")
+        print(f"model:     {model}")
+        print(f"directory: {cwd}")
 
     def pause_for_input(self) -> None:
         pass
@@ -233,9 +256,31 @@ class HarnessConsole(ConsoleBase):
             self._live.stop()
             self._live_started = False
 
+    def print_welcome(self, model: str, cwd: str, provider: str) -> None:
+        display_cwd = cwd.replace(str(Path.home()), "~")
+        body = Text.assemble(
+            ("  >_ ", "bold"),
+            ("team-harness", "bold"),
+            (f" (v{_VERSION})\n\n", "dim"),
+            ("  model:     ", "dim"),
+            (model, ""),
+            ("    ", ""),
+            ("/model", "dim cyan"),
+            (" to change\n", "dim"),
+            ("  provider:  ", "dim"),
+            (provider, ""),
+            ("\n", ""),
+            ("  directory: ", "dim"),
+            (display_cwd, ""),
+        )
+        self._console.print()
+        self._console.print(Panel(body, border_style="dim", padding=(1, 1)))
+        self._console.print()
+
     def pause_for_input(self) -> None:
         if self._live_started:
             self._live.stop()
+        self._console.rule(style="dim")
 
     def resume_after_input(self) -> None:
         if self._live_started:

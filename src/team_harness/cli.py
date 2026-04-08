@@ -305,6 +305,7 @@ async def _repl(**kwargs: Any) -> None:
         turn_index = 0
         last_logged_index = 0
         session = make_prompt_session()
+        ui.print_welcome(model=config.model, cwd=config.cwd, provider=config.provider)
         ui.start()
         try:
             while True:
