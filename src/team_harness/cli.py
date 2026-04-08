@@ -18,9 +18,14 @@ from team_harness.config import CONFIG_PATH
 from team_harness.config import load_config
 from team_harness.config import LOCAL_CONFIG_DIR_NAME
 from team_harness.config import RUNS_DIR
+from team_harness.coordinator.auth import CodexAuthError
+from team_harness.coordinator.auth import load_codex_auth
+from team_harness.coordinator.client import CoordinatorAPIError
 from team_harness.coordinator.client import CoordinatorClient
+from team_harness.coordinator.codex_client import CodexCoordinatorClient
 from team_harness.coordinator.loop import run
 from team_harness.coordinator.loop import run_one_turn
+from team_harness.coordinator.protocols import CoordinatorLike
 from team_harness.coordinator.system_prompt import build_system_prompt
 from team_harness.skills.loader import load_skills
 from team_harness.skills.loader import Skill
@@ -34,6 +39,7 @@ from team_harness.tools.agent_tools import spawn_agent_schema
 from team_harness.tools.fs_tools import FS_TOOL_SCHEMAS
 from team_harness.tools.registry import ToolRegistry
 from team_harness.tracking.context import ContextTracker
+from team_harness.tracking.context import KNOWN_CODEX_MODELS
 from team_harness.tracking.context import resolve_model_limit
 from team_harness.tracking.run_log import RunLogWriter
 from team_harness.ui.console import ConsoleBase
@@ -76,9 +82,11 @@ def init(use_global: bool, force: bool) -> None:
 @main.command(name="run")
 @click.argument("task", required=False)
 @click.option("--file", "-f", "task_file", type=click.Path())
+@click.option("--provider", default=None)
 @click.option("--model", default=None)
 @click.option("--api-base", default=None)
 @click.option("--api-key", default=None)
+@click.option("--codex-auth-path", default=None)
 @click.option("--agents", default=None)
 @click.option("--max-turns", type=int, default=None)
 @click.option("--max-retries", type=int, default=None)
@@ -89,9 +97,11 @@ def init(use_global: bool, force: bool) -> None:
 def run_cli(
     task: str | None,
     task_file: str | None,
+    provider: str | None,
     model: str | None,
     api_base: str | None,
     api_key: str | None,
+    codex_auth_path: str | None,
     agents: str | None,
     max_turns: int | None,
     max_retries: int | None,
@@ -104,9 +114,11 @@ def run_cli(
         _run(
             task=task,
             task_file=task_file,
+            provider=provider,
             model=model,
             api_base=api_base,
             api_key=api_key,
+            codex_auth_path=codex_auth_path,
             agents=agents,
             max_turns=max_turns,
             max_retries=max_retries,
@@ -119,9 +131,11 @@ def run_cli(
 
 
 @main.command()
+@click.option("--provider", default=None)
 @click.option("--model", default=None)
 @click.option("--api-base", default=None)
 @click.option("--api-key", default=None)
+@click.option("--codex-auth-path", default=None)
 @click.option("--agents", default=None)
 @click.option("--max-turns", type=int, default=None)
 @click.option("--max-retries", type=int, default=None)
@@ -130,9 +144,11 @@ def run_cli(
 @click.option("--system-prompt-file", default=None)
 @click.option("--cwd", default=".")
 def repl(
+    provider: str | None,
     model: str | None,
     api_base: str | None,
     api_key: str | None,
+    codex_auth_path: str | None,
     agents: str | None,
     max_turns: int | None,
     max_retries: int | None,
@@ -143,9 +159,11 @@ def repl(
 ) -> None:
     asyncio.run(
         _repl(
+            provider=provider,
             model=model,
             api_base=api_base,
             api_key=api_key,
+            codex_auth_path=codex_auth_path,
             agents=agents,
             max_turns=max_turns,
             max_retries=max_retries,
@@ -187,21 +205,46 @@ def logs(run_id: str | None) -> None:
         click.echo("No runs yet.")
 
 
-def _warn_missing_api_key(config: Config, ui: ConsoleBase | None = None) -> None:
-    if config.api_key:
-        return
-    if config.api_base.startswith("http://localhost") or config.api_base.startswith(
-        "http://127.0.0.1"
-    ):
-        return
-    message = (
-        "WARNING: No API key configured. Set OPENROUTER_API_KEY env var or "
-        "configure api_key in a team-harness config file."
-    )
+def _emit_provider_warning(message: str, ui: ConsoleBase | None = None) -> None:
     if ui is None:
         click.echo(message)
-    else:
-        ui.print(message)
+        return
+    ui.print(message)
+
+
+def _warn_provider_startup(config: Config, ui: ConsoleBase | None = None) -> None:
+    if config.provider == "openai_compat":
+        if config.api_key:
+            return
+        if config.api_base.startswith("http://localhost") or config.api_base.startswith(
+            "http://127.0.0.1"
+        ):
+            return
+        _emit_provider_warning(
+            "WARNING: No API key configured. Set OPENROUTER_API_KEY or OPENAI_API_KEY "
+            "or configure api_key in a team-harness config file.",
+            ui,
+        )
+        return
+    _emit_provider_warning("WARNING: provider=codex is experimental.", ui)
+    if config.model not in KNOWN_CODEX_MODELS:
+        _emit_provider_warning(
+            f"WARNING: Codex model {config.model!r} is not in the built-in known "
+            "model list; context tracking may be inaccurate.",
+            ui,
+        )
+
+
+def _make_client(config: Config) -> CoordinatorLike:
+    if config.provider == "openai_compat":
+        return CoordinatorClient(config.api_base, config.api_key, config.model)
+    if config.provider == "codex":
+        try:
+            auth = load_codex_auth(config.codex_auth_path or None, cwd=config.cwd)
+        except CodexAuthError as exc:
+            raise CoordinatorAPIError(str(exc)) from exc
+        return CodexCoordinatorClient(config.model, auth, api_base=config.api_base)
+    raise CoordinatorAPIError(f"Unsupported provider: {config.provider}")
 
 
 def _make_skill_wrapper(skill: Skill, ctx: SkillContext):
@@ -265,32 +308,37 @@ async def _run(task: str | None, task_file: str | None, **kwargs: Any) -> None:
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     config.run_dir = run_dir
-    run_log = RunLogWriter(run_id, run_dir, config.model, config.api_base)
     manager = AgentManager()
-    client = CoordinatorClient(config.api_base, config.api_key, config.model)
-    model_limit = await resolve_model_limit(config.model, client, config)
-    ctx = ContextTracker(model_id=config.model, model_limit=model_limit)
-    ui = make_console(ctx=ctx, manager=manager, run_dir=run_dir)
-    _warn_missing_api_key(config, ui)
-    skills = load_skills(cwd=config.cwd)
-    allowed_types = get_allowed_types(config)
-    validate_templates(config, allowed_types)
-    agent_tools.setup(manager, run_log, config, ui)
-    todo_tools.setup(run_dir)
-    fs_tools.setup_fs()
-    skill_ctx = SkillContext(client=client, config=config)
-    registry = _build_registry(allowed_types, skills, skill_ctx)
-    system_prompt = build_system_prompt(config, allowed_types, skills)
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": resolved_task},
-    ]
-    ui.start()
+    client = _make_client(config)
     try:
-        await run(messages, config, run_log, ui, registry, client, ctx)
+        run_log = RunLogWriter(
+            run_id, run_dir, config.provider, config.model, client.api_base
+        )
+        model_limit = await resolve_model_limit(config.model, client, config)
+        ctx = ContextTracker(model_id=config.model, model_limit=model_limit)
+        ui = make_console(ctx=ctx, manager=manager, run_dir=run_dir)
+        _warn_provider_startup(config, ui)
+        skills = load_skills(cwd=config.cwd)
+        allowed_types = get_allowed_types(config)
+        validate_templates(config, allowed_types)
+        agent_tools.setup(manager, run_log, config, ui)
+        todo_tools.setup(run_dir)
+        fs_tools.setup_fs()
+        skill_ctx = SkillContext(client=client, config=config)
+        registry = _build_registry(allowed_types, skills, skill_ctx)
+        system_prompt = build_system_prompt(config, allowed_types, skills)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": resolved_task},
+        ]
+        ui.start()
+        try:
+            await run(messages, config, run_log, ui, registry, client, ctx)
+        finally:
+            run_log.finalize()
+            ui.stop()
     finally:
-        run_log.finalize()
-        ui.stop()
+        await client.aclose()
 
 
 async def _graceful_shutdown(
@@ -331,71 +379,76 @@ async def _repl(**kwargs: Any) -> None:
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     config.run_dir = run_dir
-    run_log = RunLogWriter(run_id, run_dir, config.model, config.api_base)
     manager = AgentManager()
-    client = CoordinatorClient(config.api_base, config.api_key, config.model)
-    model_limit = await resolve_model_limit(config.model, client, config)
-    ctx = ContextTracker(model_id=config.model, model_limit=model_limit)
-    ui = make_console(ctx=ctx, manager=manager, run_dir=run_dir)
-    _warn_missing_api_key(config, ui)
-    skills = load_skills(cwd=config.cwd)
-    allowed_types = get_allowed_types(config)
-    validate_templates(config, allowed_types)
-    agent_tools.setup(manager, run_log, config, ui)
-    todo_tools.setup(run_dir)
-    fs_tools.setup_fs()
-    skill_ctx = SkillContext(client=client, config=config)
-    registry = _build_registry(allowed_types, skills, skill_ctx)
-    system_prompt = build_system_prompt(config, allowed_types, skills)
-    messages = [{"role": "system", "content": system_prompt}]
-    turn_index = 0
-    last_logged_index = 0
-    ui.start()
+    client = _make_client(config)
     try:
-        while True:
-            try:
-                raw = await asyncio.to_thread(input, "\n> ")
-            except EOFError:
-                break
-            raw = raw.strip()
-            if not raw:
-                continue
-            match raw:
-                case "/reset":
-                    messages.clear()
-                    messages.append({"role": "system", "content": system_prompt})
-                    ctx.reset()
-                    last_logged_index = 0
-                    ui.reset_separator()
-                    ui.print("Context reset. Agent state and run log preserved.")
-                case "/quit":
-                    await _graceful_shutdown(
-                        manager, run_log, ui, timeout=config.shutdown_timeout_s
-                    )
+        run_log = RunLogWriter(
+            run_id, run_dir, config.provider, config.model, client.api_base
+        )
+        model_limit = await resolve_model_limit(config.model, client, config)
+        ctx = ContextTracker(model_id=config.model, model_limit=model_limit)
+        ui = make_console(ctx=ctx, manager=manager, run_dir=run_dir)
+        _warn_provider_startup(config, ui)
+        skills = load_skills(cwd=config.cwd)
+        allowed_types = get_allowed_types(config)
+        validate_templates(config, allowed_types)
+        agent_tools.setup(manager, run_log, config, ui)
+        todo_tools.setup(run_dir)
+        fs_tools.setup_fs()
+        skill_ctx = SkillContext(client=client, config=config)
+        registry = _build_registry(allowed_types, skills, skill_ctx)
+        system_prompt = build_system_prompt(config, allowed_types, skills)
+        messages = [{"role": "system", "content": system_prompt}]
+        turn_index = 0
+        last_logged_index = 0
+        ui.start()
+        try:
+            while True:
+                try:
+                    raw = await asyncio.to_thread(input, "\n> ")
+                except EOFError:
                     break
-                case "/agents":
-                    ui.print_agent_panel_inline()
-                case "/log":
-                    ui.print(str(run_log.path))
-                case _:
-                    messages.append({"role": "user", "content": raw})
-                    should_continue = True
-                    while should_continue:
-                        should_continue, last_logged_index = await run_one_turn(
-                            messages,
-                            config,
-                            run_log,
-                            ui,
-                            registry,
-                            client,
-                            ctx,
-                            turn_index,
-                            last_logged_index,
+                raw = raw.strip()
+                if not raw:
+                    continue
+                match raw:
+                    case "/reset":
+                        messages.clear()
+                        messages.append({"role": "system", "content": system_prompt})
+                        ctx.reset()
+                        last_logged_index = 0
+                        ui.reset_separator()
+                        ui.print("Context reset. Agent state and run log preserved.")
+                    case "/quit":
+                        await _graceful_shutdown(
+                            manager, run_log, ui, timeout=config.shutdown_timeout_s
                         )
-                        turn_index += 1
-                        if turn_index >= config.max_turns:
-                            ui.print(f"Max turns ({config.max_turns}) reached.")
-                            should_continue = False
+                        break
+                    case "/agents":
+                        ui.print_agent_panel_inline()
+                    case "/log":
+                        ui.print(str(run_log.path))
+                    case _:
+                        messages.append({"role": "user", "content": raw})
+                        should_continue = True
+                        while should_continue:
+                            should_continue, last_logged_index = await run_one_turn(
+                                messages,
+                                config,
+                                run_log,
+                                ui,
+                                registry,
+                                client,
+                                ctx,
+                                turn_index,
+                                last_logged_index,
+                            )
+                            turn_index += 1
+                            if turn_index >= config.max_turns:
+                                ui.print(f"Max turns ({config.max_turns}) reached.")
+                                should_continue = False
+        finally:
+            run_log.finalize()
+            ui.stop()
     finally:
-        run_log.finalize()
-        ui.stop()
+        await client.aclose()

@@ -12,11 +12,14 @@ from team_harness.tracking.models import TurnRecord
 class RunLogWriter:
     path: Path
 
-    def __init__(self, run_id: str, run_dir: Path, model: str, api_base: str) -> None:
+    def __init__(
+        self, run_id: str, run_dir: Path, provider: str, model: str, api_base: str
+    ) -> None:
         self.path = run_dir / "run.json"
         self._log = RunRecord(
             run_id=run_id,
             start=datetime.now(timezone.utc),
+            provider=provider,
             coordinator_model=model,
             api_base=api_base,
         )

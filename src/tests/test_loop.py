@@ -11,13 +11,16 @@ from team_harness.coordinator.loop import run_one_turn
 from team_harness.tools.registry import ToolRegistry
 from team_harness.tracking.run_log import RunLogWriter
 from tests.helpers import make_api_error
+from tests.helpers import make_coordinator_api_error
 from tests.helpers import make_response
 from tests.helpers import SequenceClient
 
 
 @pytest.mark.asyncio
 async def test_run_one_turn_executes_tool_calls_first(tmp_path, config, ctx, ui):
-    run_log = RunLogWriter("run_1", tmp_path, config.model, config.api_base)
+    run_log = RunLogWriter(
+        "run_1", tmp_path, config.provider, config.model, config.api_base
+    )
     registry = ToolRegistry()
     called = []
 
@@ -66,7 +69,9 @@ async def test_run_one_turn_executes_tool_calls_first(tmp_path, config, ctx, ui)
 
 @pytest.mark.asyncio
 async def test_run_one_turn_handles_empty_and_tool_errors(tmp_path, config, ctx, ui):
-    run_log = RunLogWriter("run_1", tmp_path, config.model, config.api_base)
+    run_log = RunLogWriter(
+        "run_1", tmp_path, config.provider, config.model, config.api_base
+    )
     registry = ToolRegistry()
 
     async def bad_tool() -> str:
@@ -119,7 +124,9 @@ async def test_chat_with_retry_and_run_api_errors(
     assert sleeps == [1, 2]
 
     error_client = SequenceClient([make_api_error(400)])
-    run_log = RunLogWriter("run_2", tmp_path, config.model, config.api_base)
+    run_log = RunLogWriter(
+        "run_2", tmp_path, config.provider, config.model, config.api_base
+    )
     registry = ToolRegistry()
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
     should_continue, _ = await run_one_turn(
@@ -134,7 +141,9 @@ async def test_run_one_turn_stops_cleanly_when_retries_are_exhausted(
     tmp_path, config, ctx, ui
 ):
     config.max_retries = 0
-    run_log = RunLogWriter("run_3", tmp_path, config.model, config.api_base)
+    run_log = RunLogWriter(
+        "run_3", tmp_path, config.provider, config.model, config.api_base
+    )
     registry = ToolRegistry()
     client = SequenceClient([make_api_error(429)])
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
@@ -152,7 +161,9 @@ async def test_run_one_turn_stops_cleanly_when_retries_are_exhausted(
 async def test_run_one_turn_emits_context_warning_only_once(
     tmp_path, config, ctx, ui, monkeypatch
 ):
-    run_log = RunLogWriter("run_4", tmp_path, config.model, config.api_base)
+    run_log = RunLogWriter(
+        "run_4", tmp_path, config.provider, config.model, config.api_base
+    )
     registry = ToolRegistry()
     client = SequenceClient(
         [make_response(content="first"), make_response(content="second")]
@@ -179,7 +190,9 @@ async def test_run_one_turn_emits_context_warning_only_once(
 @pytest.mark.asyncio
 async def test_run_respects_max_turns(tmp_path, config, ctx, ui):
     config.max_turns = 2
-    run_log = RunLogWriter("run_1", tmp_path, config.model, config.api_base)
+    run_log = RunLogWriter(
+        "run_1", tmp_path, config.provider, config.model, config.api_base
+    )
     registry = ToolRegistry()
 
     async def noop() -> str:
@@ -206,3 +219,47 @@ async def test_run_respects_max_turns(tmp_path, config, ctx, ui):
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
     await run(messages, config, run_log, ui, registry, client, ctx)
     assert any("Max turns (2) reached" in message for message in ui.messages)
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_retries_coordinator_api_error(config, monkeypatch):
+    sleeps = []
+
+    async def fake_sleep(delay: int) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr("asyncio.sleep", fake_sleep)
+    client = SequenceClient(
+        [
+            make_coordinator_api_error("retry-1", status_code=429, retryable=True),
+            make_coordinator_api_error("retry-2", retryable=True),
+            make_response(content="done"),
+        ]
+    )
+
+    response = await _chat_with_retry(client, [], [], config)
+
+    assert response.choices[0].message.content == "done"
+    assert sleeps == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_run_one_turn_handles_non_retryable_coordinator_api_error(
+    tmp_path, config, ctx, ui
+):
+    run_log = RunLogWriter(
+        "run_5", tmp_path, config.provider, config.model, config.api_base
+    )
+    registry = ToolRegistry()
+    client = SequenceClient(
+        [make_coordinator_api_error("bad auth", status_code=401, retryable=False)]
+    )
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+
+    should_continue, last_logged = await run_one_turn(
+        messages, config, run_log, ui, registry, client, ctx, 0, 0
+    )
+
+    assert should_continue is False
+    assert last_logged == 0
+    assert any("API error 401" in message for message in ui.messages)

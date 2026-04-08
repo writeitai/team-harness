@@ -5,12 +5,13 @@ from typing import TYPE_CHECKING
 
 from openai import APIStatusError
 
-from team_harness.tracking.models import ToolCallRecord
+from team_harness.coordinator.client import CoordinatorAPIError
+from team_harness.tracking.models import ToolCallRecord as RunLogToolCallRecord
 
 if TYPE_CHECKING:
     from team_harness.config import Config
     from team_harness.coordinator.client import ChatResponse
-    from team_harness.coordinator.client import CoordinatorClient
+    from team_harness.coordinator.protocols import CoordinatorLike
     from team_harness.tools.registry import ToolRegistry
     from team_harness.tracking.context import ContextTracker
     from team_harness.tracking.run_log import RunLogWriter
@@ -27,7 +28,7 @@ async def run(
     run_log: "RunLogWriter",
     ui: "ConsoleBase",
     tool_registry: "ToolRegistry",
-    client: "CoordinatorClient",
+    client: "CoordinatorLike",
     ctx: "ContextTracker",
 ) -> None:
     turn_index = 0
@@ -56,7 +57,7 @@ async def run_one_turn(
     run_log: "RunLogWriter",
     ui: "ConsoleBase",
     tool_registry: "ToolRegistry",
-    client: "CoordinatorClient",
+    client: "CoordinatorLike",
     ctx: "ContextTracker",
     turn_index: int,
     last_logged_index: int,
@@ -72,6 +73,14 @@ async def run_one_turn(
     except MaxRetriesExceeded as exc:
         ui.end_streaming()
         ui.print(f"API error (retries exhausted): {exc}")
+        run_log.finalize(error=str(exc))
+        return False, last_logged_index
+    except CoordinatorAPIError as exc:
+        ui.end_streaming()
+        if exc.status_code is None:
+            ui.print(f"API error: {exc}")
+        else:
+            ui.print(f"API error {exc.status_code}: {exc}")
         run_log.finalize(error=str(exc))
         return False, last_logged_index
     except APIStatusError as exc:
@@ -96,7 +105,7 @@ async def run_one_turn(
             "tool_calls": [tool_call.model_dump() for tool_call in tool_calls],
         }
         messages.append(assistant_msg)
-        tool_call_records: list[ToolCallRecord] = []
+        tool_call_records: list[RunLogToolCallRecord] = []
         for tool_call in tool_calls:
             arguments = {}
             tool_ctx = None
@@ -115,7 +124,7 @@ async def run_one_turn(
                 tool_ctx = ui.tool_call_start(tool_call.function.name, arguments)
             tool_ctx.result(result, is_error=is_error)
             tool_call_records.append(
-                ToolCallRecord(
+                RunLogToolCallRecord(
                     name=tool_call.function.name,
                     arguments=arguments,
                     result=result,
@@ -153,7 +162,7 @@ async def run_one_turn(
 
 
 async def _chat_with_retry(
-    client: "CoordinatorClient",
+    client: "CoordinatorLike",
     messages: list[dict],
     tools: list[dict],
     config: "Config",
@@ -168,6 +177,20 @@ async def _chat_with_retry(
             stream=token_callback is not None,
             token_callback=token_callback,
         )
+    except CoordinatorAPIError as exc:
+        if exc.retryable:
+            if attempt < config.max_retries:
+                await asyncio.sleep(2**attempt)
+                return await _chat_with_retry(
+                    client,
+                    messages,
+                    tools,
+                    config,
+                    token_callback=token_callback,
+                    attempt=attempt + 1,
+                )
+            raise MaxRetriesExceeded(str(exc)) from exc
+        raise
     except APIStatusError as exc:
         if exc.status_code in retryable:
             if attempt < config.max_retries:

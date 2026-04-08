@@ -10,12 +10,12 @@ from team_harness.config import SKILLS_USER_DIR
 
 if TYPE_CHECKING:
     from team_harness.config import Config
-    from team_harness.coordinator.client import CoordinatorClient
+    from team_harness.coordinator.protocols import CoordinatorLike
 
 
 @dataclass
 class SkillContext:
-    client: "CoordinatorClient"
+    client: "CoordinatorLike"
     config: "Config"
 
     async def read_file(self, path: str) -> str:

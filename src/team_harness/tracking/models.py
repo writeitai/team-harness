@@ -48,6 +48,7 @@ class RunRecord(BaseModel):
     start: datetime
     end: datetime | None = None
     error: str | None = None
+    provider: str
     coordinator_model: str
     api_base: str
     turns: list[TurnRecord] = Field(default_factory=list)

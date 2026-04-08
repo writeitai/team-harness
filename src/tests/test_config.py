@@ -7,6 +7,7 @@ from team_harness import config as config_module
 from team_harness.cli import _prepare_task
 from team_harness.config import _deep_merge
 from team_harness.config import _default_config_text
+from team_harness.config import _parse_provider
 from team_harness.config import Config
 from team_harness.config import CONFIG_PATH
 from team_harness.config import DEFAULT_TEMPLATES
@@ -18,6 +19,7 @@ from team_harness.config import SKILLS_USER_DIR
 
 def test_default_model_is_gpt_5_4():
     assert Config().model == "gpt-5.4"
+    assert Config().provider == "openai_compat"
 
 
 def test_default_templates_updated():
@@ -244,6 +246,7 @@ def test_no_config_uses_defaults_without_creating_global_file(tmp_path, monkeypa
     config = load_config(cwd=str(tmp_path))
 
     assert config.model == "gpt-5.4"
+    assert config.provider == "openai_compat"
     assert config.global_config_path is None
     assert config.local_config_path is None
     assert not global_path.exists()
@@ -263,6 +266,35 @@ def test_config_paths_remain_under_team_harness_dir():
     assert CONFIG_PATH == config_module.Path.home() / ".team-harness" / "config.toml"
     assert RUNS_DIR == config_module.Path.home() / ".team-harness" / "runs"
     assert SKILLS_USER_DIR == config_module.Path.home() / ".team-harness" / "skills"
+
+
+def test_provider_aware_codex_defaults(tmp_path, monkeypatch):
+    global_path = tmp_path / "home" / ".team-harness" / "config.toml"
+    monkeypatch.setattr(config_module, "CONFIG_PATH", global_path)
+
+    config = load_config(provider="codex", cwd=str(tmp_path))
+
+    assert config.provider == "codex"
+    assert config.model == "codex-mini-latest"
+    assert config.api_base == ""
+
+
+def test_load_config_reads_provider_and_codex_auth_env(tmp_path, monkeypatch):
+    global_path = tmp_path / "home" / ".team-harness" / "config.toml"
+    monkeypatch.setattr(config_module, "CONFIG_PATH", global_path)
+    monkeypatch.setenv("HARNESS_PROVIDER", "codex")
+    monkeypatch.setenv("HARNESS_CODEX_AUTH_PATH", "relative/auth.json")
+
+    config = load_config(cwd=str(tmp_path))
+
+    assert config.provider == "codex"
+    assert config.codex_auth_path == "relative/auth.json"
+    assert config.model == "codex-mini-latest"
+
+
+def test_parse_provider_normalizes_openrouter_alias():
+    with pytest.warns(UserWarning):
+        assert _parse_provider("openrouter") == "openai_compat"
 
 
 def test_prepare_task_validates_inputs(tmp_path):

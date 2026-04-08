@@ -5,7 +5,9 @@ import pytest
 
 from team_harness import config as config_module
 from team_harness.cli import _run
+from team_harness.cli import _warn_provider_startup
 from team_harness.cli import main
+from team_harness.config import Config
 
 
 def test_help_uses_th_prog_name():
@@ -116,8 +118,12 @@ def test_init_global_force_overwrites(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path, capsys):
     class FakeClient:
-        def __init__(self, api_base, api_key, model):
-            self.api_base = api_base
+        api_base = "http://localhost:11434/v1"
+        model = "test/model"
+        provider = "openai_compat"
+
+        async def aclose(self):
+            return None
 
     class FakeConsole:
         def start(self):
@@ -142,7 +148,7 @@ async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path, c
     monkeypatch.chdir(elsewhere)
     monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
     monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path / "runs")
-    monkeypatch.setattr("team_harness.cli.CoordinatorClient", FakeClient)
+    monkeypatch.setattr("team_harness.cli._make_client", lambda config: FakeClient())
     monkeypatch.setattr(
         "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
     )
@@ -164,3 +170,30 @@ async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path, c
         captured.count("No config file found. Run `team-harness init` to create one.")
         == 1
     )
+
+
+def test_run_command_passes_provider_flags(monkeypatch):
+    captured = {}
+
+    async def fake_run(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("team_harness.cli._run", fake_run)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        main, ["run", "--provider", "codex", "--codex-auth-path", "auth.json", "hello"]
+    )
+
+    assert result.exit_code == 0
+    assert captured["provider"] == "codex"
+    assert captured["codex_auth_path"] == "auth.json"
+    assert captured["task"] == "hello"
+
+
+def test_warn_provider_startup_for_codex_unknown_model(capsys):
+    _warn_provider_startup(Config(provider="codex", model="custom-codex-model"))
+
+    captured = capsys.readouterr().out
+    assert "provider=codex is experimental" in captured
+    assert "context tracking may be inaccurate" in captured
