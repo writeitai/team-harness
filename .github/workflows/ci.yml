@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.14"]
 
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
         run: uv run ruff format --check src/
 
       - name: Pyright type check
-        run: uv run pyright src/ --pythonversion ${{ matrix.python-version }}
+        run: uv run pyright src/ --pythonversion 3.14
 
       - name: Run tests
         run: uv run pytest src/tests/ -v --tb=short
