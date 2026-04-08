@@ -238,17 +238,22 @@ class HarnessConsole(ConsoleBase):
             refresh_per_second=2,
             transient=False,
         )
-        self._live_started = False
+        # _live_enabled: intent — should Live be used at all?
+        # _live_running: actual — is the Live display currently active?
+        self._live_enabled = False
+        self._live_running = False
         self._streaming = False
 
     def start(self) -> None:
-        self._live.start()
-        self._live_started = True
+        self._live_enabled = True
+        # Don't start Live yet — it will start after the first input is
+        # submitted so the prompt appears inline below the welcome box.
 
     def stop(self) -> None:
-        if self._live_started:
+        if self._live_running:
             self._live.stop()
-            self._live_started = False
+            self._live_running = False
+        self._live_enabled = False
 
     def print_welcome(self, model: str, cwd: str, provider: str) -> None:
         display_cwd = cwd.replace(str(Path.home()), "~")
@@ -272,22 +277,25 @@ class HarnessConsole(ConsoleBase):
         self._console.print()
 
     def pause_for_input(self) -> None:
-        if self._live_started:
+        if self._live_running:
             self._live.stop()
+            self._live_running = False
         self._console.rule(style="dim")
 
     def resume_after_input(self) -> None:
-        if self._live_started:
+        if self._live_enabled and not self._live_running:
             self._live.start()
             self._live.update(self._render_live())
+            self._live_running = True
 
     def begin_turn(self, n: int) -> None:
         self._turn = n
         self._console.rule(f"[dim]Turn {n}[/dim]", style="dim")
 
     def begin_streaming(self) -> None:
-        if self._live_started:
+        if self._live_running:
             self._live.stop()
+            self._live_running = False
         self._streaming = True
 
     def stream_token(self, token: str) -> None:
@@ -299,13 +307,14 @@ class HarnessConsole(ConsoleBase):
         if not self._streaming:
             return
         self._console.print()
-        if self._live_started:
+        if self._live_enabled and not self._live_running:
             self._live.start()
             self._live.update(self._render_live())
+            self._live_running = True
         self._streaming = False
 
     def end_turn(self) -> None:
-        if self._live_started:
+        if self._live_running:
             self._live.update(self._render_live())
 
     def tool_call_start(self, name: str, args: dict) -> ToolCallContext:
@@ -320,7 +329,7 @@ class HarnessConsole(ConsoleBase):
                 self._console.print(f"    [dim]│[/dim] [{style}]{line}[/{style}]")
             if len(lines) > 5:
                 self._console.print(f"    [dim]│ … ({len(lines) - 5} more lines)[/dim]")
-            if self._live_started:
+            if self._live_running:
                 self._live.update(self._render_live())
 
         return ToolCallContext(_render)
@@ -330,7 +339,7 @@ class HarnessConsole(ConsoleBase):
         self._console.print(
             f"  [{color}]{state.agent_type}[/{color}] {state.id[:6]}  {event}"
         )
-        if self._live_started:
+        if self._live_running:
             self._live.update(self._render_live())
 
     def context_warning(self) -> None:
@@ -345,12 +354,14 @@ class HarnessConsole(ConsoleBase):
         self._console.print(msg)
 
     def print_agent_panel_inline(self) -> None:
-        if self._live_started:
+        if self._live_running:
             self._live.stop()
+            self._live_running = False
         self._console.print(self._render_agent_panel(self._manager.list_all()))
-        if self._live_started:
+        if self._live_enabled and not self._live_running:
             self._live.start()
             self._live.update(self._render_live())
+            self._live_running = True
 
     def _render_live(self) -> Layout:
         self._manager.poll_exit_codes()
