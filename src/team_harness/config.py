@@ -85,17 +85,40 @@ def _local_config_text() -> str:
 # Do not store API keys here; prefer environment variables.
 
 [coordinator]
-# provider = "openai_compat"
-# model = "gpt-5.4"
-# allowed_agents = ["codex", "gemini"]
-#
+provider = "openai_compat"
+model = "gpt-5.4"
+api_base = "https://openrouter.ai/api/v1"
+# api_key = ""           # prefer OPENROUTER_API_KEY or OPENAI_API_KEY env var
+system_prompt = ""
+max_turns = 50
+max_retries = 5
+max_depth = 3
+# context_limit = 128000
+shutdown_timeout_s = 10.0
+# allowed_agents = ["codex", "gemini", "claude", "opencode", "pi", "harness"]
+
 # Experimental Codex subscription coordinator:
 # provider = "codex"
 # model = "codex-mini-latest"
 # codex_auth_path = ".team-harness/codex-auth.json"
 
-# [agents.codex]
-# template = "codex exec --yolo --model gpt-5.4 PROMPT=\\"{prompt}\\""
+[agents.codex]
+template = "codex exec --yolo --model gpt-5.4 PROMPT=\\"{prompt}\\""
+
+[agents.gemini]
+template = "gemini --approval-mode=yolo -p \\"{prompt}\\""
+
+[agents.claude]
+template = "claude -p --dangerously-skip-permissions {prompt}"
+
+[agents.opencode]
+template = "opencode {prompt}"
+
+[agents.pi]
+template = "pi --print --no-session {prompt}"
+
+[agents.harness]
+template = "th run {prompt}"
 """
 
 
