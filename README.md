@@ -189,17 +189,22 @@ Unknown Codex models still work, but startup prints a warning because context tr
 th run [OPTIONS] [TASK]
 
 Options:
-  -f, --file PATH        Read task from file instead of argument
-  --provider TEXT         Coordinator provider: "openai_compat" or "codex"
-  --model TEXT            Override coordinator model (e.g. "anthropic/claude-sonnet-4")
-  --api-base TEXT         Override coordinator base URL
-  --api-key TEXT          Override coordinator API key for openai_compat
-  --codex-auth-path TEXT  Override Codex auth.json location
-  --agents TEXT           Comma-separated allowlist (e.g. "codex,gemini")
-  --max-turns INT         Maximum coordinator turns (default: 50)
-  --max-retries INT       API retry budget for 429/5xx errors (default: 5)
-  --max-depth INT         Nested harness depth limit (default: 3)
+  -f, --file PATH            Read task from file instead of argument
+  --provider TEXT             Coordinator provider: "openai_compat" or "codex"
+  --model TEXT                Override coordinator model (e.g. "anthropic/claude-sonnet-4")
+  --api-base TEXT             Override coordinator base URL
+  --api-key TEXT              Override coordinator API key for openai_compat
+  --codex-auth-path TEXT      Override Codex auth.json location
+  --agents TEXT               Comma-separated allowlist (e.g. "codex,gemini")
+  --max-turns INT             Maximum coordinator turns (default: 50)
+  --max-retries INT           API retry budget for 429/5xx errors (default: 5)
+  --max-depth INT             Nested harness depth limit (default: 3)
+  --system-prompt TEXT        Extra text appended to the system prompt
+  --system-prompt-file PATH   Read system prompt extension from file
+  --cwd PATH                  Working directory for the run (default: ".")
 ```
+
+`th repl` accepts the same options (except `-f`/`--file` and the `TASK` argument).
 
 ## REPL commands
 
