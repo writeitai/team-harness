@@ -8,12 +8,25 @@ from team_harness.cli import _run
 from team_harness.cli import main
 
 
+def test_help_uses_th_prog_name():
+    runner = CliRunner()
+    result = runner.invoke(main, ["--help"], prog_name="th")
+    assert result.exit_code == 0
+    assert "Usage: th" in result.output
+    assert "th \u2014 multi-agent AI orchestration harness." in result.output
+
+
+def test_team_harness_alias_still_works():
+    runner = CliRunner()
+    result = runner.invoke(main, ["--help"], prog_name="team-harness")
+    assert result.exit_code == 0
+    assert "Usage: team-harness" in result.output
+
+
 def test_logs_empty(monkeypatch, tmp_path):
     monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path)
     runner = CliRunner()
-
-    result = runner.invoke(main, ["logs"])
-
+    result = runner.invoke(main, ["logs"], prog_name="th")
     assert result.exit_code == 0
     assert "No runs yet." in result.output
 

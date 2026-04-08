@@ -1,6 +1,6 @@
 # team-harness
 
-A lightweight, model-agnostic multi-agent orchestration harness. It runs a coordinator LLM through any OpenAI-compatible API and lets that coordinator spawn external worker CLIs (Codex, Gemini, Claude Code, opencode, pi, or nested team-harness runs) as tool-use actions.
+A lightweight, model-agnostic multi-agent orchestration harness. It runs a coordinator LLM through any OpenAI-compatible API and lets that coordinator spawn external worker CLIs (Codex, Gemini, Claude Code, opencode, pi, or nested th runs) as tool-use actions.
 
 ## Installation
 
@@ -10,13 +10,15 @@ pip install team-harness
 uv tool install team-harness
 ```
 
+The installed command is `th`. The legacy command `team-harness` also works as a compatibility alias.
+
 Development setup:
 
 ```bash
 git clone https://github.com/writeitai/team-harness.git
 cd team-harness
 uv sync --extra dev
-uv run team-harness --help
+uv run th --help
 ```
 
 ## Prerequisites
@@ -38,36 +40,36 @@ Worker CLIs must be installed and authenticated separately. You do not need all 
 export OPENROUTER_API_KEY="sk-or-..."
 
 # Create a project-local config in ./.team-harness/config.toml
-team-harness init
+th init
 
 # Single-shot run
-team-harness run "Write unit tests for src/utils.py using pytest"
+th run "Write unit tests for src/utils.py using pytest"
 
 # From a file
-team-harness run -f task.txt
+th run -f task.txt
 
 # Interactive REPL
-team-harness repl
+th repl
 
 # View run logs
-team-harness logs
-team-harness logs <run-id>
+th logs
+th logs <run-id>
 ```
 
 ## Configuration
 
-team-harness works out of the box with built-in defaults. To create a config file explicitly:
+th works out of the box with built-in defaults. To create a config file explicitly:
 
 ```bash
 # Create project-local config for the current repo
-team-harness init
+th init
 
 # Create global config under ~/.team-harness/config.toml
-team-harness init --global
+th init --global
 
 # Overwrite an existing config file
-team-harness init --force
-team-harness init --global --force
+th init --force
+th init --global --force
 ```
 
 Global config is intended for user-wide defaults. Project config is intended for repo-specific settings and should not contain secrets; keep API keys in environment variables.
@@ -84,11 +86,23 @@ template = "codex exec --yolo --model gpt-5.4 PROMPT=\"{prompt}\""
 
 [agents.gemini]
 template = "gemini --approval-mode=yolo -p \"{prompt}\""
+
+[agents.claude]
+template = "claude -p --dangerously-skip-permissions {prompt}"
+
+[agents.opencode]
+template = "opencode {prompt}"
+
+[agents.pi]
+template = "pi --print --no-session {prompt}"
+
+[agents.harness]
+template = "th run {prompt}"
 ```
 
 ### Project-level configuration
 
-`team-harness init` writes `./.team-harness/config.toml`. Local config discovery walks upward from the effective `--cwd` and the nearest ancestor config overrides the global file.
+`th init` writes `./.team-harness/config.toml`. Local config discovery walks upward from the effective `--cwd` and the nearest ancestor config overrides the global file.
 
 Lists replace rather than extend. For example, setting `[coordinator].allowed_agents` in a local config replaces the global list instead of appending to it.
 
@@ -122,7 +136,7 @@ The new type appears automatically in the coordinator's `spawn_agent` tool.
 ## CLI flags
 
 ```
-team-harness run [OPTIONS] [TASK]
+th run [OPTIONS] [TASK]
 
 Options:
   -f, --file PATH        Read task from file instead of argument
@@ -191,6 +205,16 @@ Each run creates a directory under `~/.team-harness/runs/<run-id>/` containing:
 - The harness only sends coordinator task content and tool outputs to the configured API endpoint.
 
 This tool is designed for trusted local automation. Do not run untrusted tasks or skills.
+
+## Migration
+
+The preferred CLI command is now `th`. If you are upgrading from a previous version:
+
+- `team-harness` still works as a compatibility alias.
+- `pip install team-harness` does not change.
+- `python -m team_harness` does not change.
+- Config, runs, and skills remain under `~/.team-harness/`.
+- Existing config files are not modified by upgrades.
 
 ## Development
 

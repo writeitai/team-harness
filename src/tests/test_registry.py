@@ -82,15 +82,7 @@ def test_build_command_model_and_harness_allowlist():
         "harness", "do thing", config, model="gpt-5", allowed_agents=["codex"]
     )
 
-    assert command == [
-        "team-harness",
-        "run",
-        "--model",
-        "gpt-5",
-        "do thing",
-        "--agents",
-        "codex",
-    ]
+    assert command == ["th", "run", "--model", "gpt-5", "do thing", "--agents", "codex"]
 
 
 def test_build_command_harness_without_allowlist():
@@ -98,7 +90,7 @@ def test_build_command_harness_without_allowlist():
 
     command = build_command("harness", "do thing", config, model="gpt-5")
 
-    assert command == ["team-harness", "run", "--model", "gpt-5", "do thing"]
+    assert command == ["th", "run", "--model", "gpt-5", "do thing"]
 
 
 def test_build_command_missing_placeholder_raises():
