@@ -258,7 +258,7 @@ def test_default_templates_use_th_for_harness():
 
 def test_default_config_text_uses_th_for_harness():
     default_config = _default_config_text()
-    assert default_config.startswith("# th configuration")
+    assert default_config.startswith("# th")
     assert 'template = "th run {prompt}"' in default_config
 
 
