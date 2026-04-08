@@ -4,7 +4,6 @@ from datetime import timezone
 import json
 from pathlib import Path
 from typing import Any
-import uuid
 
 import click
 
@@ -13,33 +12,24 @@ from team_harness.agents.registry import get_allowed_types
 from team_harness.agents.registry import validate_templates
 from team_harness.config import _default_config_text
 from team_harness.config import _local_config_text
-from team_harness.config import Config
 from team_harness.config import CONFIG_PATH
 from team_harness.config import load_config
 from team_harness.config import LOCAL_CONFIG_DIR_NAME
 from team_harness.config import RUNS_DIR
-from team_harness.coordinator.auth import CodexAuthError
-from team_harness.coordinator.auth import load_codex_auth
-from team_harness.coordinator.client import CoordinatorAPIError
-from team_harness.coordinator.client import CoordinatorClient
-from team_harness.coordinator.codex_client import CodexCoordinatorClient
-from team_harness.coordinator.loop import run
 from team_harness.coordinator.loop import run_one_turn
-from team_harness.coordinator.protocols import CoordinatorLike
 from team_harness.coordinator.system_prompt import build_system_prompt
+from team_harness.harness import _build_registry
+from team_harness.harness import _make_client
+from team_harness.harness import _make_run_id
+from team_harness.harness import _show_no_config_hint
+from team_harness.harness import _warn_provider_startup
+from team_harness.harness import Harness
 from team_harness.skills.loader import load_skills
-from team_harness.skills.loader import Skill
 from team_harness.skills.loader import SkillContext
 from team_harness.tools import agent_tools
 from team_harness.tools import fs_tools
-from team_harness.tools import shell_tools
 from team_harness.tools import todo_tools
-from team_harness.tools.agent_tools import AGENT_TOOL_SCHEMAS
-from team_harness.tools.agent_tools import spawn_agent_schema
-from team_harness.tools.fs_tools import FS_TOOL_SCHEMAS
-from team_harness.tools.registry import ToolRegistry
 from team_harness.tracking.context import ContextTracker
-from team_harness.tracking.context import KNOWN_CODEX_MODELS
 from team_harness.tracking.context import resolve_model_limit
 from team_harness.tracking.run_log import RunLogWriter
 from team_harness.ui.console import ConsoleBase
@@ -48,7 +38,7 @@ from team_harness.ui.console import make_console
 
 @click.group()
 def main() -> None:
-    """th — multi-agent AI orchestration harness."""
+    """th \u2014 multi-agent AI orchestration harness."""
 
 
 def _write_config_file(path: Path, text: str, force: bool) -> None:
@@ -59,11 +49,6 @@ def _write_config_file(path: Path, text: str, force: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     click.echo(f"Created config at {path}")
-
-
-def _show_no_config_hint(config: Config) -> None:
-    if config.global_config_path is None and config.local_config_path is None:
-        click.echo("No config file found. Run `team-harness init` to create one.")
 
 
 @main.command()
@@ -205,82 +190,6 @@ def logs(run_id: str | None) -> None:
         click.echo("No runs yet.")
 
 
-def _emit_provider_warning(message: str, ui: ConsoleBase | None = None) -> None:
-    if ui is None:
-        click.echo(message)
-        return
-    ui.print(message)
-
-
-def _warn_provider_startup(config: Config, ui: ConsoleBase | None = None) -> None:
-    if config.provider == "openai_compat":
-        if config.api_key:
-            return
-        if config.api_base.startswith("http://localhost") or config.api_base.startswith(
-            "http://127.0.0.1"
-        ):
-            return
-        _emit_provider_warning(
-            "WARNING: No API key configured. Set OPENROUTER_API_KEY or OPENAI_API_KEY "
-            "or configure api_key in a team-harness config file.",
-            ui,
-        )
-        return
-    _emit_provider_warning("WARNING: provider=codex is experimental.", ui)
-    if config.model not in KNOWN_CODEX_MODELS:
-        _emit_provider_warning(
-            f"WARNING: Codex model {config.model!r} is not in the built-in known "
-            "model list; context tracking may be inaccurate.",
-            ui,
-        )
-
-
-def _make_client(config: Config) -> CoordinatorLike:
-    if config.provider == "openai_compat":
-        return CoordinatorClient(config.api_base, config.api_key, config.model)
-    if config.provider == "codex":
-        try:
-            auth = load_codex_auth(config.codex_auth_path or None, cwd=config.cwd)
-        except CodexAuthError as exc:
-            raise CoordinatorAPIError(str(exc)) from exc
-        return CodexCoordinatorClient(config.model, auth, api_base=config.api_base)
-    raise CoordinatorAPIError(f"Unsupported provider: {config.provider}")
-
-
-def _make_skill_wrapper(skill: Skill, ctx: SkillContext):
-    async def _wrapper(**args: object) -> str:
-        return await skill.execute(ctx=ctx, **args)
-
-    return _wrapper
-
-
-def _build_registry(
-    allowed_types: list[str], skills: list[Skill], skill_ctx: SkillContext
-) -> ToolRegistry:
-    registry = ToolRegistry()
-    registry.register(spawn_agent_schema(allowed_types), agent_tools.spawn_agent)
-    for schema, fn in AGENT_TOOL_SCHEMAS:
-        registry.register(schema, fn)
-    for schema, fn in FS_TOOL_SCHEMAS:
-        registry.register(schema, fn)
-    registry.register(shell_tools.BASH_SCHEMA, shell_tools.bash)
-    registry.register(todo_tools.TODO_WRITE_SCHEMA, todo_tools.todo_write)
-    registry.register(todo_tools.TODO_READ_SCHEMA, todo_tools.todo_read)
-    for skill in skills:
-        registry.register(
-            {
-                "type": "function",
-                "function": {
-                    "name": skill.name,
-                    "description": skill.description,
-                    "parameters": skill.parameters_schema,
-                },
-            },
-            _make_skill_wrapper(skill, skill_ctx),
-        )
-    return registry
-
-
 def _prepare_task(task: str | None, task_file: str | None) -> str:
     if task and task_file:
         raise click.UsageError("Provide either TASK or --file, not both.")
@@ -292,53 +201,25 @@ def _prepare_task(task: str | None, task_file: str | None) -> str:
     return task
 
 
-def _make_run_id() -> str:
-    return (
-        datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        + "_"
-        + uuid.uuid4().hex[:8]
-    )
-
-
 async def _run(task: str | None, task_file: str | None, **kwargs: Any) -> None:
     resolved_task = _prepare_task(task, task_file)
-    config = load_config(**kwargs)
-    _show_no_config_hint(config)
-    run_id = _make_run_id()
-    run_dir = RUNS_DIR / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    config.run_dir = run_dir
-    manager = AgentManager()
-    client = _make_client(config)
-    try:
-        run_log = RunLogWriter(
-            run_id, run_dir, config.provider, config.model, client.api_base
-        )
-        model_limit = await resolve_model_limit(config.model, client, config)
-        ctx = ContextTracker(model_id=config.model, model_limit=model_limit)
-        ui = make_console(ctx=ctx, manager=manager, run_dir=run_dir)
-        _warn_provider_startup(config, ui)
-        skills = load_skills(cwd=config.cwd)
-        allowed_types = get_allowed_types(config)
-        validate_templates(config, allowed_types)
-        agent_tools.setup(manager, run_log, config, ui)
-        todo_tools.setup(run_dir)
-        fs_tools.setup_fs()
-        skill_ctx = SkillContext(client=client, config=config)
-        registry = _build_registry(allowed_types, skills, skill_ctx)
-        system_prompt = build_system_prompt(config, allowed_types, skills)
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": resolved_task},
-        ]
-        ui.start()
-        try:
-            await run(messages, config, run_log, ui, registry, client, ctx)
-        finally:
-            run_log.finalize()
-            ui.stop()
-    finally:
-        await client.aclose()
+    allowed_agents = kwargs.pop("allowed_agents", None)
+    harness = Harness(
+        provider=kwargs.get("provider"),
+        model=kwargs.get("model"),
+        api_base=kwargs.get("api_base"),
+        api_key=kwargs.get("api_key"),
+        codex_auth_path=kwargs.get("codex_auth_path"),
+        agents=allowed_agents,
+        max_turns=kwargs.get("max_turns"),
+        max_retries=kwargs.get("max_retries"),
+        max_depth=kwargs.get("max_depth"),
+        system_prompt=kwargs.get("system_prompt"),
+        system_prompt_file=kwargs.get("system_prompt_file"),
+        cwd=kwargs.get("cwd"),
+        console_mode="auto",
+    )
+    await harness.run(resolved_task)
 
 
 async def _graceful_shutdown(
@@ -374,7 +255,10 @@ async def _graceful_shutdown(
 
 async def _repl(**kwargs: Any) -> None:
     config = load_config(**kwargs)
-    _show_no_config_hint(config)
+    _show_no_config_hint(config, ui=None)
+    click.echo(
+        "No config file found. Run `team-harness init` to create one."
+    ) if config.global_config_path is None and config.local_config_path is None else None
     run_id = _make_run_id()
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -387,8 +271,8 @@ async def _repl(**kwargs: Any) -> None:
         )
         model_limit = await resolve_model_limit(config.model, client, config)
         ctx = ContextTracker(model_id=config.model, model_limit=model_limit)
-        ui = make_console(ctx=ctx, manager=manager, run_dir=run_dir)
-        _warn_provider_startup(config, ui)
+        ui = make_console(ctx=ctx, manager=manager, run_dir=run_dir, mode="auto")
+        _warn_provider_startup(config, ui=ui)
         skills = load_skills(cwd=config.cwd)
         allowed_types = get_allowed_types(config)
         validate_templates(config, allowed_types)
@@ -396,7 +280,16 @@ async def _repl(**kwargs: Any) -> None:
         todo_tools.setup(run_dir)
         fs_tools.setup_fs()
         skill_ctx = SkillContext(client=client, config=config)
-        registry = _build_registry(allowed_types, skills, skill_ctx)
+        registry = _build_registry(
+            allowed_types=allowed_types,
+            skills=skills,
+            skill_ctx=skill_ctx,
+            manager=manager,
+            run_log=run_log,
+            config=config,
+            ui=ui,
+            run_dir=run_dir,
+        )
         system_prompt = build_system_prompt(config, allowed_types, skills)
         messages = [{"role": "system", "content": system_prompt}]
         turn_index = 0

@@ -1,4 +1,6 @@
 import asyncio
+from collections.abc import Awaitable
+from collections.abc import Callable
 import os
 from pathlib import Path
 
@@ -280,3 +282,48 @@ FS_TOOL_SCHEMAS = [
     (GREP_SCHEMA, grep),
     (READ_NEW_FILE_CONTENT_SCHEMA, read_new_file_content),
 ]
+
+
+def build_fs_tool_bindings() -> list[tuple[dict, Callable[..., Awaitable[str]]]]:
+    """Build per-run file system tool bindings.
+
+    Only read_new_file_content needs per-run closure state (cursor tracking).
+    All other tools are stateless and reuse the module-level functions.
+    """
+    file_cursors: dict[str, int] = {}
+    file_locks: dict[str, asyncio.Lock] = {}
+
+    async def _read_new_file_content(path: str) -> str:
+        lock = file_locks.setdefault(path, asyncio.Lock())
+        async with lock:
+            target = Path(path)
+
+            def _read() -> tuple[int, bytes]:
+                if not target.exists():
+                    return 0, b""
+                cursor = file_cursors.get(path, 0)
+                size = target.stat().st_size
+                if size <= cursor:
+                    return cursor, b""
+                with target.open("rb") as handle:
+                    handle.seek(cursor)
+                    data = handle.read()
+                return cursor + len(data), data
+
+            new_cursor, data = await asyncio.to_thread(_read)
+            if not data:
+                return ""
+            file_cursors[path] = new_cursor
+            return data.decode("utf-8", errors="replace")
+
+    return [
+        (READ_FILE_SCHEMA, read_file),
+        (WRITE_FILE_SCHEMA, write_file),
+        (APPEND_FILE_SCHEMA, append_file),
+        (EDIT_FILE_SCHEMA, edit_file),
+        (MULTI_EDIT_FILE_SCHEMA, multi_edit_file),
+        (LS_SCHEMA, ls),
+        (GLOB_SCHEMA, glob),
+        (GREP_SCHEMA, grep),
+        (READ_NEW_FILE_CONTENT_SCHEMA, _read_new_file_content),
+    ]
