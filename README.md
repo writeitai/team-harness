@@ -1,6 +1,6 @@
 # team-harness
 
-A lightweight, model-agnostic multi-agent orchestration harness. It runs a coordinator LLM through any OpenAI-compatible API and lets that coordinator spawn external worker CLIs (Codex, Gemini, Claude Code, opencode, pi, or nested th runs) as tool-use actions.
+A lightweight, model-agnostic multi-agent orchestration harness. It runs a coordinator LLM through either an OpenAI-compatible API or an experimental Codex subscription backend and lets that coordinator spawn external worker CLIs (Codex, Gemini, Claude Code, opencode, pi, or nested th runs) as tool-use actions.
 
 ## Installation
 
@@ -56,6 +56,13 @@ th logs
 th logs <run-id>
 ```
 
+Experimental Codex subscription coordinator:
+
+```bash
+codex login
+team-harness run --provider codex --model codex-mini-latest "Review this repo and file issues"
+```
+
 ## Configuration
 
 th works out of the box with built-in defaults. To create a config file explicitly:
@@ -78,6 +85,7 @@ Example global config:
 
 ```toml
 [coordinator]
+provider = "openai_compat"
 model = "gpt-5.4"
 api_base = "https://openrouter.ai/api/v1"
 
@@ -100,6 +108,18 @@ template = "pi --print --no-session {prompt}"
 template = "th run {prompt}"
 ```
 
+Experimental Codex config:
+
+```toml
+[coordinator]
+provider = "codex"
+model = "codex-mini-latest"
+# optional override for custom proxies or tests
+# api_base = "https://chatgpt.com/backend-api"
+# optional explicit auth location
+# codex_auth_path = "~/.codex/auth.json"
+```
+
 ### Project-level configuration
 
 `th init` writes `./.team-harness/config.toml`. Local config discovery walks upward from the effective `--cwd` and the nearest ancestor config overrides the global file.
@@ -113,6 +133,14 @@ Lists replace rather than extend. For example, setting `[coordinator].allowed_ag
 3. Local `.team-harness/config.toml`
 4. Global `~/.team-harness/config.toml`
 5. Built-in defaults
+
+Relevant environment variables:
+
+- `HARNESS_PROVIDER`
+- `HARNESS_MODEL`
+- `HARNESS_API_BASE`
+- `HARNESS_CODEX_AUTH_PATH`
+- `OPENROUTER_API_KEY` or `OPENAI_API_KEY`
 
 ### Adding custom agent types
 
@@ -129,9 +157,31 @@ The new type appears automatically in the coordinator's `spawn_agent` tool.
 
 ### Authentication
 
-- The coordinator uses your OpenRouter (or other OpenAI-compatible) API key.
+- `provider = "openai_compat"` uses your OpenRouter or other OpenAI-compatible API key.
+- `provider = "codex"` uses the auth file written by `codex login`.
+- Codex auth resolution order is:
+  1. `codex_auth_path` from CLI or config
+  2. `HARNESS_CODEX_AUTH_PATH`
+  3. `$CODEX_HOME/auth.json`
+  4. `~/.codex/auth.json`
+- Codex auth path values that are relative resolve against the effective harness `--cwd`.
 - Each worker CLI uses its own native auth and local config.
 - The harness does not forward the coordinator API key to workers unless you explicitly pass environment overrides at spawn time.
+
+### Codex Subscription
+
+`provider = "codex"` is experimental. team-harness talks to the ChatGPT Codex Responses SSE endpoint through a shared `httpx` client and still uses the same `model` field in config and CLI overrides.
+
+Known built-in Codex model names:
+
+- `codex-mini-latest`
+- `openai/codex-mini-latest`
+- `gpt-5.1-codex-mini`
+- `openai/gpt-5.1-codex-mini`
+- `gpt-5.1-codex-max`
+- `openai/gpt-5.1-codex-max`
+
+Unknown Codex models still work, but startup prints a warning because context tracking may be inaccurate.
 
 ## CLI flags
 
@@ -140,7 +190,11 @@ th run [OPTIONS] [TASK]
 
 Options:
   -f, --file PATH        Read task from file instead of argument
+  --provider TEXT         Coordinator provider: "openai_compat" or "codex"
   --model TEXT            Override coordinator model (e.g. "anthropic/claude-sonnet-4")
+  --api-base TEXT         Override coordinator base URL
+  --api-key TEXT          Override coordinator API key for openai_compat
+  --codex-auth-path TEXT  Override Codex auth.json location
   --agents TEXT           Comma-separated allowlist (e.g. "codex,gemini")
   --max-turns INT         Maximum coordinator turns (default: 50)
   --max-retries INT       API retry budget for 429/5xx errors (default: 5)

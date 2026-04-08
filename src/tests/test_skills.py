@@ -15,10 +15,20 @@ from team_harness.tools.registry import ToolRegistry
 
 
 class SkillClient:
+    model = "test/model"
+    api_base = "http://localhost:9999"
+    provider = "openai_compat"
+
     async def chat(self, messages, tools=None, stream=False, token_callback=None):
         return ChatResponse(
             choices=[ChoiceRecord(message=MessageRecord(content="summary"))]
         )
+
+    async def get_models(self):
+        return {"data": []}
+
+    async def aclose(self):
+        return None
 
 
 @pytest.mark.asyncio

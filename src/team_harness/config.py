@@ -3,6 +3,7 @@ from dataclasses import field
 import os
 from pathlib import Path
 import tomllib
+import warnings
 
 LOCAL_CONFIG_DIR_NAME = ".team-harness"
 CONFIG_PATH = Path.home() / ".team-harness" / "config.toml"
@@ -21,9 +22,11 @@ DEFAULT_TEMPLATES: dict[str, str] = {
 
 @dataclass
 class Config:
+    provider: str = "openai_compat"
     model: str = "gpt-5.4"
     api_base: str = "https://openrouter.ai/api/v1"
     api_key: str = ""
+    codex_auth_path: str = ""
     max_turns: int = 50
     max_retries: int = 5
     max_depth: int = 3
@@ -41,6 +44,7 @@ class Config:
 def _default_config_text() -> str:
     return """# th configuration
 [coordinator]
+provider = "openai_compat"
 model = "gpt-5.4"
 api_base = "https://openrouter.ai/api/v1"
 api_key = ""
@@ -48,6 +52,11 @@ system_prompt = ""
 # context_limit = 128000
 # shutdown_timeout_s = 10.0
 # allowed_agents = ["codex", "gemini"]
+#
+# Experimental Codex subscription coordinator:
+# provider = "codex"
+# model = "codex-mini-latest"
+# codex_auth_path = "~/.codex/auth.json"
 
 [agents.codex]
 template = "codex exec --yolo --model gpt-5.4 PROMPT=\\"{prompt}\\""
@@ -76,8 +85,14 @@ def _local_config_text() -> str:
 # Do not store API keys here; prefer environment variables.
 
 [coordinator]
+# provider = "openai_compat"
 # model = "gpt-5.4"
 # allowed_agents = ["codex", "gemini"]
+#
+# Experimental Codex subscription coordinator:
+# provider = "codex"
+# model = "codex-mini-latest"
+# codex_auth_path = ".team-harness/codex-auth.json"
 
 # [agents.codex]
 # template = "codex exec --yolo --model gpt-5.4 PROMPT=\\"{prompt}\\""
@@ -90,6 +105,25 @@ def _parse_allowed_agents(raw: str | list[str] | None) -> list[str] | None:
     if isinstance(raw, list):
         return [item.strip() for item in raw if item.strip()]
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _parse_provider(raw: object) -> str:
+    provider = str(raw).strip().lower()
+    if not provider:
+        return "openai_compat"
+    if provider == "openai_compat":
+        return provider
+    if provider == "codex":
+        return provider
+    if provider == "openrouter":
+        warnings.warn(
+            "Provider 'openrouter' is deprecated; use 'openai_compat' instead.",
+            stacklevel=2,
+        )
+        return "openai_compat"
+    raise SystemExit(
+        f"Invalid provider {provider!r}. Expected one of: 'openai_compat', 'codex'."
+    )
 
 
 def find_local_config(start: Path | None = None) -> Path | None:
@@ -127,9 +161,11 @@ def _load_toml_file(path: Path) -> dict[str, object]:
 
 def load_config(
     *,
+    provider: str | None = None,
     model: str | None = None,
     api_base: str | None = None,
     api_key: str | None = None,
+    codex_auth_path: str | None = None,
     max_turns: int | None = None,
     max_retries: int | None = None,
     max_depth: int | None = None,
@@ -177,21 +213,42 @@ def load_config(
 
     env_model = os.environ.get("HARNESS_MODEL")
     env_api_base = os.environ.get("HARNESS_API_BASE")
+    env_provider = os.environ.get("HARNESS_PROVIDER")
+    env_codex_auth_path = os.environ.get("HARNESS_CODEX_AUTH_PATH")
     env_api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get(
         "OPENAI_API_KEY"
     )
     cli_allowed_agents = _parse_allowed_agents(allowed_agents)
+    provider_value = _parse_provider(
+        provider
+        if provider is not None
+        else env_provider or coordinator.get("provider", Config.provider)
+    )
+    raw_model = model if model is not None else env_model or coordinator.get("model")
+    raw_api_base = (
+        api_base
+        if api_base is not None
+        else env_api_base or coordinator.get("api_base")
+    )
 
     return Config(
-        model=model
-        if model is not None
-        else env_model or str(coordinator.get("model", Config.model)),
-        api_base=api_base
-        if api_base is not None
-        else env_api_base or str(coordinator.get("api_base", Config.api_base)),
+        provider=provider_value,
+        model=str(raw_model)
+        if raw_model
+        else "gpt-5.4"
+        if provider_value == "openai_compat"
+        else "codex-mini-latest",
+        api_base=str(raw_api_base)
+        if raw_api_base
+        else "https://openrouter.ai/api/v1"
+        if provider_value == "openai_compat"
+        else "",
         api_key=api_key
         if api_key is not None
         else env_api_key or str(coordinator.get("api_key", "")),
+        codex_auth_path=codex_auth_path
+        if codex_auth_path is not None
+        else env_codex_auth_path or str(coordinator.get("codex_auth_path", "")),
         max_turns=max_turns
         if max_turns is not None
         else int(coordinator.get("max_turns", Config.max_turns)),

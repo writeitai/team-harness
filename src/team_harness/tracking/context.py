@@ -5,6 +5,12 @@ import warnings
 from team_harness.config import Config
 
 KNOWN_LIMITS: dict[str, int] = {
+    "codex-mini-latest": 200_000,
+    "openai/codex-mini-latest": 200_000,
+    "gpt-5.1-codex-mini": 200_000,
+    "openai/gpt-5.1-codex-mini": 200_000,
+    "gpt-5.1-codex-max": 200_000,
+    "openai/gpt-5.1-codex-max": 200_000,
     "openai/gpt-4.1": 1_047_576,
     "openai/gpt-4.1-mini": 1_047_576,
     "openai/gpt-4o": 128_000,
@@ -14,10 +20,19 @@ KNOWN_LIMITS: dict[str, int] = {
     "google/gemini-2.5-pro": 1_048_576,
 }
 
+KNOWN_CODEX_MODELS = {
+    "codex-mini-latest",
+    "openai/codex-mini-latest",
+    "gpt-5.1-codex-mini",
+    "openai/gpt-5.1-codex-mini",
+    "gpt-5.1-codex-max",
+    "openai/gpt-5.1-codex-max",
+}
+
 
 async def resolve_model_limit(model_id: str, client: Any, config: Config) -> int:
     try:
-        if hasattr(client, "get_models"):
+        if config.provider == "openai_compat" and hasattr(client, "get_models"):
             models = await client.get_models()
             for model in models.get("data", []):
                 if model.get("id") == model_id:

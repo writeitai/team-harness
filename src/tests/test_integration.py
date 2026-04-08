@@ -13,6 +13,8 @@ async def test_full_run_mock_api(tmp_path, monkeypatch):
     class FakeClient:
         def __init__(self, api_base, api_key, model):
             self.api_base = api_base
+            self.model = model
+            self.provider = "openai_compat"
 
         async def chat(self, messages, tools=None, stream=False, token_callback=None):
             from team_harness.coordinator.client import ChatResponse
@@ -51,7 +53,13 @@ async def test_full_run_mock_api(tmp_path, monkeypatch):
         async def get_models(self):
             return {"data": []}
 
-    monkeypatch.setattr("team_harness.cli.CoordinatorClient", FakeClient)
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(
+        "team_harness.cli._make_client",
+        lambda config: FakeClient(config.api_base, config.api_key, config.model),
+    )
     monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path)
     monkeypatch.setattr(
         config_module,

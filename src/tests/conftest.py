@@ -76,6 +76,7 @@ def config(tmp_path: Path) -> Config:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     return Config(
+        provider="openai_compat",
         model="test/model",
         api_base="http://localhost:9999",
         api_key="test-key",

@@ -389,6 +389,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
+    { name = "httpx" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "rich" },
@@ -405,6 +406,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "openai", specifier = ">=1.78" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1" },

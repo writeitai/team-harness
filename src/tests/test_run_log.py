@@ -10,7 +10,7 @@ from team_harness.tracking.run_log import RunLogWriter
 
 
 def test_run_log_delta_replay_and_agent_update(tmp_path):
-    writer = RunLogWriter("run_1", tmp_path, "model", "base")
+    writer = RunLogWriter("run_1", tmp_path, "openai_compat", "model", "base")
     writer.record_turn_delta(
         index=0,
         messages_appended_delta=[
@@ -59,3 +59,4 @@ def test_run_log_delta_replay_and_agent_update(tmp_path):
     ]
     assert data["agents"][0]["status"] == "done"
     assert data["error"] == "boom"
+    assert data["provider"] == "openai_compat"

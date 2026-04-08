@@ -7,6 +7,7 @@ from openai import APIStatusError
 
 from team_harness.coordinator.client import ChatResponse
 from team_harness.coordinator.client import ChoiceRecord
+from team_harness.coordinator.client import CoordinatorAPIError
 from team_harness.coordinator.client import FunctionRecord
 from team_harness.coordinator.client import MessageRecord
 from team_harness.coordinator.client import ToolCallRecord as ClientToolCallRecord
@@ -17,6 +18,9 @@ class SequenceClient:
     def __init__(self, responses: list[object]) -> None:
         self._responses = list(responses)
         self.calls = 0
+        self.model = "test/model"
+        self.api_base = "http://localhost:9999"
+        self.provider = "openai_compat"
 
     async def chat(self, messages, tools=None, stream=False, token_callback=None):
         self.calls += 1
@@ -31,6 +35,9 @@ class SequenceClient:
 
     async def get_models(self) -> dict:
         return {"data": []}
+
+    async def aclose(self) -> None:
+        return None
 
 
 def make_response(
@@ -64,3 +71,9 @@ def make_api_error(status_code: int, message: str = "boom") -> APIStatusError:
     request = httpx.Request("POST", "https://example.com/v1/chat/completions")
     response = httpx.Response(status_code=status_code, request=request)
     return APIStatusError(message, response=response, body={})
+
+
+def make_coordinator_api_error(
+    message: str = "boom", *, status_code: int | None = None, retryable: bool = False
+) -> CoordinatorAPIError:
+    return CoordinatorAPIError(message, status_code=status_code, retryable=retryable)
