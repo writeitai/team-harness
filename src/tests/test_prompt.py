@@ -114,21 +114,14 @@ async def test_history_recall():
 
 
 @pytest.mark.asyncio
-async def test_ctrl_c_reprompts():
+async def test_ctrl_c_exits():
     class FakeSession:
-        def __init__(self) -> None:
-            self.calls = 0
-
         async def prompt_async(self, prompt: str) -> str:
-            self.calls += 1
-            if self.calls == 1:
-                raise KeyboardInterrupt
-            return " ok "
+            raise KeyboardInterrupt
 
     session = FakeSession()
 
-    assert await read_user_input(cast(PromptSession, session)) == "ok"
-    assert session.calls == 2
+    assert await read_user_input(cast(PromptSession, session)) is None
 
 
 @pytest.mark.asyncio

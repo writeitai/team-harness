@@ -56,11 +56,8 @@ async def read_user_input(
             return None
         return text.strip()
 
-    while True:
-        try:
-            text = await session.prompt_async(prompt)
-            return text.strip()
-        except KeyboardInterrupt:
-            continue
-        except EOFError:
-            return None
+    try:
+        text = await session.prompt_async(prompt)
+        return text.strip()
+    except (KeyboardInterrupt, EOFError):
+        return None
