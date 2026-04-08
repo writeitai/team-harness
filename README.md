@@ -63,6 +63,58 @@ codex login
 team-harness run --provider codex --model codex-mini-latest "Review this repo and file issues"
 ```
 
+## Python SDK
+
+Use team-harness programmatically from Python:
+
+```python
+import asyncio
+from team_harness import Harness, HarnessResult
+
+async def main():
+    harness = Harness(
+        api_key="sk-or-...",
+        model="anthropic/claude-sonnet-4",
+        agents=["codex", "gemini"],
+    )
+    result: HarnessResult = await harness.run(
+        "Write unit tests for src/utils.py using pytest"
+    )
+    print(result.text)
+    for agent in result.agents:
+        print(f"  {agent.id} ({agent.agent_type}): {agent.status}")
+
+asyncio.run(main())
+```
+
+All CLI options are available as constructor parameters:
+
+```python
+harness = Harness(
+    provider="codex",           # or "openai_compat" (default)
+    model="codex-mini-latest",
+    api_base="https://openrouter.ai/api/v1",
+    api_key="sk-or-...",
+    codex_auth_path="~/.codex/auth.json",
+    agents=["codex", "gemini"], # or "codex,gemini"
+    max_turns=50,
+    max_retries=5,
+    max_depth=3,
+    system_prompt="Extra instructions",
+    system_prompt_file="prompt.txt",
+    cwd="./project",
+    console_mode="silent",      # "silent" | "auto" | "plain" | "rich"
+)
+```
+
+The `run()` method returns a `HarnessResult` with:
+
+- `text` -- final assistant response
+- `agents` -- list of `AgentSummary` (id, agent_type, status, exit_code, cwd)
+- `run_id` -- unique run identifier
+
+Errors raise `HarnessError`. Run logs are always finalized, even on failure.
+
 ## Configuration
 
 th works out of the box with built-in defaults. To create a config file explicitly:

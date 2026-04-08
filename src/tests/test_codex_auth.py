@@ -59,7 +59,7 @@ def test_load_codex_auth_success(tmp_path):
         }
     )
     path = tmp_path / "auth.json"
-    _write_auth(path, token)
+    _write_auth(path=path, token=token)
 
     auth = load_codex_auth(str(path), cwd=str(tmp_path))
 

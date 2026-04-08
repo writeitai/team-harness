@@ -41,8 +41,8 @@ def build_command(
     extra_flags: list[str] | None = None,
     allowed_agents: list[str] | None = None,
 ) -> list[str]:
-    template = resolve_template(agent_type, config)
-    template_tokens = _tokenize_template(template)
+    template = resolve_template(agent_type=agent_type, config=config)
+    template_tokens = _tokenize_template(template=template)
     command = [token.replace(PROMPT_SENTINEL, prompt) for token in template_tokens]
 
     if model is not None:
@@ -83,8 +83,8 @@ def get_allowed_types(config: Config) -> list[str]:
 
 def validate_templates(config: Config, allowed_types: list[str]) -> None:
     for agent_type in allowed_types:
-        template = resolve_template(agent_type, config)
-        binary = _tokenize_template(template)[0]
+        template = resolve_template(agent_type=agent_type, config=config)
+        binary = _tokenize_template(template=template)[0]
         if not shutil.which(binary):
             warnings.warn(
                 f"Agent type '{agent_type}': binary '{binary}' not found on PATH",

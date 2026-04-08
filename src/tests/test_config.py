@@ -54,14 +54,14 @@ def test_find_local_config_none_when_missing(tmp_path):
 
 def test_deep_merge_nested_dicts():
     merged = _deep_merge(
-        {
+        base={
             "coordinator": {
                 "model": "global-model",
                 "allowed_agents": ["codex", "claude"],
             },
             "agents": {"codex": {"template": "codex global {prompt}"}},
         },
-        {
+        override={
             "coordinator": {"model": "local-model", "allowed_agents": ["gemini"]},
             "agents": {"gemini": {"template": "gemini local {prompt}"}},
         },
@@ -301,8 +301,8 @@ def test_prepare_task_validates_inputs(tmp_path):
     task_file = tmp_path / "task.txt"
     task_file.write_text("file task")
 
-    assert _prepare_task(None, str(task_file)) == "file task"
+    assert _prepare_task(task=None, task_file=str(task_file)) == "file task"
     with pytest.raises(click.UsageError):
-        _prepare_task(None, None)
+        _prepare_task(task=None, task_file=None)
     with pytest.raises(click.UsageError):
-        _prepare_task("x", str(task_file))
+        _prepare_task(task="x", task_file=str(task_file))

@@ -19,7 +19,11 @@ from tests.helpers import SequenceClient
 @pytest.mark.asyncio
 async def test_run_one_turn_executes_tool_calls_first(tmp_path, config, ctx, ui):
     run_log = RunLogWriter(
-        "run_1", tmp_path, config.provider, config.model, config.api_base
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
     registry = ToolRegistry()
     called = []
@@ -29,7 +33,7 @@ async def test_run_one_turn_executes_tool_calls_first(tmp_path, config, ctx, ui)
         return f"ok:{value}"
 
     registry.register(
-        {
+        schema={
             "type": "function",
             "function": {
                 "name": "sample",
@@ -41,7 +45,7 @@ async def test_run_one_turn_executes_tool_calls_first(tmp_path, config, ctx, ui)
                 },
             },
         },
-        sample_tool,
+        fn=sample_tool,
     )
     client = SequenceClient(
         [
@@ -58,7 +62,15 @@ async def test_run_one_turn_executes_tool_calls_first(tmp_path, config, ctx, ui)
     )
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
     should_continue, last_logged = await run_one_turn(
-        messages, config, run_log, ui, registry, client, ctx, 0, 0
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=client,
+        ctx=ctx,
+        turn_index=0,
+        last_logged_index=0,
     )
     assert should_continue is True
     assert last_logged == 6
@@ -70,7 +82,11 @@ async def test_run_one_turn_executes_tool_calls_first(tmp_path, config, ctx, ui)
 @pytest.mark.asyncio
 async def test_run_one_turn_handles_empty_and_tool_errors(tmp_path, config, ctx, ui):
     run_log = RunLogWriter(
-        "run_1", tmp_path, config.provider, config.model, config.api_base
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
     registry = ToolRegistry()
 
@@ -78,7 +94,7 @@ async def test_run_one_turn_handles_empty_and_tool_errors(tmp_path, config, ctx,
         raise RuntimeError("broken")
 
     registry.register(
-        {
+        schema={
             "type": "function",
             "function": {
                 "name": "bad",
@@ -86,7 +102,7 @@ async def test_run_one_turn_handles_empty_and_tool_errors(tmp_path, config, ctx,
                 "parameters": {"type": "object", "properties": {}, "required": []},
             },
         },
-        bad_tool,
+        fn=bad_tool,
     )
     client = SequenceClient(
         [
@@ -96,12 +112,30 @@ async def test_run_one_turn_handles_empty_and_tool_errors(tmp_path, config, ctx,
     )
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
     assert (
-        await run_one_turn(messages, config, run_log, ui, registry, client, ctx, 0, 0)
+        await run_one_turn(
+            messages=messages,
+            config=config,
+            run_log=run_log,
+            ui=ui,
+            tool_registry=registry,
+            client=client,
+            ctx=ctx,
+            turn_index=0,
+            last_logged_index=0,
+        )
     )[0] is True
     result = ui.tool_calls[0][2].results[0]
     assert result[1] is True
     should_continue, _ = await run_one_turn(
-        messages, config, run_log, ui, registry, client, ctx, 1, len(messages)
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=client,
+        ctx=ctx,
+        turn_index=1,
+        last_logged_index=len(messages),
     )
     assert should_continue is False
     assert "WARNING: coordinator returned empty response" in ui.messages
@@ -119,18 +153,32 @@ async def test_chat_with_retry_and_run_api_errors(
     monkeypatch.setattr("asyncio.sleep", fake_sleep)
     ok_response = make_response(content="done")
     client = SequenceClient([make_api_error(429), make_api_error(429), ok_response])
-    response = await _chat_with_retry(client, [], [], config, token_callback=None)
+    response = await _chat_with_retry(
+        client=client, messages=[], tools=[], config=config, token_callback=None
+    )
     assert response.choices[0].message.content == "done"
     assert sleeps == [1, 2]
 
     error_client = SequenceClient([make_api_error(400)])
     run_log = RunLogWriter(
-        "run_2", tmp_path, config.provider, config.model, config.api_base
+        run_id="run_2",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
     registry = ToolRegistry()
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
     should_continue, _ = await run_one_turn(
-        messages, config, run_log, ui, registry, error_client, ctx, 0, 0
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=error_client,
+        ctx=ctx,
+        turn_index=0,
+        last_logged_index=0,
     )
     assert should_continue is False
     assert any("API error 400" in message for message in ui.messages)
@@ -142,14 +190,26 @@ async def test_run_one_turn_stops_cleanly_when_retries_are_exhausted(
 ):
     config.max_retries = 0
     run_log = RunLogWriter(
-        "run_3", tmp_path, config.provider, config.model, config.api_base
+        run_id="run_3",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
     registry = ToolRegistry()
     client = SequenceClient([make_api_error(429)])
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
 
     should_continue, last_logged = await run_one_turn(
-        messages, config, run_log, ui, registry, client, ctx, 0, 0
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=client,
+        ctx=ctx,
+        turn_index=0,
+        last_logged_index=0,
     )
 
     assert should_continue is False
@@ -162,7 +222,11 @@ async def test_run_one_turn_emits_context_warning_only_once(
     tmp_path, config, ctx, ui, monkeypatch
 ):
     run_log = RunLogWriter(
-        "run_4", tmp_path, config.provider, config.model, config.api_base
+        run_id="run_4",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
     registry = ToolRegistry()
     client = SequenceClient(
@@ -174,13 +238,29 @@ async def test_run_one_turn_emits_context_warning_only_once(
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
 
     should_continue, last_logged = await run_one_turn(
-        messages, config, run_log, ui, registry, client, ctx, 0, 0
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=client,
+        ctx=ctx,
+        turn_index=0,
+        last_logged_index=0,
     )
     assert should_continue is False
 
     messages.append({"role": "user", "content": "again"})
     should_continue, _ = await run_one_turn(
-        messages, config, run_log, ui, registry, client, ctx, 1, last_logged
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=client,
+        ctx=ctx,
+        turn_index=1,
+        last_logged_index=last_logged,
     )
 
     assert should_continue is False
@@ -191,7 +271,11 @@ async def test_run_one_turn_emits_context_warning_only_once(
 async def test_run_respects_max_turns(tmp_path, config, ctx, ui):
     config.max_turns = 2
     run_log = RunLogWriter(
-        "run_1", tmp_path, config.provider, config.model, config.api_base
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
     registry = ToolRegistry()
 
@@ -199,7 +283,7 @@ async def test_run_respects_max_turns(tmp_path, config, ctx, ui):
         return "ok"
 
     registry.register(
-        {
+        schema={
             "type": "function",
             "function": {
                 "name": "noop",
@@ -207,7 +291,7 @@ async def test_run_respects_max_turns(tmp_path, config, ctx, ui):
                 "parameters": {"type": "object", "properties": {}, "required": []},
             },
         },
-        noop,
+        fn=noop,
     )
     client = SequenceClient(
         [
@@ -217,7 +301,15 @@ async def test_run_respects_max_turns(tmp_path, config, ctx, ui):
         ]
     )
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
-    await run(messages, config, run_log, ui, registry, client, ctx)
+    await run(
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=client,
+        ctx=ctx,
+    )
     assert any("Max turns (2) reached" in message for message in ui.messages)
 
 
@@ -237,7 +329,9 @@ async def test_chat_with_retry_retries_coordinator_api_error(config, monkeypatch
         ]
     )
 
-    response = await _chat_with_retry(client, [], [], config)
+    response = await _chat_with_retry(
+        client=client, messages=[], tools=[], config=config
+    )
 
     assert response.choices[0].message.content == "done"
     assert sleeps == [1, 2]
@@ -248,7 +342,11 @@ async def test_run_one_turn_handles_non_retryable_coordinator_api_error(
     tmp_path, config, ctx, ui
 ):
     run_log = RunLogWriter(
-        "run_5", tmp_path, config.provider, config.model, config.api_base
+        run_id="run_5",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
     registry = ToolRegistry()
     client = SequenceClient(
@@ -257,7 +355,15 @@ async def test_run_one_turn_handles_non_retryable_coordinator_api_error(
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
 
     should_continue, last_logged = await run_one_turn(
-        messages, config, run_log, ui, registry, client, ctx, 0, 0
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=client,
+        ctx=ctx,
+        turn_index=0,
+        last_logged_index=0,
     )
 
     assert should_continue is False

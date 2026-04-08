@@ -20,9 +20,9 @@ async def spawn(
     output_path: str | None = None,
 ) -> asyncio.subprocess.Process:
     command = build_command(
-        agent_type,
-        prompt,
-        config,
+        agent_type=agent_type,
+        prompt=prompt,
+        config=config,
         model=model,
         extra_flags=extra_flags,
         allowed_agents=allowed_agents,

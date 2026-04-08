@@ -57,10 +57,12 @@ async def test_full_run_mock_api(tmp_path, monkeypatch):
             return None
 
     monkeypatch.setattr(
-        "team_harness.cli._make_client",
-        lambda config: FakeClient(config.api_base, config.api_key, config.model),
+        "team_harness.harness._make_client",
+        lambda config: FakeClient(
+            api_base=config.api_base, api_key=config.api_key, model=config.model
+        ),
     )
-    monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path)
+    monkeypatch.setattr("team_harness.harness.RUNS_DIR", tmp_path)
     monkeypatch.setattr(
         config_module,
         "CONFIG_PATH",
@@ -75,7 +77,7 @@ async def test_full_run_mock_api(tmp_path, monkeypatch):
     other_cwd = tmp_path / "elsewhere"
     other_cwd.mkdir()
     monkeypatch.chdir(other_cwd)
-    monkeypatch.setattr("team_harness.cli.load_skills", fake_load_skills)
+    monkeypatch.setattr("team_harness.harness.load_skills", fake_load_skills)
     await _run(
         task="hello",
         task_file=None,

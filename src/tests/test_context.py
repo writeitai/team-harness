@@ -19,17 +19,34 @@ class ClientFail:
 
 @pytest.mark.asyncio
 async def test_resolve_model_limit_fallbacks():
-    assert await resolve_model_limit("x", ClientWithModels(), Config()) == 321
-    assert await resolve_model_limit("openai/gpt-4o", ClientFail(), Config()) == 128_000
+    assert (
+        await resolve_model_limit(
+            model_id="x", client=ClientWithModels(), config=Config()
+        )
+        == 321
+    )
+    assert (
+        await resolve_model_limit(
+            model_id="openai/gpt-4o", client=ClientFail(), config=Config()
+        )
+        == 128_000
+    )
     with pytest.warns(UserWarning):
         assert (
             await resolve_model_limit(
-                "unknown", ClientFail(), Config(context_limit=999)
+                model_id="unknown",
+                client=ClientFail(),
+                config=Config(context_limit=999),
             )
             == 999
         )
     with pytest.warns(UserWarning):
-        assert await resolve_model_limit("unknown", ClientFail(), Config()) == 128_000
+        assert (
+            await resolve_model_limit(
+                model_id="unknown", client=ClientFail(), config=Config()
+            )
+            == 128_000
+        )
 
 
 def test_context_tracker_properties():

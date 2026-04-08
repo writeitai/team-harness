@@ -13,7 +13,14 @@ async def test_spawn_creates_logs_and_uses_devnull(tmp_path):
     log_dir = tmp_path / "logs"
     config = Config(agent_templates={"codex": "echo {prompt}"})
 
-    proc = await spawn("agent_test", "codex", "hello", tmp_path, config, log_dir)
+    proc = await spawn(
+        agent_id="agent_test",
+        agent_type="codex",
+        prompt="hello",
+        cwd=tmp_path,
+        config=config,
+        log_dir=log_dir,
+    )
     await asyncio.wait_for(proc.wait(), 2)
 
     assert proc.stdin is None

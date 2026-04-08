@@ -1,13 +1,13 @@
-# pyright: reportMissingParameterType=false
+# pyright: reportMissingParameterType=false, reportArgumentType=false
 
 from click.testing import CliRunner
 import pytest
 
 from team_harness import config as config_module
 from team_harness.cli import _run
-from team_harness.cli import _warn_provider_startup
 from team_harness.cli import main
 from team_harness.config import Config
+from team_harness.harness import _warn_provider_startup
 
 
 def test_help_uses_th_prog_name():
@@ -116,7 +116,7 @@ def test_init_global_force_overwrites(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path, capsys):
+async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path):
     class FakeClient:
         api_base = "http://localhost:11434/v1"
         model = "test/model"
@@ -124,6 +124,8 @@ async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path, c
 
         async def aclose(self):
             return None
+
+    printed_messages: list[str] = []
 
     class FakeConsole:
         def start(self):
@@ -133,12 +135,42 @@ async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path, c
             return None
 
         def print(self, message):
+            printed_messages.append(message)
+
+        def begin_turn(self, n):
             return None
 
-    async def fake_resolve_model_limit(model, client, config):
+        def begin_streaming(self):
+            return None
+
+        def stream_token(self, token):
+            return None
+
+        def end_streaming(self):
+            return None
+
+        def end_turn(self):
+            return None
+
+        def tool_call_start(self, name, args):
+            return None
+
+        def agent_event(self, event, state):
+            return None
+
+        def context_warning(self):
+            return None
+
+        def reset_separator(self):
+            return None
+
+        def print_agent_panel_inline(self):
+            return None
+
+    async def fake_resolve_model_limit(model_id, client, config):
         return 128_000
 
-    async def fake_run(messages, config, run_log, ui, registry, client, ctx):
+    async def fake_run(messages, config, run_log, ui, tool_registry, client, ctx):
         return None
 
     project_dir = tmp_path / "project"
@@ -147,16 +179,22 @@ async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path, c
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
-    monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path / "runs")
-    monkeypatch.setattr("team_harness.cli._make_client", lambda config: FakeClient())
+    monkeypatch.setattr("team_harness.harness.RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(
-        "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
+        "team_harness.harness._make_client", lambda config: FakeClient()
     )
-    monkeypatch.setattr("team_harness.cli.make_console", lambda **_: FakeConsole())
-    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
-    monkeypatch.setattr("team_harness.cli.validate_templates", lambda *args: None)
-    monkeypatch.setattr("team_harness.cli.build_system_prompt", lambda *args: "system")
-    monkeypatch.setattr("team_harness.cli.run", fake_run)
+    monkeypatch.setattr(
+        "team_harness.harness.resolve_model_limit", fake_resolve_model_limit
+    )
+    monkeypatch.setattr("team_harness.harness.make_console", lambda **_: FakeConsole())
+    monkeypatch.setattr("team_harness.harness.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr(
+        "team_harness.harness.validate_templates", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "team_harness.harness.build_system_prompt", lambda *args, **kwargs: "system"
+    )
+    monkeypatch.setattr("team_harness.harness.run", fake_run)
 
     await _run(
         task="hello",
@@ -165,11 +203,8 @@ async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path, c
         api_base="http://localhost:11434/v1",
     )
 
-    captured = capsys.readouterr().out
-    assert (
-        captured.count("No config file found. Run `team-harness init` to create one.")
-        == 1
-    )
+    no_config_messages = [m for m in printed_messages if "No config file found" in m]
+    assert len(no_config_messages) == 1
 
 
 def test_run_command_passes_provider_flags(monkeypatch):
@@ -191,9 +226,17 @@ def test_run_command_passes_provider_flags(monkeypatch):
     assert captured["task"] == "hello"
 
 
-def test_warn_provider_startup_for_codex_unknown_model(capsys):
-    _warn_provider_startup(Config(provider="codex", model="custom-codex-model"))
+def test_warn_provider_startup_for_codex_unknown_model():
+    messages: list[str] = []
 
-    captured = capsys.readouterr().out
-    assert "provider=codex is experimental" in captured
-    assert "context tracking may be inaccurate" in captured
+    class _CaptureUI:
+        def print(self, msg: str) -> None:
+            messages.append(msg)
+
+    _warn_provider_startup(
+        Config(provider="codex", model="custom-codex-model"), ui=_CaptureUI()
+    )
+
+    combined = "\n".join(messages)
+    assert "provider=codex is experimental" in combined
+    assert "context tracking may be inaccurate" in combined
