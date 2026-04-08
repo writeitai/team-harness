@@ -215,6 +215,21 @@ Options:
 | `/agents`  | Print current agent status table inline                         |
 | `/log`     | Print the path to the current run log                           |
 
+## REPL editing keys
+
+| Key              | Action                                         |
+|------------------|------------------------------------------------|
+| `Enter`          | Submit the current input                       |
+| `Alt+Enter`      | Insert a newline (multi-line editing)          |
+| `Esc Esc`        | Clear the entire input buffer                  |
+| `Ctrl+C`         | Clear current input without exiting the REPL   |
+| `Ctrl+D`         | Exit the REPL (when the input buffer is empty) |
+| `Up` / `Down`    | Navigate input history within the session      |
+
+Standard cursor movement keys (Left/Right, Home/End, Ctrl+A/E, Ctrl+W, Ctrl+K) work as expected.
+
+If Alt/Esc key sequences feel delayed in tmux, set `set -sg escape-time 0` in your tmux config.
+
 ## Coordinator tools
 
 The coordinator model has access to these tools:

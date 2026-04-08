@@ -44,6 +44,8 @@ from team_harness.tracking.context import resolve_model_limit
 from team_harness.tracking.run_log import RunLogWriter
 from team_harness.ui.console import ConsoleBase
 from team_harness.ui.console import make_console
+from team_harness.ui.prompt import make_prompt_session
+from team_harness.ui.prompt import read_user_input
 
 
 @click.group()
@@ -401,14 +403,17 @@ async def _repl(**kwargs: Any) -> None:
         messages = [{"role": "system", "content": system_prompt}]
         turn_index = 0
         last_logged_index = 0
+        session = make_prompt_session()
         ui.start()
         try:
             while True:
+                ui.pause_for_input()
                 try:
-                    raw = await asyncio.to_thread(input, "\n> ")
-                except EOFError:
+                    raw = await read_user_input(session)
+                finally:
+                    ui.resume_after_input()
+                if raw is None:
                     break
-                raw = raw.strip()
                 if not raw:
                     continue
                 match raw:

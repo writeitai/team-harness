@@ -39,6 +39,12 @@ class ConsoleBase(ABC):
     def stop(self) -> None: ...
 
     @abstractmethod
+    def pause_for_input(self) -> None: ...
+
+    @abstractmethod
+    def resume_after_input(self) -> None: ...
+
+    @abstractmethod
     def begin_turn(self, n: int) -> None: ...
 
     @abstractmethod
@@ -98,6 +104,12 @@ class PlainConsole(ConsoleBase):
 
     def stop(self) -> None:
         return None
+
+    def pause_for_input(self) -> None:
+        pass
+
+    def resume_after_input(self) -> None:
+        pass
 
     def begin_turn(self, n: int) -> None:
         print(f"\n{self._prefix()} [Turn {n}]")
@@ -171,6 +183,15 @@ class HarnessConsole(ConsoleBase):
         if self._live_started:
             self._live.stop()
             self._live_started = False
+
+    def pause_for_input(self) -> None:
+        if self._live_started:
+            self._live.stop()
+
+    def resume_after_input(self) -> None:
+        if self._live_started:
+            self._live.start()
+            self._live.update(self._render_live())
 
     def begin_turn(self, n: int) -> None:
         self._turn = n
