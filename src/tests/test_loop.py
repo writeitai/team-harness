@@ -1,6 +1,8 @@
 # pyright: reportMissingParameterType=false, reportArgumentType=false
 
 
+from unittest.mock import Mock
+
 import pytest
 
 from team_harness.coordinator.loop import _chat_with_retry
@@ -125,6 +127,53 @@ async def test_chat_with_retry_and_run_api_errors(
     )
     assert should_continue is False
     assert any("API error 400" in message for message in ui.messages)
+
+
+@pytest.mark.asyncio
+async def test_run_one_turn_stops_cleanly_when_retries_are_exhausted(
+    tmp_path, config, ctx, ui
+):
+    config.max_retries = 0
+    run_log = RunLogWriter("run_3", tmp_path, config.model, config.api_base)
+    registry = ToolRegistry()
+    client = SequenceClient([make_api_error(429)])
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+
+    should_continue, last_logged = await run_one_turn(
+        messages, config, run_log, ui, registry, client, ctx, 0, 0
+    )
+
+    assert should_continue is False
+    assert last_logged == 0
+    assert any("API error (retries exhausted)" in message for message in ui.messages)
+
+
+@pytest.mark.asyncio
+async def test_run_one_turn_emits_context_warning_only_once(
+    tmp_path, config, ctx, ui, monkeypatch
+):
+    run_log = RunLogWriter("run_4", tmp_path, config.model, config.api_base)
+    registry = ToolRegistry()
+    client = SequenceClient(
+        [make_response(content="first"), make_response(content="second")]
+    )
+    warning_spy = Mock(wraps=ui.context_warning)
+    monkeypatch.setattr(ui, "context_warning", warning_spy)
+    ctx.prompt_tokens = 80
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+
+    should_continue, last_logged = await run_one_turn(
+        messages, config, run_log, ui, registry, client, ctx, 0, 0
+    )
+    assert should_continue is False
+
+    messages.append({"role": "user", "content": "again"})
+    should_continue, _ = await run_one_turn(
+        messages, config, run_log, ui, registry, client, ctx, 1, last_logged
+    )
+
+    assert should_continue is False
+    assert warning_spy.call_count == 1
 
 
 @pytest.mark.asyncio

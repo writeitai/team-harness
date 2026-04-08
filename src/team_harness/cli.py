@@ -330,6 +330,7 @@ async def _repl(**kwargs: Any) -> None:
                 case "/reset":
                     messages.clear()
                     messages.append({"role": "system", "content": system_prompt})
+                    ctx.reset()
                     last_logged_index = 0
                     ui.reset_separator()
                     ui.print("Context reset. Agent state and run log preserved.")

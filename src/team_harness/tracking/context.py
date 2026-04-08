@@ -58,6 +58,12 @@ class ContextTracker:
         self.prompt_tokens += int(getattr(usage, "prompt_tokens", 0))
         self.completion_tokens += int(getattr(usage, "completion_tokens", 0))
 
+    def reset(self) -> None:
+        """Reset token tracking after a conversation reset."""
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.at_warning_emitted = False
+
     @property
     def total(self) -> int:
         return self.prompt_tokens + self.completion_tokens

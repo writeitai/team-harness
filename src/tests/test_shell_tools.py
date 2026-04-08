@@ -17,6 +17,7 @@ async def test_bash_echo_and_stdin_devnull():
 @pytest.mark.asyncio
 async def test_bash_timeout(monkeypatch):
     async def fake_wait_for(coro, timeout):
+        coro.close()
         raise asyncio.TimeoutError
 
     monkeypatch.setattr("asyncio.wait_for", fake_wait_for)

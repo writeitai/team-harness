@@ -98,14 +98,21 @@ async def run_one_turn(
         messages.append(assistant_msg)
         tool_call_records: list[ToolCallRecord] = []
         for tool_call in tool_calls:
-            arguments = json.loads(tool_call.function.arguments)
-            tool_ctx = ui.tool_call_start(tool_call.function.name, arguments)
+            arguments = {}
+            tool_ctx = None
             try:
+                arguments = json.loads(tool_call.function.arguments)
+                tool_ctx = ui.tool_call_start(tool_call.function.name, arguments)
                 result = await tool_registry.execute(tool_call.function.name, arguments)
                 is_error = result.startswith("ERROR:")
+            except json.JSONDecodeError as exc:
+                result = f"ERROR: invalid tool arguments JSON: {exc}"
+                is_error = True
             except Exception as exc:
                 result = f"ERROR: {exc}"
                 is_error = True
+            if tool_ctx is None:
+                tool_ctx = ui.tool_call_start(tool_call.function.name, arguments)
             tool_ctx.result(result, is_error=is_error)
             tool_call_records.append(
                 ToolCallRecord(

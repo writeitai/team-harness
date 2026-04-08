@@ -26,8 +26,8 @@ async def bash(command: str, cwd: str = ".") -> str:
     try:
         stdout, _ = await asyncio.wait_for(communicate_coro, timeout=120)
     except asyncio.TimeoutError:
-        communicate_coro.close()
         proc.kill()
+        await proc.wait()
         return "ERROR: command timed out after 120 seconds."
     output = stdout.decode(errors="replace")
     if len(output) > 32768:

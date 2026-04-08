@@ -129,3 +129,24 @@ async def test_list_agents_and_graceful_shutdown(tmp_path, config, manager, ui):
     data = json.loads((tmp_path / "run.json").read_text())
     statuses = {agent["id"]: agent["status"] for agent in data["agents"]}
     assert statuses["agent_2"] == "killed"
+
+
+@pytest.mark.asyncio
+async def test_list_agents_shows_killed_status(tmp_path, config, manager, ui):
+    config.run_dir = tmp_path
+    config.agent_templates = {"codex": "sh -lc 'sleep 5' {prompt}"}
+    run_log = RunLogWriter("run_1", tmp_path, config.model, config.api_base)
+    agent_tools.setup(manager, run_log, config, ui)
+
+    agent_id = await agent_tools.spawn_agent(
+        type="codex", prompt="hello", cwd=str(tmp_path)
+    )
+    result = await agent_tools.kill_agent(agent_id)
+    payload = json.loads(await agent_tools.list_agents())
+
+    assert result == f"Killed {agent_id}."
+    assert len(payload) == 1
+    assert payload[0]["id"] == agent_id
+    assert payload[0]["type"] == "codex"
+    assert payload[0]["status"] == "killed"
+    assert payload[0]["cwd"] == str(tmp_path)
