@@ -306,7 +306,10 @@ async def _repl(**kwargs: Any) -> None:
         last_logged_index = 0
         session = make_prompt_session()
         ui.print_welcome(model=config.model, cwd=config.cwd, provider=config.provider)
-        ui.start()
+        # Do NOT call ui.start() — that enables Rich Live, which takes over
+        # terminal space and causes the viewport to jump. In REPL mode
+        # everything prints inline (like Codex): prompt stays in place,
+        # response streams below, next prompt appears after.
         try:
             while True:
                 ui.pause_for_input()
