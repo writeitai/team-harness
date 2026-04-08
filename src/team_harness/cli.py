@@ -87,7 +87,7 @@ def init(use_global: bool, force: bool) -> None:
 @click.option("--api-base", default=None)
 @click.option("--api-key", default=None)
 @click.option("--codex-auth-path", default=None)
-@click.option("--agents", default=None)
+@click.option("--agents", "allowed_agents", default=None)
 @click.option("--max-turns", type=int, default=None)
 @click.option("--max-retries", type=int, default=None)
 @click.option("--max-depth", type=int, default=None)
@@ -102,7 +102,7 @@ def run_cli(
     api_base: str | None,
     api_key: str | None,
     codex_auth_path: str | None,
-    agents: str | None,
+    allowed_agents: str | None,
     max_turns: int | None,
     max_retries: int | None,
     max_depth: int | None,
@@ -119,7 +119,7 @@ def run_cli(
             api_base=api_base,
             api_key=api_key,
             codex_auth_path=codex_auth_path,
-            agents=agents,
+            allowed_agents=allowed_agents,
             max_turns=max_turns,
             max_retries=max_retries,
             max_depth=max_depth,
@@ -136,7 +136,7 @@ def run_cli(
 @click.option("--api-base", default=None)
 @click.option("--api-key", default=None)
 @click.option("--codex-auth-path", default=None)
-@click.option("--agents", default=None)
+@click.option("--agents", "allowed_agents", default=None)
 @click.option("--max-turns", type=int, default=None)
 @click.option("--max-retries", type=int, default=None)
 @click.option("--max-depth", type=int, default=None)
@@ -149,7 +149,7 @@ def repl(
     api_base: str | None,
     api_key: str | None,
     codex_auth_path: str | None,
-    agents: str | None,
+    allowed_agents: str | None,
     max_turns: int | None,
     max_retries: int | None,
     max_depth: int | None,
@@ -164,7 +164,7 @@ def repl(
             api_base=api_base,
             api_key=api_key,
             codex_auth_path=codex_auth_path,
-            agents=agents,
+            allowed_agents=allowed_agents,
             max_turns=max_turns,
             max_retries=max_retries,
             max_depth=max_depth,
