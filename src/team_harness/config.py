@@ -42,22 +42,50 @@ class Config:
 
 
 def _default_config_text() -> str:
-    return """# th configuration
+    return """# th — global configuration
+# Applies to all projects. Project-level .team-harness/config.toml overrides these.
+
 [coordinator]
+# Coordinator backend: "openai_compat" (OpenRouter / any OpenAI-compatible API)
+# or "codex" (experimental ChatGPT Codex subscription).
 provider = "openai_compat"
+
+# Model name passed to the coordinator API.
 model = "gpt-5.4"
+
+# Base URL for the coordinator API.
 api_base = "https://openrouter.ai/api/v1"
+
+# API key. Prefer the OPENROUTER_API_KEY or OPENAI_API_KEY env var instead.
 api_key = ""
+
+# Extra text appended to the system prompt for every run.
 system_prompt = ""
+
+# Maximum coordinator turns before the run stops.
+max_turns = 50
+
+# Retry budget for transient API errors (429 / 5xx).
+max_retries = 5
+
+# Maximum nesting depth for recursive th-run agents.
+max_depth = 3
+
+# Override the model's context window size (tokens). Leave commented to auto-detect.
 # context_limit = 128000
-# shutdown_timeout_s = 10.0
-# allowed_agents = ["codex", "gemini"]
-#
-# Experimental Codex subscription coordinator:
+
+# Seconds to wait for running agents on /quit or Ctrl+C before force-killing.
+shutdown_timeout_s = 10.0
+
+# Restrict which agent types the coordinator can spawn. Leave commented to allow all.
+# allowed_agents = ["codex", "gemini", "claude", "opencode", "pi", "harness"]
+
+# --- Experimental Codex subscription coordinator ---
 # provider = "codex"
 # model = "codex-mini-latest"
 # codex_auth_path = "~/.codex/auth.json"
 
+# Agent templates. {prompt} is replaced with the task text at spawn time.
 [agents.codex]
 template = "codex exec --yolo --model gpt-5.4 PROMPT=\\"{prompt}\\""
 
@@ -85,23 +113,45 @@ def _local_config_text() -> str:
 # Do not store API keys here; prefer environment variables.
 
 [coordinator]
+# Coordinator backend: "openai_compat" or "codex" (experimental).
 provider = "openai_compat"
+
+# Model name passed to the coordinator API.
 model = "gpt-5.4"
+
+# Base URL for the coordinator API.
 api_base = "https://openrouter.ai/api/v1"
-# api_key = ""           # prefer OPENROUTER_API_KEY or OPENAI_API_KEY env var
+
+# API key — prefer OPENROUTER_API_KEY or OPENAI_API_KEY env var instead.
+# api_key = ""
+
+# Extra text appended to the system prompt for every run.
 system_prompt = ""
+
+# Maximum coordinator turns before the run stops.
 max_turns = 50
+
+# Retry budget for transient API errors (429 / 5xx).
 max_retries = 5
+
+# Maximum nesting depth for recursive th-run agents.
 max_depth = 3
+
+# Override the model's context window size (tokens). Leave commented to auto-detect.
 # context_limit = 128000
+
+# Seconds to wait for running agents on /quit or Ctrl+C before force-killing.
 shutdown_timeout_s = 10.0
+
+# Restrict which agent types the coordinator can spawn. Leave commented to allow all.
 # allowed_agents = ["codex", "gemini", "claude", "opencode", "pi", "harness"]
 
-# Experimental Codex subscription coordinator:
+# --- Experimental Codex subscription coordinator ---
 # provider = "codex"
 # model = "codex-mini-latest"
 # codex_auth_path = ".team-harness/codex-auth.json"
 
+# Agent templates. {prompt} is replaced with the task text at spawn time.
 [agents.codex]
 template = "codex exec --yolo --model gpt-5.4 PROMPT=\\"{prompt}\\""
 
