@@ -115,42 +115,19 @@ def test_init_global_force_overwrites(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path, capsys):
-    class FakeClient:
-        def __init__(self, api_base, api_key, model):
-            self.api_base = api_base
+    captured = {}
 
-    class FakeConsole:
-        def start(self):
-            return None
+    class FakeHarness:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
 
-        def stop(self):
-            return None
-
-        def print(self, message):
-            return None
-
-    async def fake_resolve_model_limit(model, client, config):
-        return 128_000
-
-    async def fake_run(messages, config, run_log, ui, registry, client, ctx):
-        return None
+        async def run(self, task):
+            captured["task"] = task
 
     project_dir = tmp_path / "project"
     project_dir.mkdir()
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    monkeypatch.chdir(elsewhere)
     monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
-    monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path / "runs")
-    monkeypatch.setattr("team_harness.cli.CoordinatorClient", FakeClient)
-    monkeypatch.setattr(
-        "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
-    )
-    monkeypatch.setattr("team_harness.cli.make_console", lambda **_: FakeConsole())
-    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
-    monkeypatch.setattr("team_harness.cli.validate_templates", lambda *args: None)
-    monkeypatch.setattr("team_harness.cli.build_system_prompt", lambda *args: "system")
-    monkeypatch.setattr("team_harness.cli.run", fake_run)
+    monkeypatch.setattr("team_harness.cli.Harness", FakeHarness)
 
     await _run(
         task="hello",
@@ -159,8 +136,8 @@ async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path, c
         api_base="http://localhost:11434/v1",
     )
 
-    captured = capsys.readouterr().out
-    assert (
-        captured.count("No config file found. Run `team-harness init` to create one.")
-        == 1
-    )
+    assert capsys.readouterr().out == ""
+    assert captured["task"] == "hello"
+    assert captured["kwargs"]["cwd"] == str(project_dir)
+    assert captured["kwargs"]["api_base"] == "http://localhost:11434/v1"
+    assert captured["kwargs"]["console_mode"] == "auto"

@@ -56,6 +56,34 @@ th logs
 th logs <run-id>
 ```
 
+## Python SDK
+
+The SDK provides a programmatic interface mirroring the CLI:
+
+```python
+import asyncio
+from team_harness import Harness
+
+async def main():
+    harness = Harness(
+        model="openai/gpt-4o",
+        api_key="sk-...",
+    )
+    result = await harness.run("Write unit tests for src/utils.py")
+    print(result.text)       # final coordinator response
+    print(result.run_id)     # run log ID
+    for agent in result.agents:
+        print(f"{agent.agent_type}: {agent.status}")
+
+asyncio.run(main())
+```
+
+- `Harness.run()` is async and returns a `HarnessResult` with `text`, `run_id`, and `agents`
+- Console output is silent by default; use `console_mode="plain"` or `"rich"` for visible output
+- Constructor options mirror CLI flags and config file settings
+- Runs create normal run logs under `~/.team-harness/runs/`
+- Safe for concurrent use — all tool state is isolated per run
+
 ## Configuration
 
 th works out of the box with built-in defaults. To create a config file explicitly:

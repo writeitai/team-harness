@@ -144,6 +144,47 @@ class PlainConsole(ConsoleBase):
             )
 
 
+class SilentConsole(ConsoleBase):
+    def start(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def begin_turn(self, n: int) -> None:
+        return None
+
+    def begin_streaming(self) -> None:
+        return None
+
+    def stream_token(self, token: str) -> None:
+        return None
+
+    def end_streaming(self) -> None:
+        return None
+
+    def end_turn(self) -> None:
+        return None
+
+    def tool_call_start(self, name: str, args: dict) -> ToolCallContext:
+        return ToolCallContext(lambda text, is_error: None)
+
+    def agent_event(self, event: str, state: "AgentState") -> None:
+        return None
+
+    def context_warning(self) -> None:
+        return None
+
+    def reset_separator(self) -> None:
+        return None
+
+    def print(self, msg: str) -> None:
+        return None
+
+    def print_agent_panel_inline(self) -> None:
+        return None
+
+
 class HarnessConsole(ConsoleBase):
     def __init__(
         self, ctx: "ContextTracker", manager: "AgentManager", run_dir: Path
@@ -361,8 +402,21 @@ def _last_line(path: Path) -> str:
 
 
 def make_console(
-    ctx: "ContextTracker", manager: "AgentManager", run_dir: Path
+    ctx: "ContextTracker | None" = None,
+    manager: "AgentManager | None" = None,
+    run_dir: Path | None = None,
+    mode: str = "auto",
 ) -> ConsoleBase:
-    if sys.stdout.isatty():
+    if mode == "silent":
+        return SilentConsole()
+    if ctx is None or manager is None or run_dir is None:
+        raise ValueError("ctx, manager, and run_dir are required for visible consoles")
+    if mode == "plain":
+        return PlainConsole(ctx, manager, run_dir)
+    if mode == "rich":
         return HarnessConsole(ctx, manager, run_dir)
-    return PlainConsole(ctx, manager, run_dir)
+    if mode == "auto":
+        if sys.stdout.isatty():
+            return HarnessConsole(ctx, manager, run_dir)
+        return PlainConsole(ctx, manager, run_dir)
+    raise ValueError(f"Unknown console mode: {mode!r}")

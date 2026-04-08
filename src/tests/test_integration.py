@@ -51,8 +51,8 @@ async def test_full_run_mock_api(tmp_path, monkeypatch):
         async def get_models(self):
             return {"data": []}
 
-    monkeypatch.setattr("team_harness.cli.CoordinatorClient", FakeClient)
-    monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path)
+    monkeypatch.setattr("team_harness.harness.CoordinatorClient", FakeClient)
+    monkeypatch.setattr("team_harness.harness.RUNS_DIR", tmp_path)
     monkeypatch.setattr(
         config_module,
         "CONFIG_PATH",
@@ -67,7 +67,7 @@ async def test_full_run_mock_api(tmp_path, monkeypatch):
     other_cwd = tmp_path / "elsewhere"
     other_cwd.mkdir()
     monkeypatch.chdir(other_cwd)
-    monkeypatch.setattr("team_harness.cli.load_skills", fake_load_skills)
+    monkeypatch.setattr("team_harness.harness.load_skills", fake_load_skills)
     await _run(
         task="hello",
         task_file=None,
