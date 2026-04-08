@@ -1,0 +1,368 @@
+from abc import ABC
+from abc import abstractmethod
+from datetime import datetime
+from datetime import timezone
+import json
+import os
+from pathlib import Path
+import sys
+import time
+from typing import TYPE_CHECKING
+
+from rich.console import Console
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+if TYPE_CHECKING:
+    from team_harness.agents.manager import AgentManager
+    from team_harness.agents.manager import AgentState
+    from team_harness.tracking.context import ContextTracker
+
+AGENT_COLORS: dict[str, str] = {
+    "codex": "blue",
+    "gemini": "green",
+    "claude": "magenta",
+    "opencode": "cyan",
+    "harness": "yellow",
+    "pi": "bright_red",
+}
+
+
+class ConsoleBase(ABC):
+    @abstractmethod
+    def start(self) -> None: ...
+
+    @abstractmethod
+    def stop(self) -> None: ...
+
+    @abstractmethod
+    def begin_turn(self, n: int) -> None: ...
+
+    @abstractmethod
+    def begin_streaming(self) -> None: ...
+
+    @abstractmethod
+    def stream_token(self, token: str) -> None: ...
+
+    @abstractmethod
+    def end_streaming(self) -> None: ...
+
+    @abstractmethod
+    def end_turn(self) -> None: ...
+
+    @abstractmethod
+    def tool_call_start(self, name: str, args: dict) -> "ToolCallContext": ...
+
+    @abstractmethod
+    def agent_event(self, event: str, state: "AgentState") -> None: ...
+
+    @abstractmethod
+    def context_warning(self) -> None: ...
+
+    @abstractmethod
+    def reset_separator(self) -> None: ...
+
+    @abstractmethod
+    def print(self, msg: str) -> None: ...
+
+    @abstractmethod
+    def print_agent_panel_inline(self) -> None: ...
+
+
+class ToolCallContext:
+    def __init__(self, callback: callable) -> None:
+        self._callback = callback
+
+    def result(self, text: str, is_error: bool = False) -> None:
+        self._callback(text, is_error)
+
+
+class PlainConsole(ConsoleBase):
+    def __init__(
+        self, ctx: "ContextTracker", manager: "AgentManager", run_dir: Path
+    ) -> None:
+        self._ctx = ctx
+        self._manager = manager
+        self._run_dir = run_dir
+        self._start = time.monotonic()
+
+    def _prefix(self) -> str:
+        elapsed = int(time.monotonic() - self._start)
+        return f"[{elapsed // 60:02d}:{elapsed % 60:02d}]"
+
+    def start(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def begin_turn(self, n: int) -> None:
+        print(f"\n{self._prefix()} [Turn {n}]")
+
+    def begin_streaming(self) -> None:
+        return None
+
+    def stream_token(self, token: str) -> None:
+        print(token, end="", flush=True)
+
+    def end_streaming(self) -> None:
+        return None
+
+    def end_turn(self) -> None:
+        print()
+
+    def tool_call_start(self, name: str, args: dict) -> ToolCallContext:
+        print(f"\n{self._prefix()}   ▶ {name}({json.dumps(args, sort_keys=True)})")
+
+        def _render(text: str, is_error: bool) -> None:
+            for line in text.splitlines() or [""]:
+                prefix = "ERROR" if is_error else "RESULT"
+                print(f"{self._prefix()}   {prefix}: {line}")
+
+        return ToolCallContext(_render)
+
+    def agent_event(self, event: str, state: "AgentState") -> None:
+        print(f"{self._prefix()}   {state.agent_type} {state.id[:6]}  {event}")
+
+    def context_warning(self) -> None:
+        print(f"{self._prefix()} ⚠ Context at {self._ctx.pct:.0f}% — consider /reset")
+
+    def reset_separator(self) -> None:
+        print(f"{self._prefix()} --- Context reset ---")
+
+    def print(self, msg: str) -> None:
+        print(f"{self._prefix()} {msg}")
+
+    def print_agent_panel_inline(self) -> None:
+        self._manager.poll_exit_codes()
+        for state in self._manager.list_all():
+            print(
+                f"{self._prefix()} {state.id} {state.agent_type} {state.status} {state.cwd} {_elapsed(state)}"
+            )
+
+
+class HarnessConsole(ConsoleBase):
+    def __init__(
+        self, ctx: "ContextTracker", manager: "AgentManager", run_dir: Path
+    ) -> None:
+        self._ctx = ctx
+        self._manager = manager
+        self._run_dir = run_dir
+        self._turn = 0
+        self._start = time.monotonic()
+        self._console = Console(highlight=False)
+        self._live = Live(
+            self._render_live(),
+            console=self._console,
+            refresh_per_second=2,
+            transient=False,
+        )
+        self._live_started = False
+        self._streaming = False
+
+    def start(self) -> None:
+        self._live.start()
+        self._live_started = True
+
+    def stop(self) -> None:
+        if self._live_started:
+            self._live.stop()
+            self._live_started = False
+
+    def begin_turn(self, n: int) -> None:
+        self._turn = n
+        self._console.rule(f"[dim]Turn {n}[/dim]", style="dim")
+
+    def begin_streaming(self) -> None:
+        if self._live_started:
+            self._live.stop()
+        self._streaming = True
+
+    def stream_token(self, token: str) -> None:
+        self._console.print(
+            token, end="", markup=False, highlight=False, soft_wrap=True
+        )
+
+    def end_streaming(self) -> None:
+        if not self._streaming:
+            return
+        self._console.print()
+        if self._live_started:
+            self._live.start()
+            self._live.update(self._render_live())
+        self._streaming = False
+
+    def end_turn(self) -> None:
+        if self._live_started:
+            self._live.update(self._render_live())
+
+    def tool_call_start(self, name: str, args: dict) -> ToolCallContext:
+        self._console.print(
+            f"\n  [bold]▶[/bold] [bold cyan]{name}[/bold cyan]({_fmt_args(args)})"
+        )
+
+        def _render(text: str, is_error: bool) -> None:
+            style = "red" if is_error else "dim"
+            lines = text.splitlines()
+            for line in lines[:5]:
+                self._console.print(f"    [dim]│[/dim] [{style}]{line}[/{style}]")
+            if len(lines) > 5:
+                self._console.print(f"    [dim]│ … ({len(lines) - 5} more lines)[/dim]")
+            if self._live_started:
+                self._live.update(self._render_live())
+
+        return ToolCallContext(_render)
+
+    def agent_event(self, event: str, state: "AgentState") -> None:
+        color = AGENT_COLORS.get(state.agent_type, "white")
+        self._console.print(
+            f"  [{color}]{state.agent_type}[/{color}] {state.id[:6]}  {event}"
+        )
+        if self._live_started:
+            self._live.update(self._render_live())
+
+    def context_warning(self) -> None:
+        self._console.print(
+            f"\n  [bold red]⚠ Context at {self._ctx.pct:.0f}% — consider /reset[/bold red]\n"
+        )
+
+    def reset_separator(self) -> None:
+        self._console.rule("[bold yellow]Context reset[/bold yellow]", style="yellow")
+
+    def print(self, msg: str) -> None:
+        self._console.print(msg)
+
+    def print_agent_panel_inline(self) -> None:
+        if self._live_started:
+            self._live.stop()
+        self._console.print(self._render_agent_panel(self._manager.list_all()))
+        if self._live_started:
+            self._live.start()
+            self._live.update(self._render_live())
+
+    def _render_live(self) -> Layout:
+        self._manager.poll_exit_codes()
+        layout = Layout()
+        blocks: list[Layout] = []
+        agents = self._manager.list_all()
+        todos = self._load_todos()
+        if agents:
+            agent_panel = Layout(self._render_agent_panel(agents), name="agents")
+            agent_panel.size = min(len(agents) + 2, 10)
+            blocks.append(agent_panel)
+        if todos:
+            todo_panel = Layout(self._render_todo_panel(todos), name="todos")
+            todo_panel.size = min(len(todos) + 3, 8)
+            blocks.append(todo_panel)
+        blocks.append(Layout(self._render_status_bar(), name="status", size=1))
+        layout.split_column(*blocks)
+        return layout
+
+    def _render_agent_panel(self, agents: list["AgentState"]) -> Panel:
+        table = Table(box=None, padding=(0, 1), show_header=True, header_style="dim")
+        table.add_column("ID", style="dim", width=8)
+        table.add_column("TYPE", width=10)
+        table.add_column("STATUS", width=14)
+        table.add_column("ELAPSED", width=7)
+        table.add_column("LAST OUTPUT", no_wrap=True)
+        for state in agents:
+            color = AGENT_COLORS.get(state.agent_type, "white")
+            status, status_style = _format_status(state)
+            table.add_row(
+                state.id[:6],
+                f"[{color}]{state.agent_type}[/{color}]",
+                f"[{status_style}]{status}[/{status_style}]",
+                _elapsed(state),
+                _last_line(state.stdout_log),
+            )
+        return Panel(
+            table, title="[dim]agents[/dim]", border_style="dim", padding=(0, 1)
+        )
+
+    def _render_todo_panel(self, todos: list[dict]) -> Panel:
+        table = Table(box=None, padding=(0, 1), show_header=True, header_style="dim")
+        table.add_column("id", style="dim", width=12)
+        table.add_column("description")
+        table.add_column("status", width=12)
+        table.add_column("priority", width=10)
+        for task in todos:
+            table.add_row(
+                str(task.get("id", "")),
+                str(task.get("description", "")),
+                str(task.get("status", "")),
+                str(task.get("priority", "-")),
+            )
+        return Panel(table, title="[dim]todo[/dim]", border_style="dim", padding=(0, 1))
+
+    def _render_status_bar(self) -> Text:
+        elapsed = time.monotonic() - self._start
+        pct = self._ctx.pct
+        ctx_color = "red" if pct >= 80 else "yellow" if pct >= 60 else "cyan"
+        running = self._manager.running_count()
+        total = len(self._manager.list_all())
+        return Text.assemble(
+            (" ctx: ", "dim"),
+            (f"{self._ctx.total:,}/{self._ctx.model_limit:,} ({pct:.0f}%)", ctx_color),
+            ("  │  ", "dim"),
+            (
+                f"agents: {running} running / {total} total",
+                "yellow" if running else "dim",
+            ),
+            ("  │  ", "dim"),
+            (f"turn: {self._turn}", "dim"),
+            ("  │  ", "dim"),
+            (_fmt_elapsed(elapsed), "green"),
+            ("  │  ", "dim"),
+            (f"model: {self._ctx.model_id}", "dim"),
+        )
+
+    def _load_todos(self) -> list[dict]:
+        todo_path = self._run_dir / "todo.json"
+        if not todo_path.exists():
+            return []
+        return json.loads(todo_path.read_text())
+
+
+def _fmt_args(args: dict) -> str:
+    return ", ".join(f"{key}={value!r}" for key, value in args.items())
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    value = int(seconds)
+    return f"{value // 60}:{value % 60:02d}"
+
+
+def _elapsed(state: "AgentState") -> str:
+    end = state.finished_at or datetime.now(timezone.utc)
+    total_seconds = int((end - state.spawn_time).total_seconds())
+    return f"{total_seconds // 60}:{total_seconds % 60:02d}"
+
+
+def _format_status(state: "AgentState") -> tuple[str, str]:
+    if state.exit_code is None:
+        return ("● running", "yellow")
+    if state.exit_code == 0:
+        return ("✓ done(0)", "green")
+    return (f"✗ failed({state.exit_code})", "red")
+
+
+def _last_line(path: Path) -> str:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(max(0, os.path.getsize(path) - 512))
+            tail = handle.read().decode(errors="replace")
+        lines = [line for line in tail.splitlines() if line.strip()]
+        return lines[-1][:60] if lines else ""
+    except OSError:
+        return ""
+
+
+def make_console(
+    ctx: "ContextTracker", manager: "AgentManager", run_dir: Path
+) -> ConsoleBase:
+    if sys.stdout.isatty():
+        return HarnessConsole(ctx, manager, run_dir)
+    return PlainConsole(ctx, manager, run_dir)

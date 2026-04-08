@@ -1,0 +1,89 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "team-harness"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "openai>=1.78",
+    "pydantic>=2.11",
+    "rich>=14.0",
+    "click>=8.1",
+]
+
+[project.scripts]
+team-harness = "team_harness.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pyright>=1.1",
+    "ruff>=0.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/team_harness"]
+
+[tool.ruff]
+src = ["src"]
+target-version = "py314"
+line-length = 88
+exclude = ["tmp/"]
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true
+
+[tool.ruff.lint]
+extend-select = ["I", "B", "A", "ERA"]
+
+[tool.ruff.lint.isort]
+case-sensitive = false
+force-single-line = true
+force-sort-within-sections = true
+known-first-party = ["team_harness"]
+order-by-type = false
+relative-imports-order = "closest-to-furthest"
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "basic"
+extraPaths = ["src"]
+reportArgumentType = true
+reportMissingParameterType = true
+reportCallIssue = true
+reportMissingImports = true
+reportUnusedImport = true
+reportDuplicateImport = true
+reportAttributeAccessIssue = true
+reportUnnecessaryIsInstance = true
+reportUnnecessaryComparison = true
+useLibraryCodeForTypes = true
+reportGeneralTypeIssues = false
+reportOptionalMemberAccess = false
+reportOptionalOperand = false
+reportOptionalSubscript = false
+reportOptionalCall = false
+reportUnknownParameterType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUnknownLambdaType = false
+reportIncompatibleMethodOverride = false
+reportIncompatibleVariableOverride = false
+reportOperatorIssue = false
+reportIndexIssue = false
+reportReturnType = false
+reportAssignmentType = false
+reportPrivateUsage = false
+reportTypeCommentUsage = false
+reportMatchNotExhaustive = false
+include = ["src"]
+exclude = ["**/virtualenvs", "tmp/"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["src/tests"]
