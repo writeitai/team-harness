@@ -42,7 +42,7 @@ from team_harness.ui.console import make_console
 
 @click.group()
 def main() -> None:
-    """team-harness — multi-agent AI orchestration harness."""
+    """th — multi-agent AI orchestration harness."""
 
 
 def _write_config_file(path: Path, text: str, force: bool) -> None:

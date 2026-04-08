@@ -14,6 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
+th = "team_harness.cli:main"
 team-harness = "team_harness.cli:main"
 
 [project.optional-dependencies]

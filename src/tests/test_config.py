@@ -6,10 +6,14 @@ import pytest
 from team_harness import config as config_module
 from team_harness.cli import _prepare_task
 from team_harness.config import _deep_merge
+from team_harness.config import _default_config_text
 from team_harness.config import Config
+from team_harness.config import CONFIG_PATH
 from team_harness.config import DEFAULT_TEMPLATES
 from team_harness.config import find_local_config
 from team_harness.config import load_config
+from team_harness.config import RUNS_DIR
+from team_harness.config import SKILLS_USER_DIR
 
 
 def test_default_model_is_gpt_5_4():
@@ -243,6 +247,22 @@ def test_no_config_uses_defaults_without_creating_global_file(tmp_path, monkeypa
     assert config.global_config_path is None
     assert config.local_config_path is None
     assert not global_path.exists()
+
+
+def test_default_templates_use_th_for_harness():
+    assert DEFAULT_TEMPLATES["harness"] == "th run {prompt}"
+
+
+def test_default_config_text_uses_th_for_harness():
+    default_config = _default_config_text()
+    assert default_config.startswith("# th configuration")
+    assert 'template = "th run {prompt}"' in default_config
+
+
+def test_config_paths_remain_under_team_harness_dir():
+    assert CONFIG_PATH == config_module.Path.home() / ".team-harness" / "config.toml"
+    assert RUNS_DIR == config_module.Path.home() / ".team-harness" / "runs"
+    assert SKILLS_USER_DIR == config_module.Path.home() / ".team-harness" / "skills"
 
 
 def test_prepare_task_validates_inputs(tmp_path):

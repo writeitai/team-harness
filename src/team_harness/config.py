@@ -15,7 +15,7 @@ DEFAULT_TEMPLATES: dict[str, str] = {
     "claude": "claude -p --dangerously-skip-permissions {prompt}",
     "opencode": "opencode {prompt}",
     "pi": "pi --print --no-session {prompt}",
-    "harness": "team-harness run {prompt}",
+    "harness": "th run {prompt}",
 }
 
 
@@ -39,7 +39,7 @@ class Config:
 
 
 def _default_config_text() -> str:
-    return """# team-harness configuration
+    return """# th configuration
 [coordinator]
 model = "gpt-5.4"
 api_base = "https://openrouter.ai/api/v1"
@@ -65,7 +65,7 @@ template = "opencode {prompt}"
 template = "pi --print --no-session {prompt}"
 
 [agents.harness]
-template = "team-harness run {prompt}"
+template = "th run {prompt}"
 """
 
 
