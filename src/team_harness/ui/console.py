@@ -128,6 +128,12 @@ class SilentConsole(ConsoleBase):
     def print_agent_panel_inline(self) -> None:
         return None
 
+    def pause_for_input(self) -> None:
+        return None
+
+    def resume_after_input(self) -> None:
+        return None
+
 
 class PlainConsole(ConsoleBase):
     def __init__(

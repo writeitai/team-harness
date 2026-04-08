@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "team-harness"
 version = "0.1.0"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28",
     "openai>=1.78",
@@ -32,7 +32,7 @@ packages = ["src/team_harness"]
 
 [tool.ruff]
 src = ["src"]
-target-version = "py314"
+target-version = "py312"
 line-length = 88
 exclude = ["tmp/"]
 
@@ -52,7 +52,7 @@ relative-imports-order = "closest-to-furthest"
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
 
 [tool.pyright]
-pythonVersion = "3.14"
+pythonVersion = "3.12"
 typeCheckingMode = "basic"
 extraPaths = ["src"]
 reportArgumentType = true
