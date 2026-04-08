@@ -67,3 +67,39 @@ async def test_load_skills_and_ctx(tmp_path):
         _make_wrapper(skill, ctx),
     )
     assert await registry.execute("demo", {"path": str(target)}) == "hello"
+
+
+def test_load_skills_uses_passed_cwd_for_project_skills(monkeypatch, tmp_path):
+    user_dir = tmp_path / "user-skills"
+    cwd_one = tmp_path / "project-one"
+    cwd_two = tmp_path / "project-two"
+    (cwd_one / "skills").mkdir(parents=True)
+    (cwd_two / "skills").mkdir(parents=True)
+    (cwd_one / "skills" / "one.py").write_text(
+        textwrap.dedent(
+            """
+            name = "one"
+            description = "project one"
+            parameters_schema = {"type": "object", "properties": {}}
+            async def execute(ctx):
+                return "one"
+            """
+        )
+    )
+    (cwd_two / "skills" / "two.py").write_text(
+        textwrap.dedent(
+            """
+            name = "two"
+            description = "project two"
+            parameters_schema = {"type": "object", "properties": {}}
+            async def execute(ctx):
+                return "two"
+            """
+        )
+    )
+    monkeypatch.setattr("team_harness.skills.loader.SKILLS_USER_DIR", user_dir)
+    monkeypatch.chdir(cwd_two)
+
+    skills = load_skills(cwd=cwd_one)
+
+    assert [skill.name for skill in skills] == ["one"]

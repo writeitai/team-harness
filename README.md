@@ -37,6 +37,9 @@ Worker CLIs must be installed and authenticated separately. You do not need all 
 # Set your API key
 export OPENROUTER_API_KEY="sk-or-..."
 
+# Create a project-local config in ./.team-harness/config.toml
+team-harness init
+
 # Single-shot run
 team-harness run "Write unit tests for src/utils.py using pytest"
 
@@ -53,36 +56,49 @@ team-harness logs <run-id>
 
 ## Configuration
 
-On first run, team-harness creates `~/.team-harness/config.toml` with sensible defaults:
+team-harness works out of the box with built-in defaults. To create a config file explicitly:
+
+```bash
+# Create project-local config for the current repo
+team-harness init
+
+# Create global config under ~/.team-harness/config.toml
+team-harness init --global
+
+# Overwrite an existing config file
+team-harness init --force
+team-harness init --global --force
+```
+
+Global config is intended for user-wide defaults. Project config is intended for repo-specific settings and should not contain secrets; keep API keys in environment variables.
+
+Example global config:
 
 ```toml
 [coordinator]
-model = "openai/gpt-4o"
+model = "gpt-5.4"
 api_base = "https://openrouter.ai/api/v1"
-api_key = ""           # or set OPENROUTER_API_KEY env var
-system_prompt = ""     # appended to the base system prompt
-# context_limit = 128000
-# shutdown_timeout_s = 10.0
-# allowed_agents = ["codex", "gemini"]
 
 [agents.codex]
-template = "codex exec {prompt}"
+template = "codex exec --yolo --model gpt-5.4 PROMPT=\"{prompt}\""
 
 [agents.gemini]
-template = "gemini -p {prompt}"
-
-[agents.claude]
-template = "claude -p --dangerously-skip-permissions {prompt}"
-
-[agents.opencode]
-template = "opencode {prompt}"
-
-[agents.pi]
-template = "pi --print --no-session {prompt}"
-
-[agents.harness]
-template = "team-harness run {prompt}"
+template = "gemini --approval-mode=yolo -p \"{prompt}\""
 ```
+
+### Project-level configuration
+
+`team-harness init` writes `./.team-harness/config.toml`. Local config discovery walks upward from the effective `--cwd` and the nearest ancestor config overrides the global file.
+
+Lists replace rather than extend. For example, setting `[coordinator].allowed_agents` in a local config replaces the global list instead of appending to it.
+
+### Configuration resolution order
+
+1. CLI flags
+2. Environment variables
+3. Local `.team-harness/config.toml`
+4. Global `~/.team-harness/config.toml`
+5. Built-in defaults
 
 ### Adding custom agent types
 
@@ -94,6 +110,8 @@ template = "my-custom-cli --mode auto {prompt}"
 ```
 
 The new type appears automatically in the coordinator's `spawn_agent` tool.
+
+`{prompt}` is substituted after tokenization, not by shell evaluation. Quoted placeholder forms such as `PROMPT="{prompt}"` are supported.
 
 ### Authentication
 
@@ -138,7 +156,7 @@ The coordinator model has access to these tools:
 
 ## Skills
 
-Skills are Python modules loaded from `~/.team-harness/skills/` and `./skills/`. Each skill exports `name`, `description`, `parameters_schema`, and an async `execute(**args, ctx)` function.
+Skills are Python modules loaded from `~/.team-harness/skills/` and `<effective cwd>/skills/`. Each skill exports `name`, `description`, `parameters_schema`, and an async `execute(**args, ctx)` function.
 
 Example (`skills/summarise.py`):
 

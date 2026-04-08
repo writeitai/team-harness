@@ -12,8 +12,6 @@ if TYPE_CHECKING:
     from team_harness.config import Config
     from team_harness.coordinator.client import CoordinatorClient
 
-SKILL_DIRS = [SKILLS_USER_DIR, Path.cwd() / "skills"]
-
 
 @dataclass
 class SkillContext:
@@ -39,8 +37,11 @@ class Skill:
     execute: Callable[..., Any]
 
 
-def load_skills(extra_dirs: list[Path] | None = None) -> list[Skill]:
-    skill_dirs = list(SKILL_DIRS)
+def load_skills(
+    *, cwd: str | Path | None = None, extra_dirs: list[Path] | None = None
+) -> list[Skill]:
+    root = Path(cwd).resolve() if cwd else Path.cwd()
+    skill_dirs = [SKILLS_USER_DIR, root / "skills"]
     if extra_dirs:
         skill_dirs.extend(extra_dirs)
 

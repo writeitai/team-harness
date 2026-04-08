@@ -11,8 +11,12 @@ import click
 from team_harness.agents.manager import AgentManager
 from team_harness.agents.registry import get_allowed_types
 from team_harness.agents.registry import validate_templates
+from team_harness.config import _default_config_text
+from team_harness.config import _local_config_text
 from team_harness.config import Config
+from team_harness.config import CONFIG_PATH
 from team_harness.config import load_config
+from team_harness.config import LOCAL_CONFIG_DIR_NAME
 from team_harness.config import RUNS_DIR
 from team_harness.coordinator.client import CoordinatorClient
 from team_harness.coordinator.loop import run
@@ -39,6 +43,34 @@ from team_harness.ui.console import make_console
 @click.group()
 def main() -> None:
     """team-harness — multi-agent AI orchestration harness."""
+
+
+def _write_config_file(path: Path, text: str, force: bool) -> None:
+    if path.exists() and not force:
+        raise click.ClickException(
+            f"Config file already exists at {path}. Use --force to overwrite."
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    click.echo(f"Created config at {path}")
+
+
+def _show_no_config_hint(config: Config) -> None:
+    if config.global_config_path is None and config.local_config_path is None:
+        click.echo("No config file found. Run `team-harness init` to create one.")
+
+
+@main.command()
+@click.option("--global", "use_global", is_flag=True, help="Create global config.")
+@click.option("--force", is_flag=True, help="Overwrite an existing config file.")
+def init(use_global: bool, force: bool) -> None:
+    path = (
+        CONFIG_PATH
+        if use_global
+        else Path.cwd() / LOCAL_CONFIG_DIR_NAME / "config.toml"
+    )
+    text = _default_config_text() if use_global else _local_config_text()
+    _write_config_file(path, text, force)
 
 
 @main.command(name="run")
@@ -163,8 +195,8 @@ def _warn_missing_api_key(config: Config, ui: ConsoleBase | None = None) -> None
     ):
         return
     message = (
-        "WARNING: No API key configured. Set OPENROUTER_API_KEY env var or add "
-        "api_key to ~/.team-harness/config.toml."
+        "WARNING: No API key configured. Set OPENROUTER_API_KEY env var or "
+        "configure api_key in a team-harness config file."
     )
     if ui is None:
         click.echo(message)
@@ -228,6 +260,7 @@ def _make_run_id() -> str:
 async def _run(task: str | None, task_file: str | None, **kwargs: Any) -> None:
     resolved_task = _prepare_task(task, task_file)
     config = load_config(**kwargs)
+    _show_no_config_hint(config)
     run_id = _make_run_id()
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -239,7 +272,7 @@ async def _run(task: str | None, task_file: str | None, **kwargs: Any) -> None:
     ctx = ContextTracker(model_id=config.model, model_limit=model_limit)
     ui = make_console(ctx=ctx, manager=manager, run_dir=run_dir)
     _warn_missing_api_key(config, ui)
-    skills = load_skills()
+    skills = load_skills(cwd=config.cwd)
     allowed_types = get_allowed_types(config)
     validate_templates(config, allowed_types)
     agent_tools.setup(manager, run_log, config, ui)
@@ -293,6 +326,7 @@ async def _graceful_shutdown(
 
 async def _repl(**kwargs: Any) -> None:
     config = load_config(**kwargs)
+    _show_no_config_hint(config)
     run_id = _make_run_id()
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -304,7 +338,7 @@ async def _repl(**kwargs: Any) -> None:
     ctx = ContextTracker(model_id=config.model, model_limit=model_limit)
     ui = make_console(ctx=ctx, manager=manager, run_dir=run_dir)
     _warn_missing_api_key(config, ui)
-    skills = load_skills()
+    skills = load_skills(cwd=config.cwd)
     allowed_types = get_allowed_types(config)
     validate_templates(config, allowed_types)
     agent_tools.setup(manager, run_log, config, ui)
