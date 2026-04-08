@@ -279,8 +279,11 @@ def _make_client(config: Config) -> CoordinatorLike:
             auth = load_codex_auth(config.codex_auth_path or None, cwd=config.cwd)
         except CodexAuthError as exc:
             raise CoordinatorAPIError(str(exc)) from exc
+        # Only pass api_base if the user explicitly overrode it; the default
+        # OpenRouter URL is not valid for the Codex provider.
+        codex_api_base = config.api_base if config.api_base != Config.api_base else ""
         return CodexCoordinatorClient(
-            model=config.model, auth=auth, api_base=config.api_base
+            model=config.model, auth=auth, api_base=codex_api_base
         )
     raise CoordinatorAPIError(f"Unsupported provider: {config.provider}")
 

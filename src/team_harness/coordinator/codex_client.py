@@ -395,7 +395,10 @@ def _map_http_status_error(exc: httpx.HTTPStatusError) -> CoordinatorAPIError:
 
 
 def _http_error_message(response: httpx.Response) -> str:
-    payload = response.text.strip()
+    try:
+        payload = response.text.strip()
+    except httpx.ResponseNotRead:
+        return f"Codex request failed with status {response.status_code}."
     if payload:
         try:
             parsed = json.loads(payload)
