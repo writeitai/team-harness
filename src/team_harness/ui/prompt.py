@@ -42,8 +42,7 @@ def make_prompt_session(
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return None
     return PromptSession(
-        history=history or InMemoryHistory(),
-        key_bindings=_build_key_bindings(),
+        history=history or InMemoryHistory(), key_bindings=_build_key_bindings()
     )
 
 
