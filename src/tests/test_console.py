@@ -50,19 +50,20 @@ def test_harness_console_pause_stops_live_when_started(monkeypatch, tmp_path):
     console._live.stop.assert_called_once()
 
 
-def test_harness_console_resume_restarts_and_updates_live(monkeypatch, tmp_path):
+def test_harness_console_resume_is_noop(monkeypatch, tmp_path):
+    """resume_after_input does not start Live — that happens in begin_turn."""
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
     console = HarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     console._live = MagicMock()
     console._live_enabled = True
-    console._live_running = False  # paused — resume should start it
+    console._live_running = False
 
     console.resume_after_input()
 
-    console._live.start.assert_called_once()
-    console._live.update.assert_called_once()
+    console._live.start.assert_not_called()
+    console._live.update.assert_not_called()
 
 
 def test_harness_console_pause_is_noop_when_not_started(monkeypatch, tmp_path):

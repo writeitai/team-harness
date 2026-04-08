@@ -280,16 +280,22 @@ class HarnessConsole(ConsoleBase):
         if self._live_running:
             self._live.stop()
             self._live_running = False
-        self._console.rule(style="dim")
+        # Print a static status line so the user sees context/agent info
+        # without Live reserving terminal space.
+        self._console.print(self._render_status_bar())
+        self._console.print()
 
     def resume_after_input(self) -> None:
+        # Don't start Live here — it causes the screen to jump.
+        # Live starts in begin_turn() when actual processing begins.
+        pass
+
+    def begin_turn(self, n: int) -> None:
+        self._turn = n
         if self._live_enabled and not self._live_running:
             self._live.start()
             self._live.update(self._render_live())
             self._live_running = True
-
-    def begin_turn(self, n: int) -> None:
-        self._turn = n
         self._console.rule(f"[dim]Turn {n}[/dim]", style="dim")
 
     def begin_streaming(self) -> None:
