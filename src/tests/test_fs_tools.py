@@ -46,6 +46,21 @@ async def test_multi_edit_and_incremental_reads(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_multi_edit_is_atomic_on_error(tmp_path):
+    fs_tools.setup_fs()
+    path = tmp_path / "file.txt"
+    original = "alpha beta gamma"
+    path.write_text(original)
+
+    result = await fs_tools.multi_edit_file(
+        str(path), [{"old": "alpha", "new": "A"}, {"old": "missing", "new": "X"}]
+    )
+
+    assert result == "ERROR: string not found: 'missing'"
+    assert path.read_text() == original
+
+
+@pytest.mark.asyncio
 async def test_glob_grep_and_ls(tmp_path):
     fs_tools.setup_fs()
     (tmp_path / "dir").mkdir()

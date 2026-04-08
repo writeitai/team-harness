@@ -38,6 +38,12 @@ def test_build_command_model_and_harness_allowlist():
     ]
 
 
+def test_build_command_harness_without_allowlist():
+    config = Config()
+    command = build_command("harness", "do thing", config, model="gpt-5")
+    assert command == ["team-harness", "run", "--model", "gpt-5", "do thing"]
+
+
 def test_build_command_missing_placeholder_raises():
     config = Config(agent_templates={"codex": "codex exec"})
     with pytest.raises(ValueError):
