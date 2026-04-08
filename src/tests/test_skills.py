@@ -66,7 +66,7 @@ async def test_load_skills_and_ctx(tmp_path):
 
     skill = next(skill for skill in skills if skill.name == "demo")
     registry.register(
-        {
+        schema={
             "type": "function",
             "function": {
                 "name": skill.name,
@@ -74,9 +74,11 @@ async def test_load_skills_and_ctx(tmp_path):
                 "parameters": skill.parameters_schema,
             },
         },
-        _make_wrapper(skill, ctx),
+        fn=_make_wrapper(skill=skill, skill_ctx=ctx),
     )
-    assert await registry.execute("demo", {"path": str(target)}) == "hello"
+    assert (
+        await registry.execute(name="demo", arguments={"path": str(target)}) == "hello"
+    )
 
 
 def test_load_skills_uses_passed_cwd_for_project_skills(monkeypatch, tmp_path):

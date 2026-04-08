@@ -109,11 +109,15 @@ class CodexCoordinatorClient:
                         continue
                     if event_type == "response.failed":
                         raise CoordinatorAPIError(
-                            _response_error_message(event, "Codex response failed.")
+                            _response_error_message(
+                                event=event, fallback="Codex response failed."
+                            )
                         )
                     if event_type == "error":
                         raise CoordinatorAPIError(
-                            _response_error_message(event, "Codex request failed.")
+                            _response_error_message(
+                                event=event, fallback="Codex request failed."
+                            )
                         )
         except CoordinatorAPIError:
             raise

@@ -9,6 +9,8 @@ from team_harness.ui.console import PlainConsole
 def test_make_console_plain(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.stdout.isatty", lambda: False)
     console = make_console(
-        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+        ctx=ContextTracker(model_id="m", model_limit=100),
+        manager=AgentManager(),
+        run_dir=tmp_path,
     )
     assert isinstance(console, PlainConsole)

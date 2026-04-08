@@ -19,9 +19,13 @@ async def test_spawn_agent_appends_output_instruction(tmp_path, config, manager,
     config.run_dir = tmp_path
     config.agent_templates = {"codex": "echo {prompt}"}
     run_log = RunLogWriter(
-        "run_1", tmp_path, config.provider, config.model, config.api_base
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
-    agent_tools.setup(manager, run_log, config, ui)
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
     agent_id = await agent_tools.spawn_agent(
         type="codex", prompt="hello", cwd=str(tmp_path)
     )
@@ -51,9 +55,13 @@ async def test_read_new_output_waits_and_kills(tmp_path, config, manager, ui):
     )
     manager.register(state)
     run_log = RunLogWriter(
-        "run_1", tmp_path, config.provider, config.model, config.api_base
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
-    agent_tools.setup(manager, run_log, config, ui)
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
     assert await agent_tools.read_new_agent_output("agent_1") == "one\n"
     stdout.write_text("one\ntwo\n")
     pieces = await asyncio.gather(
@@ -99,9 +107,13 @@ async def test_list_agents_and_graceful_shutdown(tmp_path, config, manager, ui):
     )
     manager.register(state)
     run_log = RunLogWriter(
-        "run_1", tmp_path, config.provider, config.model, config.api_base
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
-    agent_tools.setup(manager, run_log, config, ui)
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
     await asyncio.sleep(0.1)
     payload = json.loads(await agent_tools.list_agents())
     assert payload[0]["status"] == "done (exit 0)"
@@ -131,7 +143,7 @@ async def test_list_agents_and_graceful_shutdown(tmp_path, config, manager, ui):
             stderr_log=str(state2.stderr_log),
         )
     )
-    await _graceful_shutdown(manager, run_log, ui, timeout=0.01)
+    await _graceful_shutdown(manager=manager, run_log=run_log, ui=ui, timeout=0.01)
     data = json.loads((tmp_path / "run.json").read_text())
     statuses = {agent["id"]: agent["status"] for agent in data["agents"]}
     assert statuses["agent_2"] == "killed"
@@ -142,9 +154,13 @@ async def test_list_agents_shows_killed_status(tmp_path, config, manager, ui):
     config.run_dir = tmp_path
     config.agent_templates = {"codex": "sh -lc 'sleep 5' {prompt}"}
     run_log = RunLogWriter(
-        "run_1", tmp_path, config.provider, config.model, config.api_base
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
-    agent_tools.setup(manager, run_log, config, ui)
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
 
     agent_id = await agent_tools.spawn_agent(
         type="codex", prompt="hello", cwd=str(tmp_path)
@@ -167,9 +183,13 @@ async def test_spawn_agent_harness_depth_guard_blocks_spawn(
     config.run_dir = tmp_path
     config.max_depth = 2
     run_log = RunLogWriter(
-        "run_1", tmp_path, config.provider, config.model, config.api_base
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
-    agent_tools.setup(manager, run_log, config, ui)
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
     monkeypatch.setenv("HARNESS_DEPTH", "2")
 
     result = await agent_tools.spawn_agent(

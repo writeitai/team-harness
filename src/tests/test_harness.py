@@ -161,7 +161,7 @@ def test_make_console_silent_mode():
 def test_make_console_plain_mode(tmp_path):
     ctx = ContextTracker(model_id="m", model_limit=100)
     manager = AgentManager()
-    console = make_console(ctx, manager, tmp_path, mode="plain")
+    console = make_console(ctx=ctx, manager=manager, run_dir=tmp_path, mode="plain")
     assert isinstance(console, PlainConsole)
 
 
@@ -179,9 +179,9 @@ def test_make_console_silent_no_ops():
     console.stream_token("x")
     console.end_streaming()
     console.end_turn()
-    tc = console.tool_call_start("test", {})
+    tc = console.tool_call_start(name="test", args={})
     tc.result("ok", is_error=False)
-    console.agent_event("spawned", None)
+    console.agent_event(event="spawned", state=None)
     console.context_warning()
     console.reset_separator()
     console.print("hello")
@@ -222,7 +222,9 @@ async def test_harness_run_returns_result(monkeypatch, tmp_path):
     )
     monkeypatch.setattr("team_harness.harness.RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
-    monkeypatch.setattr("team_harness.harness.validate_templates", lambda *args: None)
+    monkeypatch.setattr(
+        "team_harness.harness.validate_templates", lambda *args, **kwargs: None
+    )
 
     harness = Harness(api_base="http://localhost:11434/v1", cwd=str(tmp_path))
     result = await harness.run("hello")
@@ -277,7 +279,9 @@ async def test_harness_error_on_loop_failure(monkeypatch, tmp_path):
     )
     monkeypatch.setattr("team_harness.harness.RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
-    monkeypatch.setattr("team_harness.harness.validate_templates", lambda *args: None)
+    monkeypatch.setattr(
+        "team_harness.harness.validate_templates", lambda *args, **kwargs: None
+    )
 
     harness = Harness(api_base="http://localhost:11434/v1", cwd=str(tmp_path))
     with pytest.raises(HarnessError, match="boom"):
@@ -389,7 +393,11 @@ async def test_build_agent_tool_bindings_produces_closures(tmp_path):
     )
     manager = AgentManager()
     run_log = RunLogWriter(
-        "run_1", run_dir, config.provider, config.model, config.api_base
+        run_id="run_1",
+        run_dir=run_dir,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
     ui = SilentConsole()
     allowed_types = ["codex"]
@@ -444,7 +452,13 @@ async def test_agent_tool_bindings_isolate_cursor_state(tmp_path):
         agent_templates={"codex": "echo {prompt}"},
     )
     manager_a = AgentManager()
-    log_a = RunLogWriter("a", run_dir_a, config.provider, config.model, config.api_base)
+    log_a = RunLogWriter(
+        run_id="a",
+        run_dir=run_dir_a,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
     ui = SilentConsole()
     bindings_a = build_agent_tool_bindings(
         manager=manager_a, run_log=log_a, config=config, ui=ui, allowed_types=["codex"]
@@ -461,7 +475,11 @@ async def test_agent_tool_bindings_isolate_cursor_state(tmp_path):
     )
     manager_b = AgentManager()
     log_b = RunLogWriter(
-        "b", run_dir_b, config_b.provider, config_b.model, config_b.api_base
+        run_id="b",
+        run_dir=run_dir_b,
+        provider=config_b.provider,
+        model=config_b.model,
+        api_base=config_b.api_base,
     )
     bindings_b = build_agent_tool_bindings(
         manager=manager_b,

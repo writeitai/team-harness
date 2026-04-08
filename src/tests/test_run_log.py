@@ -10,7 +10,13 @@ from team_harness.tracking.run_log import RunLogWriter
 
 
 def test_run_log_delta_replay_and_agent_update(tmp_path):
-    writer = RunLogWriter("run_1", tmp_path, "openai_compat", "model", "base")
+    writer = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider="openai_compat",
+        model="model",
+        api_base="base",
+    )
     writer.record_turn_delta(
         index=0,
         messages_appended_delta=[

@@ -145,7 +145,7 @@ def _deep_merge(
     for key, override_value in override.items():
         base_value = merged.get(key)
         if isinstance(base_value, dict) and isinstance(override_value, dict):
-            merged[key] = _deep_merge(base_value, override_value)
+            merged[key] = _deep_merge(base=base_value, override=override_value)
             continue
         merged[key] = override_value
     return merged
@@ -186,7 +186,7 @@ def load_config(
 
     global_data = _load_toml_file(global_path) if global_path else {}
     local_data = _load_toml_file(local_path) if local_path else {}
-    config_data = _deep_merge(global_data, local_data)
+    config_data = _deep_merge(base=global_data, override=local_data)
 
     coordinator = config_data.get("coordinator", {})
     if not isinstance(coordinator, dict):

@@ -61,7 +61,7 @@ def init(use_global: bool, force: bool) -> None:
         else Path.cwd() / LOCAL_CONFIG_DIR_NAME / "config.toml"
     )
     text = _default_config_text() if use_global else _local_config_text()
-    _write_config_file(path, text, force)
+    _write_config_file(path=path, text=text, force=force)
 
 
 @main.command(name="run")
@@ -202,7 +202,7 @@ def _prepare_task(task: str | None, task_file: str | None) -> str:
 
 
 async def _run(task: str | None, task_file: str | None, **kwargs: Any) -> None:
-    resolved_task = _prepare_task(task, task_file)
+    resolved_task = _prepare_task(task=task, task_file=task_file)
     allowed_agents = kwargs.pop("allowed_agents", None)
     harness = Harness(
         provider=kwargs.get("provider"),
@@ -250,7 +250,7 @@ async def _graceful_shutdown(
                         finished_at=state.finished_at,
                         status="killed",
                     )
-                    ui.agent_event("killed", state)
+                    ui.agent_event(event="killed", state=state)
 
 
 async def _repl(**kwargs: Any) -> None:
@@ -267,17 +267,23 @@ async def _repl(**kwargs: Any) -> None:
     client = _make_client(config)
     try:
         run_log = RunLogWriter(
-            run_id, run_dir, config.provider, config.model, client.api_base
+            run_id=run_id,
+            run_dir=run_dir,
+            provider=config.provider,
+            model=config.model,
+            api_base=client.api_base,
         )
-        model_limit = await resolve_model_limit(config.model, client, config)
+        model_limit = await resolve_model_limit(
+            model_id=config.model, client=client, config=config
+        )
         ctx = ContextTracker(model_id=config.model, model_limit=model_limit)
         ui = make_console(ctx=ctx, manager=manager, run_dir=run_dir, mode="auto")
         _warn_provider_startup(config, ui=ui)
         skills = load_skills(cwd=config.cwd)
         allowed_types = get_allowed_types(config)
-        validate_templates(config, allowed_types)
-        agent_tools.setup(manager, run_log, config, ui)
-        todo_tools.setup(run_dir)
+        validate_templates(config=config, allowed_types=allowed_types)
+        agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+        todo_tools.setup(run_dir=run_dir)
         fs_tools.setup_fs()
         skill_ctx = SkillContext(client=client, config=config)
         registry = _build_registry(
@@ -290,7 +296,9 @@ async def _repl(**kwargs: Any) -> None:
             ui=ui,
             run_dir=run_dir,
         )
-        system_prompt = build_system_prompt(config, allowed_types, skills)
+        system_prompt = build_system_prompt(
+            config=config, allowed_types=allowed_types, skills=skills
+        )
         messages = [{"role": "system", "content": system_prompt}]
         turn_index = 0
         last_logged_index = 0
@@ -314,7 +322,10 @@ async def _repl(**kwargs: Any) -> None:
                         ui.print("Context reset. Agent state and run log preserved.")
                     case "/quit":
                         await _graceful_shutdown(
-                            manager, run_log, ui, timeout=config.shutdown_timeout_s
+                            manager=manager,
+                            run_log=run_log,
+                            ui=ui,
+                            timeout=config.shutdown_timeout_s,
                         )
                         break
                     case "/agents":
@@ -326,15 +337,15 @@ async def _repl(**kwargs: Any) -> None:
                         should_continue = True
                         while should_continue:
                             should_continue, last_logged_index = await run_one_turn(
-                                messages,
-                                config,
-                                run_log,
-                                ui,
-                                registry,
-                                client,
-                                ctx,
-                                turn_index,
-                                last_logged_index,
+                                messages=messages,
+                                config=config,
+                                run_log=run_log,
+                                ui=ui,
+                                tool_registry=registry,
+                                client=client,
+                                ctx=ctx,
+                                turn_index=turn_index,
+                                last_logged_index=last_logged_index,
                             )
                             turn_index += 1
                             if turn_index >= config.max_turns:

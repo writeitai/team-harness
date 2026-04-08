@@ -423,10 +423,10 @@ def make_console(
     if ctx is None or manager is None or run_dir is None:
         return SilentConsole()
     if mode == "plain":
-        return PlainConsole(ctx, manager, run_dir)
+        return PlainConsole(ctx=ctx, manager=manager, run_dir=run_dir)
     if mode == "rich":
-        return HarnessConsole(ctx, manager, run_dir)
+        return HarnessConsole(ctx=ctx, manager=manager, run_dir=run_dir)
     # auto
     if sys.stdout.isatty():
-        return HarnessConsole(ctx, manager, run_dir)
-    return PlainConsole(ctx, manager, run_dir)
+        return HarnessConsole(ctx=ctx, manager=manager, run_dir=run_dir)
+    return PlainConsole(ctx=ctx, manager=manager, run_dir=run_dir)

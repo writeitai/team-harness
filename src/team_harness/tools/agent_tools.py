@@ -216,12 +216,12 @@ async def spawn_agent(**kwargs: object) -> str:
     )
     stderr_log = run_dir / f"{agent_id}_stderr.log"
     proc = await spawner.spawn(
-        agent_id,
-        agent_type,
-        full_prompt,
-        Path(cwd),
-        config,
-        run_dir,
+        agent_id=agent_id,
+        agent_type=agent_type,
+        prompt=full_prompt,
+        cwd=Path(cwd),
+        config=config,
+        log_dir=run_dir,
         extra_env=extra_env,
         model=model,
         extra_flags=flags,
@@ -247,9 +247,9 @@ async def spawn_agent(**kwargs: object) -> str:
         prompt=prompt,
         full_prompt=full_prompt,
         command=spawner.build_command(
-            agent_type,
-            full_prompt,
-            config,
+            agent_type=agent_type,
+            prompt=full_prompt,
+            config=config,
             model=model,
             extra_flags=flags,
             allowed_agents=agents if agent_type == "harness" else None,
@@ -261,7 +261,7 @@ async def spawn_agent(**kwargs: object) -> str:
         stderr_log=str(stderr_log),
     )
     run_log.record_agent_spawn(record)
-    ui.agent_event("spawned", state)
+    ui.agent_event(event="spawned", state=state)
     asyncio.ensure_future(_watch_agent(agent_id))
     return agent_id
 
@@ -278,7 +278,7 @@ async def _watch_agent(agent_id: str) -> None:
             finished_at=state.finished_at or datetime.now(timezone.utc),
             status=state.status,
         )
-        ui.agent_event("done" if exit_code == 0 else "failed", state)
+        ui.agent_event(event="done" if exit_code == 0 else "failed", state=state)
 
 
 def _status_from_state(state: AgentState) -> str:
@@ -438,7 +438,7 @@ async def kill_agent(agent_id: str) -> str:
         finished_at=state.finished_at,
         status="killed",
     )
-    ui.agent_event("killed", state)
+    ui.agent_event(event="killed", state=state)
     return f"Killed {agent_id}."
 
 
@@ -518,12 +518,12 @@ def build_agent_tool_bindings(
         )
         stderr_log = run_dir / f"{agent_id}_stderr.log"
         proc = await spawner.spawn(
-            agent_id,
-            agent_type,
-            full_prompt,
-            Path(cwd),
-            config,
-            run_dir,
+            agent_id=agent_id,
+            agent_type=agent_type,
+            prompt=full_prompt,
+            cwd=Path(cwd),
+            config=config,
+            log_dir=run_dir,
             extra_env=extra_env,
             model=model_val,
             extra_flags=flags,
@@ -549,9 +549,9 @@ def build_agent_tool_bindings(
             prompt=prompt,
             full_prompt=full_prompt,
             command=spawner.build_command(
-                agent_type,
-                full_prompt,
-                config,
+                agent_type=agent_type,
+                prompt=full_prompt,
+                config=config,
                 model=model_val,
                 extra_flags=flags,
                 allowed_agents=agents_arg if agent_type == "harness" else None,
@@ -563,7 +563,7 @@ def build_agent_tool_bindings(
             stderr_log=str(stderr_log),
         )
         run_log.record_agent_spawn(record)
-        ui.agent_event("spawned", state)
+        ui.agent_event(event="spawned", state=state)
 
         async def _watch() -> None:
             exit_code = await manager.wait_one(agent_id)
@@ -576,7 +576,7 @@ def build_agent_tool_bindings(
                     finished_at=s.finished_at or datetime.now(timezone.utc),
                     status=s.status,
                 )
-                ui.agent_event("done" if exit_code == 0 else "failed", s)
+                ui.agent_event(event="done" if exit_code == 0 else "failed", state=s)
 
         asyncio.ensure_future(_watch())
         return agent_id
@@ -712,7 +712,7 @@ def build_agent_tool_bindings(
             finished_at=state.finished_at,
             status="killed",
         )
-        ui.agent_event("killed", state)
+        ui.agent_event(event="killed", state=state)
         return f"Killed {agent_id}."
 
     return [

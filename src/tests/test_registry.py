@@ -13,7 +13,9 @@ from team_harness.config import Config
 def test_build_command_codex_prompt_assignment_template():
     config = Config()
 
-    command = build_command("codex", 'Say "hello" && echo $HOME', config)
+    command = build_command(
+        agent_type="codex", prompt='Say "hello" && echo $HOME', config=config
+    )
 
     assert command == [
         "codex",
@@ -28,7 +30,9 @@ def test_build_command_codex_prompt_assignment_template():
 def test_build_command_gemini_quoted_template():
     config = Config()
 
-    command = build_command("gemini", 'quoted "prompt"', config)
+    command = build_command(
+        agent_type="gemini", prompt='quoted "prompt"', config=config
+    )
 
     assert command == ["gemini", "--approval-mode=yolo", "-p", 'quoted "prompt"']
 
@@ -37,7 +41,9 @@ def test_build_command_prompt_with_quotes_and_shell_metacharacters():
     config = Config()
 
     command = build_command(
-        "codex", 'a "quote" && echo $HOME ; rm -rf * \\ still literal', config
+        agent_type="codex",
+        prompt='a "quote" && echo $HOME ; rm -rf * \\ still literal',
+        config=config,
     )
 
     assert command[-1] == 'PROMPT=a "quote" && echo $HOME ; rm -rf * \\ still literal'
@@ -47,7 +53,9 @@ def test_build_command_prompt_with_quotes_and_shell_metacharacters():
 def test_build_command_backward_compatible_bare_placeholder():
     config = Config()
 
-    command = build_command("claude", 'my prompt "with" spaces', config)
+    command = build_command(
+        agent_type="claude", prompt='my prompt "with" spaces', config=config
+    )
 
     assert command == [
         "claude",
@@ -62,7 +70,9 @@ def test_build_command_model_inserted_before_prompt_token_not_index_one():
         agent_templates={"myagent": "myagent exec --json {prompt} --verbose"}
     )
 
-    command = build_command("myagent", "do thing", config, model="gpt-5")
+    command = build_command(
+        agent_type="myagent", prompt="do thing", config=config, model="gpt-5"
+    )
 
     assert command == [
         "myagent",
@@ -79,7 +89,11 @@ def test_build_command_model_and_harness_allowlist():
     config = Config()
 
     command = build_command(
-        "harness", "do thing", config, model="gpt-5", allowed_agents=["codex"]
+        agent_type="harness",
+        prompt="do thing",
+        config=config,
+        model="gpt-5",
+        allowed_agents=["codex"],
     )
 
     assert command == ["th", "run", "--model", "gpt-5", "do thing", "--agents", "codex"]
@@ -88,7 +102,9 @@ def test_build_command_model_and_harness_allowlist():
 def test_build_command_harness_without_allowlist():
     config = Config()
 
-    command = build_command("harness", "do thing", config, model="gpt-5")
+    command = build_command(
+        agent_type="harness", prompt="do thing", config=config, model="gpt-5"
+    )
 
     assert command == ["th", "run", "--model", "gpt-5", "do thing"]
 
@@ -97,7 +113,7 @@ def test_build_command_missing_placeholder_raises():
     config = Config(agent_templates={"codex": "codex exec"})
 
     with pytest.raises(ValueError, match="missing \\{prompt\\} placeholder|Template"):
-        build_command("codex", "prompt", config)
+        build_command(agent_type="codex", prompt="prompt", config=config)
 
 
 def test_build_command_duplicate_model_warning_uses_tokenized_template():
@@ -106,7 +122,9 @@ def test_build_command_duplicate_model_warning_uses_tokenized_template():
     )
 
     with pytest.warns(UserWarning):
-        command = build_command("codex", "prompt", config, model="override")
+        command = build_command(
+            agent_type="codex", prompt="prompt", config=config, model="override"
+        )
 
     assert command == ["codex", "exec", "PROMPT=prompt", "--model", "existing-model"]
 
@@ -125,4 +143,4 @@ def test_allowed_types_and_depth_guard(monkeypatch):
 def test_validate_templates_handles_quoted_default_templates(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/env")
 
-    validate_templates(Config(), ["codex", "gemini"])
+    validate_templates(config=Config(), allowed_types=["codex", "gemini"])

@@ -167,10 +167,10 @@ async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path):
         def print_agent_panel_inline(self):
             return None
 
-    async def fake_resolve_model_limit(model, client, config):
+    async def fake_resolve_model_limit(model_id, client, config):
         return 128_000
 
-    async def fake_run(messages, config, run_log, ui, registry, client, ctx):
+    async def fake_run(messages, config, run_log, ui, tool_registry, client, ctx):
         return None
 
     project_dir = tmp_path / "project"
@@ -188,9 +188,11 @@ async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path):
     )
     monkeypatch.setattr("team_harness.harness.make_console", lambda **_: FakeConsole())
     monkeypatch.setattr("team_harness.harness.load_skills", lambda cwd=None: [])
-    monkeypatch.setattr("team_harness.harness.validate_templates", lambda *args: None)
     monkeypatch.setattr(
-        "team_harness.harness.build_system_prompt", lambda *args: "system"
+        "team_harness.harness.validate_templates", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "team_harness.harness.build_system_prompt", lambda *args, **kwargs: "system"
     )
     monkeypatch.setattr("team_harness.harness.run", fake_run)
 

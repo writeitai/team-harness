@@ -108,9 +108,15 @@ class Harness:
         client = _make_client(config)
         try:
             run_log = RunLogWriter(
-                run_id, run_dir, config.provider, config.model, client.api_base
+                run_id=run_id,
+                run_dir=run_dir,
+                provider=config.provider,
+                model=config.model,
+                api_base=client.api_base,
             )
-            model_limit = await resolve_model_limit(config.model, client, config)
+            model_limit = await resolve_model_limit(
+                model_id=config.model, client=client, config=config
+            )
             ctx = ContextTracker(model_id=config.model, model_limit=model_limit)
             ui = make_console(
                 ctx=ctx, manager=manager, run_dir=run_dir, mode=self._console_mode
@@ -119,7 +125,7 @@ class Harness:
             _warn_provider_startup(config, ui=ui)
             skills = load_skills(cwd=config.cwd)
             allowed_types = get_allowed_types(config)
-            validate_templates(config, allowed_types)
+            validate_templates(config=config, allowed_types=allowed_types)
             skill_ctx = SkillContext(client=client, config=config)
             registry = _build_registry(
                 allowed_types=allowed_types,
@@ -131,14 +137,24 @@ class Harness:
                 ui=ui,
                 run_dir=run_dir,
             )
-            system_prompt = build_system_prompt(config, allowed_types, skills)
+            system_prompt = build_system_prompt(
+                config=config, allowed_types=allowed_types, skills=skills
+            )
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
             ]
             ui.start()
             try:
-                await run(messages, config, run_log, ui, registry, client, ctx)
+                await run(
+                    messages=messages,
+                    config=config,
+                    run_log=run_log,
+                    ui=ui,
+                    tool_registry=registry,
+                    client=client,
+                    ctx=ctx,
+                )
             except Exception as exc:
                 run_log.finalize(error=str(exc))
                 raise HarnessError(str(exc)) from exc
@@ -231,17 +247,17 @@ def _warn_provider_startup(config: Config, ui: ConsoleBase | None = None) -> Non
         ):
             return
         _emit_provider_warning(
-            "WARNING: No API key configured. Set OPENROUTER_API_KEY or OPENAI_API_KEY "
+            message="WARNING: No API key configured. Set OPENROUTER_API_KEY or OPENAI_API_KEY "
             "or configure api_key in a team-harness config file.",
-            ui,
+            ui=ui,
         )
         return
-    _emit_provider_warning("WARNING: provider=codex is experimental.", ui)
+    _emit_provider_warning(message="WARNING: provider=codex is experimental.", ui=ui)
     if config.model not in KNOWN_CODEX_MODELS:
         _emit_provider_warning(
-            f"WARNING: Codex model {config.model!r} is not in the built-in known "
+            message=f"WARNING: Codex model {config.model!r} is not in the built-in known "
             "model list; context tracking may be inaccurate.",
-            ui,
+            ui=ui,
         )
 
 
@@ -255,13 +271,17 @@ def _show_no_config_hint(config: Config, ui: ConsoleBase | None = None) -> None:
 def _make_client(config: Config) -> CoordinatorLike:
     """Create the appropriate coordinator client based on provider."""
     if config.provider == "openai_compat":
-        return CoordinatorClient(config.api_base, config.api_key, config.model)
+        return CoordinatorClient(
+            api_base=config.api_base, api_key=config.api_key, model=config.model
+        )
     if config.provider == "codex":
         try:
             auth = load_codex_auth(config.codex_auth_path or None, cwd=config.cwd)
         except CodexAuthError as exc:
             raise CoordinatorAPIError(str(exc)) from exc
-        return CodexCoordinatorClient(config.model, auth, api_base=config.api_base)
+        return CodexCoordinatorClient(
+            model=config.model, auth=auth, api_base=config.api_base
+        )
     raise CoordinatorAPIError(f"Unsupported provider: {config.provider}")
 
 
@@ -306,25 +326,25 @@ def _build_registry(
         allowed_types=allowed_types,
     )
     for schema, fn in agent_bindings:
-        registry.register(schema, fn)
+        registry.register(schema=schema, fn=fn)
 
     # File system tools (per-run closures for stateful tools)
     fs_bindings = build_fs_tool_bindings()
     for schema, fn in fs_bindings:
-        registry.register(schema, fn)
+        registry.register(schema=schema, fn=fn)
 
     # Shell tools (stateless)
-    registry.register(shell_tools.BASH_SCHEMA, shell_tools.bash)
+    registry.register(schema=shell_tools.BASH_SCHEMA, fn=shell_tools.bash)
 
     # Todo tools (per-run closures)
     todo_bindings = build_todo_tool_bindings(run_dir=run_dir)
     for schema, fn in todo_bindings:
-        registry.register(schema, fn)
+        registry.register(schema=schema, fn=fn)
 
     # Skills
     for skill in skills:
         registry.register(
-            {
+            schema={
                 "type": "function",
                 "function": {
                     "name": skill.name,
@@ -332,6 +352,6 @@ def _build_registry(
                     "parameters": skill.parameters_schema,
                 },
             },
-            _make_skill_wrapper(skill, skill_ctx),
+            fn=_make_skill_wrapper(skill=skill, ctx=skill_ctx),
         )
     return registry

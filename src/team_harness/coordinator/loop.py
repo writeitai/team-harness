@@ -35,15 +35,15 @@ async def run(
     last_logged_index = 0
     while turn_index < config.max_turns:
         should_continue, last_logged_index = await run_one_turn(
-            messages,
-            config,
-            run_log,
-            ui,
-            tool_registry,
-            client,
-            ctx,
-            turn_index,
-            last_logged_index,
+            messages=messages,
+            config=config,
+            run_log=run_log,
+            ui=ui,
+            tool_registry=tool_registry,
+            client=client,
+            ctx=ctx,
+            turn_index=turn_index,
+            last_logged_index=last_logged_index,
         )
         turn_index += 1
         if not should_continue:
@@ -68,7 +68,11 @@ async def run_one_turn(
     ui.begin_streaming()
     try:
         response = await _chat_with_retry(
-            client, messages, tools, config, token_callback=ui.stream_token
+            client=client,
+            messages=messages,
+            tools=tools,
+            config=config,
+            token_callback=ui.stream_token,
         )
     except MaxRetriesExceeded as exc:
         ui.end_streaming()
@@ -111,8 +115,12 @@ async def run_one_turn(
             tool_ctx = None
             try:
                 arguments = json.loads(tool_call.function.arguments)
-                tool_ctx = ui.tool_call_start(tool_call.function.name, arguments)
-                result = await tool_registry.execute(tool_call.function.name, arguments)
+                tool_ctx = ui.tool_call_start(
+                    name=tool_call.function.name, args=arguments
+                )
+                result = await tool_registry.execute(
+                    name=tool_call.function.name, arguments=arguments
+                )
                 is_error = result.startswith("ERROR:")
             except json.JSONDecodeError as exc:
                 result = f"ERROR: invalid tool arguments JSON: {exc}"
@@ -121,7 +129,9 @@ async def run_one_turn(
                 result = f"ERROR: {exc}"
                 is_error = True
             if tool_ctx is None:
-                tool_ctx = ui.tool_call_start(tool_call.function.name, arguments)
+                tool_ctx = ui.tool_call_start(
+                    name=tool_call.function.name, args=arguments
+                )
             tool_ctx.result(result, is_error=is_error)
             tool_call_records.append(
                 RunLogToolCallRecord(
@@ -172,7 +182,7 @@ async def _chat_with_retry(
     retryable = {429, 500, 502, 503, 504}
     try:
         return await client.chat(
-            messages,
+            messages=messages,
             tools=tools,
             stream=token_callback is not None,
             token_callback=token_callback,
@@ -182,10 +192,10 @@ async def _chat_with_retry(
             if attempt < config.max_retries:
                 await asyncio.sleep(2**attempt)
                 return await _chat_with_retry(
-                    client,
-                    messages,
-                    tools,
-                    config,
+                    client=client,
+                    messages=messages,
+                    tools=tools,
+                    config=config,
                     token_callback=token_callback,
                     attempt=attempt + 1,
                 )
@@ -196,10 +206,10 @@ async def _chat_with_retry(
             if attempt < config.max_retries:
                 await asyncio.sleep(2**attempt)
                 return await _chat_with_retry(
-                    client,
-                    messages,
-                    tools,
-                    config,
+                    client=client,
+                    messages=messages,
+                    tools=tools,
+                    config=config,
                     token_callback=token_callback,
                     attempt=attempt + 1,
                 )

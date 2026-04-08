@@ -69,7 +69,7 @@ def _make_client(
     *, response=None, exc=None
 ) -> tuple[CodexCoordinatorClient, FakeAsyncClient]:
     client = CodexCoordinatorClient(
-        "codex-mini-latest", CodexAuth(token="token", account_id="acct_123")
+        model="codex-mini-latest", auth=CodexAuth(token="token", account_id="acct_123")
     )
     fake_http = FakeAsyncClient(response=response, exc=exc)
     client._client = cast(Any, fake_http)

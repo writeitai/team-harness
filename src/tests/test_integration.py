@@ -58,7 +58,9 @@ async def test_full_run_mock_api(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "team_harness.harness._make_client",
-        lambda config: FakeClient(config.api_base, config.api_key, config.model),
+        lambda config: FakeClient(
+            api_base=config.api_base, api_key=config.api_key, model=config.model
+        ),
     )
     monkeypatch.setattr("team_harness.harness.RUNS_DIR", tmp_path)
     monkeypatch.setattr(
