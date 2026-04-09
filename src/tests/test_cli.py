@@ -4,6 +4,7 @@ from click.testing import CliRunner
 import pytest
 
 from team_harness import config as config_module
+from team_harness.cli import _repl
 from team_harness.cli import _run
 from team_harness.cli import main
 from team_harness.config import Config
@@ -205,6 +206,112 @@ async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path):
 
     no_config_messages = [m for m in printed_messages if "No config file found" in m]
     assert len(no_config_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_repl_creates_session_output_dir_and_passes_it_to_prompt(
+    monkeypatch, tmp_path
+):
+    class FakeClient:
+        api_base = "http://localhost:11434/v1"
+        model = "test/model"
+        provider = "openai_compat"
+
+        async def aclose(self):
+            return None
+
+    class FakeConsole:
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+        def print(self, message):
+            return None
+
+        def print_welcome(self, model, cwd, provider):
+            return None
+
+        def pause_for_input(self):
+            return None
+
+        def resume_after_input(self):
+            return None
+
+        def begin_turn(self, n):
+            return None
+
+        def begin_streaming(self):
+            return None
+
+        def stream_token(self, token):
+            return None
+
+        def end_streaming(self):
+            return None
+
+        def end_turn(self):
+            return None
+
+        def tool_call_start(self, name, args):
+            return None
+
+        def agent_event(self, event, state):
+            return None
+
+        def context_warning(self):
+            return None
+
+        def reset_separator(self):
+            return None
+
+        def print_agent_panel_inline(self):
+            return None
+
+    async def fake_resolve_model_limit(model_id, client, config):
+        return 128_000
+
+    async def fake_read_user_input(session):
+        return None
+
+    captured: dict[str, str] = {}
+    output_root = tmp_path / "project" / "artifacts"
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+
+    def fake_build_system_prompt(*, config, allowed_types, skills, session_output_dir):
+        captured["session_output_dir"] = session_output_dir
+        return "system"
+
+    monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
+    monkeypatch.setattr("team_harness.cli._make_client", lambda config: FakeClient())
+    monkeypatch.setattr(
+        "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
+    )
+    monkeypatch.setattr("team_harness.cli.make_console", lambda **_: FakeConsole())
+    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr(
+        "team_harness.cli.validate_templates", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "team_harness.cli.build_system_prompt", fake_build_system_prompt
+    )
+    monkeypatch.setattr("team_harness.cli._build_registry", lambda **_: object())
+    monkeypatch.setattr("team_harness.cli.make_prompt_session", lambda: object())
+    monkeypatch.setattr("team_harness.cli.read_user_input", fake_read_user_input)
+
+    local_config = project_dir / ".team-harness" / "config.toml"
+    local_config.parent.mkdir()
+    local_config.write_text('[coordinator]\noutput_dir = "artifacts"\n')
+
+    await _repl(cwd=str(project_dir), api_base="http://localhost:11434/v1")
+
+    session_output_dir = config_module.Path(captured["session_output_dir"])
+    assert "session_output_dir" in captured
+    assert session_output_dir.parent == output_root
+    assert session_output_dir.is_dir()
 
 
 def test_run_command_passes_provider_flags(monkeypatch):

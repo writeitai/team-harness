@@ -140,6 +140,7 @@ Example global config:
 provider = "openai_compat"
 model = "gpt-5.4"
 api_base = "https://openrouter.ai/api/v1"
+output_dir = "_outputs"
 
 [agents.codex]
 template = "codex exec --yolo --model gpt-5.4 PROMPT=\"{prompt}\""
@@ -177,6 +178,12 @@ model = "codex-mini-latest"
 `th init` writes `./.team-harness/config.toml`. Local config discovery walks upward from the effective `--cwd` and the nearest ancestor config overrides the global file.
 
 Lists replace rather than extend. For example, setting `[coordinator].allowed_agents` in a local config replaces the global list instead of appending to it.
+
+`[coordinator].output_dir` controls where per-run coordinator and worker
+artifacts are written. Each run creates `<output_dir>/<run_id>/`, and the
+coordinator may instruct workers to place notes, reports, logs, or other
+deliverables there. Relative `output_dir` values resolve against the effective
+`--cwd`.
 
 ### Configuration resolution order
 

@@ -13,7 +13,6 @@ import uuid
 from team_harness.agents import spawner
 from team_harness.agents.manager import AgentState
 from team_harness.agents.registry import check_harness_depth
-from team_harness.coordinator.system_prompt import OUTPUT_INSTRUCTION
 from team_harness.tracking.models import AgentRecord
 
 if TYPE_CHECKING:
@@ -29,6 +28,17 @@ _ui: "ConsoleBase | None" = None
 
 _output_cursors: dict[str, int] = {}
 _output_locks: dict[str, asyncio.Lock] = {}
+
+WORKER_OUTPUT_FOOTER = """
+---
+IMPORTANT — output requirements:
+- Write substantial artifacts to files when useful instead of relying only on
+  stdout.
+- If the coordinator gave you an output path or session output directory, use
+  it.
+- Report blockers, errors, and any final result clearly in your response.
+---
+""".strip()
 
 AGENT_STATUS_SCHEMA = {
     "type": "function",
@@ -204,7 +214,7 @@ async def spawn_agent(**kwargs: object) -> str:
         except ValueError:
             return f"ERROR: max harness depth ({config.max_depth}) reached"
 
-    full_prompt = prompt.rstrip() + "\n\n" + OUTPUT_INSTRUCTION
+    full_prompt = prompt.rstrip() + "\n\n" + WORKER_OUTPUT_FOOTER
     current_depth = int(os.environ.get("HARNESS_DEPTH", "0"))
     extra_env = {**(env or {}), "HARNESS_DEPTH": str(current_depth + 1)}
     agent_id = "agent_" + uuid.uuid4().hex[:12]
@@ -506,7 +516,7 @@ def build_agent_tool_bindings(
             except ValueError:
                 return f"ERROR: max harness depth ({config.max_depth}) reached"
 
-        full_prompt = prompt.rstrip() + "\n\n" + OUTPUT_INSTRUCTION
+        full_prompt = prompt.rstrip() + "\n\n" + WORKER_OUTPUT_FOOTER
         current_depth = int(os.environ.get("HARNESS_DEPTH", "0"))
         extra_env = {**(env or {}), "HARNESS_DEPTH": str(current_depth + 1)}
         agent_id = "agent_" + uuid.uuid4().hex[:12]

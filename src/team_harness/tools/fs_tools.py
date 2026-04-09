@@ -126,7 +126,8 @@ READ_NEW_FILE_CONTENT_SCHEMA = {
         "name": "read_new_file_content",
         "description": (
             "Read only the new content appended to a file since the last call "
-            "for this path. Used for incremental reading of AGENT_PROGRESS.md. "
+            "for this path. Useful for incremental reading of worker-generated "
+            "artifacts. "
             "Returns empty string if nothing new."
         ),
         "parameters": {

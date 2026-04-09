@@ -103,6 +103,9 @@ class Harness:
         run_id = _make_run_id()
         run_dir = RUNS_DIR / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
+        session_output_dir = _prepare_session_output_dir(
+            config=config, session_id=run_id
+        )
         config.run_dir = run_dir
         manager = AgentManager()
         client = _make_client(config)
@@ -138,7 +141,10 @@ class Harness:
                 run_dir=run_dir,
             )
             system_prompt = build_system_prompt(
-                config=config, allowed_types=allowed_types, skills=skills
+                config=config,
+                allowed_types=allowed_types,
+                skills=skills,
+                session_output_dir=str(session_output_dir),
             )
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
@@ -228,6 +234,16 @@ def _build_agent_summaries(manager: AgentManager) -> list[AgentSummary]:
         )
         for state in manager.list_all()
     ]
+
+
+def _prepare_session_output_dir(config: Config, session_id: str) -> Path:
+    """Resolve and create the per-session artifact directory."""
+    output_root = Path(config.output_dir).expanduser()
+    if not output_root.is_absolute():
+        output_root = Path(config.cwd) / output_root
+    session_output_dir = (output_root / session_id).resolve()
+    session_output_dir.mkdir(parents=True, exist_ok=True)
+    return session_output_dir
 
 
 def _emit_provider_warning(message: str, ui: ConsoleBase | None = None) -> None:
