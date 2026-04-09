@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import timezone
@@ -34,6 +35,7 @@ from team_harness.tracking.context import ContextTracker
 from team_harness.tracking.context import KNOWN_CODEX_MODELS
 from team_harness.tracking.context import resolve_model_limit
 from team_harness.tracking.run_log import RunLogWriter
+from team_harness.tracking.worker_sessions import write_worker_sessions_manifest
 from team_harness.ui.console import ConsoleBase
 from team_harness.ui.console import make_console
 
@@ -109,6 +111,9 @@ class Harness:
         config.run_dir = run_dir
         manager = AgentManager()
         client = _make_client(config)
+        run_log: RunLogWriter | None = None
+        ui: ConsoleBase | None = None
+        messages: list[dict[str, Any]] = []
         try:
             run_log = RunLogWriter(
                 run_id=run_id,
@@ -152,24 +157,31 @@ class Harness:
                 {"role": "user", "content": task},
             ]
             ui.start()
-            try:
-                await run(
-                    messages=messages,
-                    config=config,
-                    run_log=run_log,
-                    ui=ui,
-                    tool_registry=registry,
-                    client=client,
-                    ctx=ctx,
-                )
-            except Exception as exc:
-                run_log.finalize(error=str(exc))
-                raise HarnessError(str(exc)) from exc
-            finally:
-                run_log.finalize()
-                ui.stop()
+            await run(
+                messages=messages,
+                config=config,
+                run_log=run_log,
+                ui=ui,
+                tool_registry=registry,
+                client=client,
+                ctx=ctx,
+            )
+        except Exception as exc:
+            raise HarnessError(str(exc)) from exc
         finally:
+            if run_log is not None:
+                await _finalize_run(
+                    manager=manager,
+                    run_log=run_log,
+                    session_output_dir=session_output_dir,
+                    shutdown_timeout_s=config.shutdown_timeout_s,
+                    ui=ui,
+                )
+            if ui is not None:
+                ui.stop()
             await client.aclose()
+        if run_log.error:
+            raise HarnessError(run_log.error)
         text = _extract_final_text(messages)
         agent_summaries = _build_agent_summaries(manager)
         return HarnessResult(text=text, agents=agent_summaries, run_id=run_id)
@@ -245,6 +257,98 @@ def _prepare_session_output_dir(config: Config, session_id: str) -> Path:
     session_output_dir = (output_root / session_id).resolve()
     session_output_dir.mkdir(parents=True, exist_ok=True)
     return session_output_dir
+
+
+def _sync_terminal_agents(manager: AgentManager, run_log: RunLogWriter) -> None:
+    manager.poll_exit_codes()
+    for state in manager.list_all():
+        if state.status == "running":
+            continue
+        if state.finished_at is None:
+            state.finished_at = datetime.now(timezone.utc)
+        exit_code = state.exit_code
+        if exit_code is None and state.status == "killed":
+            exit_code = (
+                state.proc.returncode if state.proc.returncode is not None else -1
+            )
+            state.exit_code = exit_code
+        if exit_code is None:
+            continue
+        run_log.update_agent(
+            state.id,
+            exit_code=exit_code,
+            finished_at=state.finished_at,
+            status=state.status,
+        )
+
+
+async def _graceful_shutdown(
+    manager: AgentManager,
+    run_log: RunLogWriter,
+    ui: ConsoleBase | None,
+    timeout: float = 10.0,
+    terminate_wait: float = 1.0,
+) -> None:
+    manager.poll_exit_codes()
+    running = [state.id for state in manager.list_all() if state.status == "running"]
+    if running:
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*(manager.wait_one(agent_id) for agent_id in running)),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            manager.poll_exit_codes()
+            stragglers: list[str] = []
+            for agent_id in running:
+                state = manager.get(agent_id)
+                if state.status != "running" or state.proc.returncode is not None:
+                    continue
+                try:
+                    state.proc.terminate()
+                except ProcessLookupError:
+                    continue
+                state.status = "killed"
+                stragglers.append(agent_id)
+            if stragglers:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(
+                            *(manager.wait_one(agent_id) for agent_id in stragglers)
+                        ),
+                        timeout=terminate_wait,
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                finally:
+                    for agent_id in stragglers:
+                        state = manager.get(agent_id)
+                        state.status = "killed"
+                        if state.finished_at is None:
+                            state.finished_at = datetime.now(timezone.utc)
+                        if ui is not None:
+                            ui.agent_event(event="killed", state=state)
+    _sync_terminal_agents(manager, run_log)
+
+
+async def _finalize_run(
+    *,
+    manager: AgentManager,
+    run_log: RunLogWriter,
+    session_output_dir: str | Path,
+    shutdown_timeout_s: float,
+    ui: ConsoleBase | None,
+    error: str | None = None,
+) -> None:
+    await _graceful_shutdown(
+        manager=manager, run_log=run_log, ui=ui, timeout=shutdown_timeout_s
+    )
+    run_log.finalize(error=error)
+    write_worker_sessions_manifest(
+        run_id=run_log.run_id,
+        session_output_dir=session_output_dir,
+        agents=run_log.snapshot_agents(),
+    )
 
 
 def _emit_provider_warning(message: str, ui: ConsoleBase | None = None) -> None:

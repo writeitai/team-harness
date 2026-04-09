@@ -26,16 +26,6 @@ def test_run_log_delta_replay_and_agent_update(tmp_path):
         response_text=None,
         usage={},
     )
-    writer.record_turn_delta(
-        index=1,
-        messages_appended_delta=[
-            {"role": "assistant", "content": "a"},
-            {"role": "tool", "tool_call_id": "1", "content": "ok"},
-        ],
-        response_text="a",
-        usage={"prompt_tokens": 1, "completion_tokens": 1},
-        tool_calls=[ToolCallRecord(name="tool", arguments={}, result="ok")],
-    )
     writer.record_agent_spawn(
         AgentRecord(
             id="agent_1",
@@ -48,6 +38,21 @@ def test_run_log_delta_replay_and_agent_update(tmp_path):
             stdout_log="out",
             stderr_log="err",
         )
+    )
+    writer.record_turn_delta(
+        index=1,
+        messages_appended_delta=[
+            {"role": "assistant", "content": "a"},
+            {"role": "tool", "tool_call_id": "1", "content": "ok"},
+        ],
+        response_text="a",
+        usage={"prompt_tokens": 1, "completion_tokens": 1},
+        tool_calls=[
+            ToolCallRecord(
+                name="spawn_agent", arguments={"type": "codex"}, result="agent_1"
+            ),
+            ToolCallRecord(name="tool", arguments={}, result="ok"),
+        ],
     )
     finished_at = datetime.now(timezone.utc)
     writer.update_agent("agent_1", exit_code=0, finished_at=finished_at, status="done")
@@ -64,5 +69,35 @@ def test_run_log_delta_replay_and_agent_update(tmp_path):
         {"role": "tool", "tool_call_id": "1", "content": "ok"},
     ]
     assert data["agents"][0]["status"] == "done"
+    assert data["agents"][0]["coordinator_turn_index"] == 1
     assert data["error"] == "boom"
     assert data["provider"] == "openai_compat"
+
+
+def test_snapshot_agents_returns_copy(tmp_path):
+    writer = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider="openai_compat",
+        model="model",
+        api_base="base",
+    )
+    writer.record_agent_spawn(
+        AgentRecord(
+            id="agent_1",
+            agent_type="codex",
+            cwd=".",
+            prompt="p",
+            full_prompt="p\nx",
+            command=["echo"],
+            spawned_at=datetime.now(timezone.utc),
+            stdout_log="out",
+            stderr_log="err",
+        )
+    )
+
+    snapshot = writer.snapshot_agents()
+    snapshot[0].status = "tampered"
+
+    data = json.loads((tmp_path / "run.json").read_text())
+    assert data["agents"][0]["status"] == "running"

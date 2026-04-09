@@ -221,7 +221,9 @@ Lists replace rather than extend. For example, setting `[coordinator].allowed_ag
 `[coordinator].output_dir` controls where per-run coordinator and worker
 artifacts are written. Each run creates `<output_dir>/<run_id>/`, and the
 coordinator may instruct workers to place notes, reports, logs, or other
-deliverables there. Relative `output_dir` values resolve against the effective
+deliverables there. The harness also writes a compact
+`worker_sessions.json` manifest in that directory summarizing every spawned
+worker for the run. Relative `output_dir` values resolve against the effective
 `--cwd`.
 
 `th init --force` overwrites `config.toml` but preserves existing `coordinator_prompt.md`, `worker_suffix.md`, and `worker_footer.md` files to protect user customizations. Missing sidecar files are re-created.
@@ -372,6 +374,10 @@ Each run creates a directory under `~/.team-harness/runs/<run-id>/` containing:
 - `run.json` — full delta-based run log (losslessly replayable conversation)
 - `<agent-id>_stdout.log` / `<agent-id>_stderr.log` — per-agent output
 - `todo.json` — persistent task list
+
+Each run also creates `<output_dir>/<run-id>/worker_sessions.json`, a compact
+worker index with per-agent prompt, status, timestamps, log paths, and
+resume-related metadata.
 
 ## Trust model
 

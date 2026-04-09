@@ -1,5 +1,7 @@
 # pyright: reportMissingParameterType=false, reportArgumentType=false
 
+import json
+
 from click.testing import CliRunner
 import pytest
 
@@ -362,6 +364,110 @@ async def test_repl_creates_session_output_dir_and_passes_it_to_prompt(
     assert "session_output_dir" in captured
     assert session_output_dir.parent == output_root
     assert session_output_dir.is_dir()
+    manifest = session_output_dir / "worker_sessions.json"
+    assert manifest.exists()
+    assert json.loads(manifest.read_text())["workers"] == []
+
+
+@pytest.mark.asyncio
+async def test_repl_exception_path_still_writes_worker_manifest(monkeypatch, tmp_path):
+    class FakeClient:
+        api_base = "http://localhost:11434/v1"
+        model = "test/model"
+        provider = "openai_compat"
+
+        async def aclose(self):
+            return None
+
+    class FakeConsole:
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+        def print(self, message):
+            return None
+
+        def print_welcome(self, model, cwd, provider):
+            return None
+
+        def pause_for_input(self):
+            return None
+
+        def resume_after_input(self):
+            return None
+
+        def begin_turn(self, n):
+            return None
+
+        def begin_streaming(self):
+            return None
+
+        def stream_token(self, token):
+            return None
+
+        def end_streaming(self):
+            return None
+
+        def end_turn(self):
+            return None
+
+        def tool_call_start(self, name, args):
+            return None
+
+        def agent_event(self, event, state):
+            return None
+
+        def context_warning(self):
+            return None
+
+        def reset_separator(self):
+            return None
+
+        def print_agent_panel_inline(self):
+            return None
+
+    async def fake_resolve_model_limit(model_id, client, config):
+        return 128_000
+
+    async def fake_read_user_input(session):
+        raise RuntimeError("input failed")
+
+    captured: dict[str, str] = {}
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+
+    def fake_build_system_prompt(*, config, allowed_types, skills, session_output_dir):
+        captured["session_output_dir"] = session_output_dir
+        return "system"
+
+    monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
+    monkeypatch.setattr("team_harness.cli._make_client", lambda config: FakeClient())
+    monkeypatch.setattr(
+        "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
+    )
+    monkeypatch.setattr("team_harness.cli.make_console", lambda **_: FakeConsole())
+    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr(
+        "team_harness.cli.validate_templates", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "team_harness.cli.build_system_prompt", fake_build_system_prompt
+    )
+    monkeypatch.setattr("team_harness.cli._build_registry", lambda **_: object())
+    monkeypatch.setattr("team_harness.cli.make_prompt_session", lambda: object())
+    monkeypatch.setattr("team_harness.cli.read_user_input", fake_read_user_input)
+
+    with pytest.raises(RuntimeError, match="input failed"):
+        await _repl(cwd=str(project_dir), api_base="http://localhost:11434/v1")
+
+    manifest = (
+        config_module.Path(captured["session_output_dir"]) / "worker_sessions.json"
+    )
+    assert manifest.exists()
+    assert json.loads(manifest.read_text())["workers"] == []
 
 
 def test_run_command_passes_provider_flags(monkeypatch):

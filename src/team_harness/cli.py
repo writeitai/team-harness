@@ -1,6 +1,4 @@
 import asyncio
-from datetime import datetime
-from datetime import timezone
 import json
 from pathlib import Path
 from typing import Any
@@ -21,6 +19,8 @@ from team_harness.coordinator.system_prompt import COORDINATOR_PROMPT
 from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
 from team_harness.coordinator.system_prompt import build_system_prompt
 from team_harness.harness import _build_registry
+from team_harness.harness import _finalize_run
+from team_harness.harness import _graceful_shutdown
 from team_harness.harness import _make_client
 from team_harness.harness import _make_run_id
 from team_harness.harness import _prepare_session_output_dir
@@ -246,37 +246,6 @@ async def _run(task: str | None, task_file: str | None, **kwargs: Any) -> None:
     await harness.run(resolved_task)
 
 
-async def _graceful_shutdown(
-    manager: AgentManager, run_log: RunLogWriter, ui: ConsoleBase, timeout: float = 10.0
-) -> None:
-    running = [state.id for state in manager.list_all() if state.status == "running"]
-    if not running:
-        return
-    try:
-        await asyncio.wait_for(
-            asyncio.gather(*(manager.wait_one(agent_id) for agent_id in running)),
-            timeout=timeout,
-        )
-    except asyncio.TimeoutError:
-        for agent_id in running:
-            state = manager.get(agent_id)
-            if state.proc.returncode is None:
-                try:
-                    state.proc.terminate()
-                    state.status = "killed"
-                    state.finished_at = datetime.now(timezone.utc)
-                except ProcessLookupError:
-                    pass
-                else:
-                    run_log.update_agent(
-                        agent_id,
-                        exit_code=-1,
-                        finished_at=state.finished_at,
-                        status="killed",
-                    )
-                    ui.agent_event(event="killed", state=state)
-
-
 async def _repl(**kwargs: Any) -> None:
     config = load_config(**kwargs)
     _show_no_config_hint(config, ui=None)
@@ -290,6 +259,8 @@ async def _repl(**kwargs: Any) -> None:
     config.run_dir = run_dir
     manager = AgentManager()
     client = _make_client(config)
+    run_log: RunLogWriter | None = None
+    ui: ConsoleBase | None = None
     try:
         run_log = RunLogWriter(
             run_id=run_id,
@@ -390,7 +361,13 @@ async def _repl(**kwargs: Any) -> None:
                                 ui.print(f"Max turns ({config.max_turns}) reached.")
                                 should_continue = False
         finally:
-            run_log.finalize()
+            await _finalize_run(
+                manager=manager,
+                run_log=run_log,
+                session_output_dir=session_output_dir,
+                shutdown_timeout_s=config.shutdown_timeout_s,
+                ui=ui,
+            )
             ui.stop()
     finally:
         await client.aclose()
