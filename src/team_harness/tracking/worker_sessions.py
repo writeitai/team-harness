@@ -7,6 +7,7 @@ from pathlib import Path
 
 from team_harness.tracking.models import AgentRecord
 from team_harness.tracking.models import WorkerResumeInfo
+from team_harness.tracking.models import WorkerSessionInfo
 from team_harness.tracking.models import WorkerSessionRecord
 from team_harness.tracking.models import WorkerSessionsManifest
 
@@ -45,6 +46,9 @@ def build_worker_sessions_manifest(
             finished_at=record.finished_at,
             stdout_path=str(Path(record.stdout_log).resolve()),
             stderr_path=str(Path(record.stderr_log).resolve()),
+            session=WorkerSessionInfo(
+                log_path=str(Path(record.stdout_log).resolve()),
+            ),
             resume=record.resume or resume_info_for_agent_type(record.agent_type),
         )
         for record in agents

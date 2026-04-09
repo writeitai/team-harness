@@ -549,8 +549,6 @@ async def test_build_agent_tool_bindings_spawn_records_resume_metadata(
     assert data["agents"][0]["resume"] == {
         "supported": True,
         "preferred_mode": "resume",
-        "provider_session_id": None,
-        "provider_session_path": None,
     }
 
 

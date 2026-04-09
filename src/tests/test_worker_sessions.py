@@ -59,11 +59,14 @@ def test_build_worker_sessions_manifest_shape_and_absolute_paths(tmp_path):
             "finished_at": "2026-04-09T12:03:00Z",
             "stdout_path": str(stdout_log.resolve()),
             "stderr_path": str(stderr_log.resolve()),
+            "session": {
+                "log_path": str(stdout_log.resolve()),
+                "provider_session_id": None,
+                "provider_session_path": None,
+            },
             "resume": {
                 "supported": True,
                 "preferred_mode": "resume",
-                "provider_session_id": None,
-                "provider_session_path": None,
             },
         }
     ]
@@ -114,5 +117,7 @@ def test_custom_agent_types_default_to_no_resume_support(tmp_path):
 
     worker = manifest.workers[0]
     assert worker.agent_type == "myagent"
+    assert worker.session.log_path == str((tmp_path / "custom_stdout.log").resolve())
+    assert worker.session.provider_session_id is None
     assert worker.resume.supported is False
     assert worker.resume.preferred_mode is None

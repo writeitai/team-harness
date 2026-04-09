@@ -48,8 +48,19 @@ class WorkerResumeInfo(BaseModel):
 
     supported: bool
     preferred_mode: str | None
+
+
+class WorkerSessionInfo(BaseModel):
+    """What the worker's session actually is -- enough to identify and resume it."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=False)
+
+    log_path: str
+    """Absolute path to the worker's stdout log (the raw session transcript)."""
     provider_session_id: str | None = None
+    """Vendor session ID extracted from the worker's output (null until stdout parsing)."""
     provider_session_path: str | None = None
+    """Path to the vendor's own session file, e.g. ~/.codex/sessions/*.json (null until post-hoc harvesting)."""
 
 
 class WorkerSessionRecord(BaseModel):
@@ -66,6 +77,7 @@ class WorkerSessionRecord(BaseModel):
     finished_at: datetime | None = None
     stdout_path: str
     stderr_path: str
+    session: WorkerSessionInfo
     resume: WorkerResumeInfo
 
 
