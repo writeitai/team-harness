@@ -24,6 +24,11 @@ TODO_WRITE_SCHEMA = {
                             "description": {"type": "string"},
                             "status": {"type": "string"},
                             "priority": {"type": "string"},
+                            "blocked_by": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "IDs of tasks that must complete before this one can start.",
+                            },
                         },
                         "required": ["id", "description", "status"],
                     },

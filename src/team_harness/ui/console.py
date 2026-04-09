@@ -381,7 +381,7 @@ class HarnessConsole(ConsoleBase):
             blocks.append(agent_panel)
         if todos:
             todo_panel = Layout(self._render_todo_panel(todos), name="todos")
-            todo_panel.size = min(len(todos) + 3, 8)
+            todo_panel.size = min(len(todos) + 3, 14)
             blocks.append(todo_panel)
         blocks.append(Layout(self._render_status_bar(), name="status", size=1))
         layout.split_column(*blocks)
@@ -409,19 +409,40 @@ class HarnessConsole(ConsoleBase):
         )
 
     def _render_todo_panel(self, todos: list[dict]) -> Panel:
-        table = Table(box=None, padding=(0, 1), show_header=True, header_style="dim")
-        table.add_column("id", style="dim", width=12)
-        table.add_column("description")
-        table.add_column("status", width=12)
-        table.add_column("priority", width=10)
-        for task in todos:
-            table.add_row(
-                str(task.get("id", "")),
-                str(task.get("description", "")),
-                str(task.get("status", "")),
-                str(task.get("priority", "-")),
-            )
-        return Panel(table, title="[dim]todo[/dim]", border_style="dim", padding=(0, 1))
+        lines = Text()
+        for i, task in enumerate(todos):
+            status = task.get("status", "pending")
+            desc = task.get("description", "")
+            blocked_by = task.get("blocked_by") or []
+            task_id = task.get("id", "")
+
+            if status == "in_progress":
+                marker = "■"
+                style = "bold yellow"
+            elif status == "done":
+                marker = "✓"
+                style = "green"
+            elif status == "blocked":
+                marker = "□"
+                style = "dim red"
+            else:  # pending
+                marker = "□"
+                style = "dim"
+
+            if i > 0:
+                lines.append("\n")
+            # Tree connector: └ for first item, then indented siblings
+            if i == 0:
+                lines.append("  └ ", "dim")
+            else:
+                lines.append("    ", "dim")
+            lines.append(f"{marker} ", style)
+            lines.append(desc, style)
+            if blocked_by:
+                refs = ", ".join(f"#{b}" for b in blocked_by)
+                lines.append(f" › blocked by {refs}", "dim red")
+
+        return Panel(lines, title="[dim]todo[/dim]", border_style="dim", padding=(0, 1))
 
     def _render_status_bar(self) -> Text:
         elapsed = time.monotonic() - self._start
