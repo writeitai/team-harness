@@ -25,20 +25,28 @@ _manager: "AgentManager | None" = None
 _run_log: "RunLogWriter | None" = None
 _config: "Config | None" = None
 _ui: "ConsoleBase | None" = None
+_session_output_dir: str = ""
 
 _output_cursors: dict[str, int] = {}
 _output_locks: dict[str, asyncio.Lock] = {}
 
-WORKER_OUTPUT_FOOTER = """
----
-IMPORTANT — output requirements:
-- Write substantial artifacts to files when useful instead of relying only on
-  stdout.
-- If the coordinator gave you an output path or session output directory, use
-  it.
-- Report blockers, errors, and any final result clearly in your response.
----
-""".strip()
+
+def _build_worker_output_footer(output_dir: str = "") -> str:
+    parts = [
+        "---",
+        "IMPORTANT — output requirements:",
+        "- Write substantial artifacts to files when useful instead of relying only on",
+        "  stdout.",
+    ]
+    if output_dir:
+        parts.append(f"- Session output directory: {output_dir}")
+        parts.append("  Place outputs, notes, and scratchpads there.")
+    parts.append(
+        "- Report blockers, errors, and any final result clearly in your response."
+    )
+    parts.append("---")
+    return "\n".join(parts)
+
 
 AGENT_STATUS_SCHEMA = {
     "type": "function",
@@ -136,15 +144,18 @@ def setup(
     run_log: "RunLogWriter",
     config: "Config",
     ui: "ConsoleBase",
+    session_output_dir: str = "",
 ) -> None:
     global _manager
     global _run_log
     global _config
     global _ui
+    global _session_output_dir
     _manager = manager
     _run_log = run_log
     _config = config
     _ui = ui
+    _session_output_dir = session_output_dir
     _output_cursors.clear()
     _output_locks.clear()
 
@@ -214,7 +225,9 @@ async def spawn_agent(**kwargs: object) -> str:
         except ValueError:
             return f"ERROR: max harness depth ({config.max_depth}) reached"
 
-    full_prompt = prompt.rstrip() + "\n\n" + WORKER_OUTPUT_FOOTER
+    full_prompt = (
+        prompt.rstrip() + "\n\n" + _build_worker_output_footer(_session_output_dir)
+    )
     current_depth = int(os.environ.get("HARNESS_DEPTH", "0"))
     extra_env = {**(env or {}), "HARNESS_DEPTH": str(current_depth + 1)}
     agent_id = "agent_" + uuid.uuid4().hex[:12]
@@ -476,6 +489,7 @@ def build_agent_tool_bindings(
     config: "Config",
     ui: "ConsoleBase",
     allowed_types: list[str],
+    session_output_dir: str = "",
 ) -> list[tuple[dict, Callable[..., Awaitable[str]]]]:
     """Build per-run agent tool closures for concurrent safety.
 
@@ -516,7 +530,9 @@ def build_agent_tool_bindings(
             except ValueError:
                 return f"ERROR: max harness depth ({config.max_depth}) reached"
 
-        full_prompt = prompt.rstrip() + "\n\n" + WORKER_OUTPUT_FOOTER
+        full_prompt = (
+            prompt.rstrip() + "\n\n" + _build_worker_output_footer(session_output_dir)
+        )
         current_depth = int(os.environ.get("HARNESS_DEPTH", "0"))
         extra_env = {**(env or {}), "HARNESS_DEPTH": str(current_depth + 1)}
         agent_id = "agent_" + uuid.uuid4().hex[:12]

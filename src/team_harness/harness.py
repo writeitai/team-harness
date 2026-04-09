@@ -139,6 +139,7 @@ class Harness:
                 config=config,
                 ui=ui,
                 run_dir=run_dir,
+                session_output_dir=str(session_output_dir),
             )
             system_prompt = build_system_prompt(
                 config=config,
@@ -332,6 +333,7 @@ def _build_registry(
     config: Config,
     ui: ConsoleBase,
     run_dir: Path,
+    session_output_dir: str = "",
 ) -> ToolRegistry:
     """Build a ToolRegistry with per-run tool closures for concurrent safety."""
     registry = ToolRegistry()
@@ -343,6 +345,7 @@ def _build_registry(
         config=config,
         ui=ui,
         allowed_types=allowed_types,
+        session_output_dir=session_output_dir,
     )
     for schema, fn in agent_bindings:
         registry.register(schema=schema, fn=fn)

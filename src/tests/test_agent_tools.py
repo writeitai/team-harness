@@ -32,7 +32,9 @@ async def test_spawn_agent_appends_output_instruction(tmp_path, config, manager,
     await asyncio.sleep(0.1)
     state = manager.get(agent_id)
     data = json.loads((tmp_path / "run.json").read_text())
-    assert data["agents"][0]["full_prompt"].endswith(agent_tools.WORKER_OUTPUT_FOOTER)
+    assert data["agents"][0]["full_prompt"].endswith(
+        agent_tools._build_worker_output_footer("")
+    )
     assert "AGENT_SUMMARY.md" not in data["agents"][0]["full_prompt"]
     assert "AGENT_PROGRESS.md" not in data["agents"][0]["full_prompt"]
     assert state.agent_type == "codex"
