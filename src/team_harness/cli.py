@@ -286,7 +286,13 @@ async def _repl(**kwargs: Any) -> None:
         skills = load_skills(cwd=config.cwd)
         allowed_types = get_allowed_types(config)
         validate_templates(config=config, allowed_types=allowed_types)
-        agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+        agent_tools.setup(
+            manager=manager,
+            run_log=run_log,
+            config=config,
+            ui=ui,
+            session_output_dir=str(session_output_dir),
+        )
         todo_tools.setup(run_dir=run_dir)
         fs_tools.setup_fs()
         skill_ctx = SkillContext(client=client, config=config)
@@ -299,6 +305,7 @@ async def _repl(**kwargs: Any) -> None:
             config=config,
             ui=ui,
             run_dir=run_dir,
+            session_output_dir=str(session_output_dir),
         )
         system_prompt = build_system_prompt(
             config=config,
