@@ -13,6 +13,7 @@ import uuid
 from team_harness.agents import spawner
 from team_harness.agents.manager import AgentState
 from team_harness.agents.registry import check_harness_depth
+from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
 from team_harness.tracking.models import AgentRecord
 
 if TYPE_CHECKING:
@@ -31,21 +32,15 @@ _output_cursors: dict[str, int] = {}
 _output_locks: dict[str, asyncio.Lock] = {}
 
 
-def _build_worker_output_footer(output_dir: str = "") -> str:
-    parts = [
-        "---",
-        "IMPORTANT — output requirements:",
-        "- Write substantial artifacts to files when useful instead of relying only on",
-        "  stdout.",
-    ]
-    if output_dir:
-        parts.append(f"- Session output directory: {output_dir}")
-        parts.append("  Place outputs, notes, and scratchpads there.")
-    parts.append(
-        "- Report blockers, errors, and any final result clearly in your response."
+def _build_worker_output_footer(
+    output_dir: str = "", config: "Config | None" = None
+) -> str:
+    template = (
+        getattr(config, "worker_footer", DEFAULT_WORKER_FOOTER)
+        if config
+        else DEFAULT_WORKER_FOOTER
     )
-    parts.append("---")
-    return "\n".join(parts)
+    return template.format(session_output_dir=output_dir)
 
 
 AGENT_STATUS_SCHEMA = {
@@ -225,9 +220,11 @@ async def spawn_agent(**kwargs: object) -> str:
         except ValueError:
             return f"ERROR: max harness depth ({config.max_depth}) reached"
 
-    full_prompt = (
-        prompt.rstrip() + "\n\n" + _build_worker_output_footer(_session_output_dir)
-    )
+    parts = [prompt.rstrip()]
+    if config.worker_suffix:
+        parts.append(config.worker_suffix)
+    parts.append(_build_worker_output_footer(_session_output_dir, config))
+    full_prompt = "\n\n".join(part for part in parts if part)
     current_depth = int(os.environ.get("HARNESS_DEPTH", "0"))
     extra_env = {**(env or {}), "HARNESS_DEPTH": str(current_depth + 1)}
     agent_id = "agent_" + uuid.uuid4().hex[:12]
@@ -530,9 +527,11 @@ def build_agent_tool_bindings(
             except ValueError:
                 return f"ERROR: max harness depth ({config.max_depth}) reached"
 
-        full_prompt = (
-            prompt.rstrip() + "\n\n" + _build_worker_output_footer(session_output_dir)
-        )
+        _parts = [prompt.rstrip()]
+        if config.worker_suffix:
+            _parts.append(config.worker_suffix)
+        _parts.append(_build_worker_output_footer(session_output_dir, config))
+        full_prompt = "\n\n".join(p for p in _parts if p)
         current_depth = int(os.environ.get("HARNESS_DEPTH", "0"))
         extra_env = {**(env or {}), "HARNESS_DEPTH": str(current_depth + 1)}
         agent_id = "agent_" + uuid.uuid4().hex[:12]

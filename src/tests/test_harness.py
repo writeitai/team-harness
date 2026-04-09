@@ -57,7 +57,7 @@ def test_cli_sdk_parity():
         "max_retries": "max_retries",
         "max_depth": "max_depth",
         "system_prompt": "system_prompt",
-        "system_prompt_file": "system_prompt_file",
+        "cli_system_prompt_file": "system_prompt_file",
         "cwd": "cwd",
     }
 

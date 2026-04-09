@@ -3,5 +3,8 @@ __pycache__/
 .pytest_cache/
 *.pyc
 
+_feature_planning/
+.team-harness/
+
 Makefile
 .mcp.json

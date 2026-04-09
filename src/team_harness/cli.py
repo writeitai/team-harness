@@ -17,6 +17,8 @@ from team_harness.config import load_config
 from team_harness.config import LOCAL_CONFIG_DIR_NAME
 from team_harness.config import RUNS_DIR
 from team_harness.coordinator.loop import run_one_turn
+from team_harness.coordinator.system_prompt import COORDINATOR_PROMPT
+from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
 from team_harness.coordinator.system_prompt import build_system_prompt
 from team_harness.harness import _build_registry
 from team_harness.harness import _make_client
@@ -50,8 +52,27 @@ def _write_config_file(path: Path, text: str, force: bool) -> None:
             f"Config file already exists at {path}. Use --force to overwrite."
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     click.echo(f"Created config at {path}")
+
+
+def _write_sidecar_file(path: Path, text: str) -> None:
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    click.echo(f"Created prompt file at {path}")
+
+
+def _write_init_files(config_path: Path, config_text: str, force: bool) -> None:
+    _write_config_file(path=config_path, text=config_text, force=force)
+    _write_sidecar_file(
+        config_path.parent / "coordinator_prompt.md", COORDINATOR_PROMPT
+    )
+    _write_sidecar_file(config_path.parent / "worker_suffix.md", "")
+    _write_sidecar_file(
+        config_path.parent / "worker_footer.md", DEFAULT_WORKER_FOOTER
+    )
 
 
 @main.command()
@@ -64,7 +85,7 @@ def init(use_global: bool, force: bool) -> None:
         else Path.cwd() / LOCAL_CONFIG_DIR_NAME / "config.toml"
     )
     text = _default_config_text() if use_global else _local_config_text()
-    _write_config_file(path=path, text=text, force=force)
+    _write_init_files(path, text, force)
 
 
 @main.command(name="run")
@@ -80,7 +101,7 @@ def init(use_global: bool, force: bool) -> None:
 @click.option("--max-retries", type=int, default=None)
 @click.option("--max-depth", type=int, default=None)
 @click.option("--system-prompt", default=None)
-@click.option("--system-prompt-file", default=None)
+@click.option("--system-prompt-file", "cli_system_prompt_file", default=None)
 @click.option("--cwd", default=".")
 def run_cli(
     task: str | None,
@@ -95,7 +116,7 @@ def run_cli(
     max_retries: int | None,
     max_depth: int | None,
     system_prompt: str | None,
-    system_prompt_file: str | None,
+    cli_system_prompt_file: str | None,
     cwd: str,
 ) -> None:
     asyncio.run(
@@ -112,7 +133,7 @@ def run_cli(
             max_retries=max_retries,
             max_depth=max_depth,
             system_prompt=system_prompt,
-            system_prompt_file=system_prompt_file,
+            system_prompt_file=cli_system_prompt_file,
             cwd=cwd,
         )
     )
@@ -129,7 +150,7 @@ def run_cli(
 @click.option("--max-retries", type=int, default=None)
 @click.option("--max-depth", type=int, default=None)
 @click.option("--system-prompt", default=None)
-@click.option("--system-prompt-file", default=None)
+@click.option("--system-prompt-file", "cli_system_prompt_file", default=None)
 @click.option("--cwd", default=".")
 def repl(
     provider: str | None,
@@ -142,7 +163,7 @@ def repl(
     max_retries: int | None,
     max_depth: int | None,
     system_prompt: str | None,
-    system_prompt_file: str | None,
+    cli_system_prompt_file: str | None,
     cwd: str,
 ) -> None:
     asyncio.run(
@@ -157,7 +178,7 @@ def repl(
             max_retries=max_retries,
             max_depth=max_depth,
             system_prompt=system_prompt,
-            system_prompt_file=system_prompt_file,
+            cli_system_prompt_file=cli_system_prompt_file,
             cwd=cwd,
         )
     )
@@ -318,10 +339,6 @@ async def _repl(**kwargs: Any) -> None:
         last_logged_index = 0
         session = make_prompt_session()
         ui.print_welcome(model=config.model, cwd=config.cwd, provider=config.provider)
-        # Do NOT call ui.start() — that enables Rich Live, which takes over
-        # terminal space and causes the viewport to jump. In REPL mode
-        # everything prints inline (like Codex): prompt stays in place,
-        # response streams below, next prompt appears after.
         try:
             while True:
                 ui.pause_for_input()

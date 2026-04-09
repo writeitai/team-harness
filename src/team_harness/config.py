@@ -5,10 +5,14 @@ from pathlib import Path
 import tomllib
 import warnings
 
+from team_harness.coordinator.system_prompt import COORDINATOR_PROMPT
+from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
+
 LOCAL_CONFIG_DIR_NAME = ".team-harness"
 CONFIG_PATH = Path.home() / ".team-harness" / "config.toml"
 RUNS_DIR = Path.home() / ".team-harness" / "runs"
 SKILLS_USER_DIR = Path.home() / ".team-harness" / "skills"
+PROMPT_FILE_MAX_BYTES = 100 * 1024
 
 DEFAULT_TEMPLATES: dict[str, str] = {
     "codex": 'codex exec --yolo --model gpt-5.4 PROMPT="{prompt}"',
@@ -30,6 +34,9 @@ class Config:
     max_turns: int = 50
     max_retries: int = 5
     max_depth: int = 3
+    coordinator_prompt: str = COORDINATOR_PROMPT
+    worker_suffix: str = ""
+    worker_footer: str = DEFAULT_WORKER_FOOTER
     system_prompt_extension: str = ""
     output_dir: str = "_outputs"
     context_limit: int | None = None
@@ -59,6 +66,11 @@ api_base = "https://openrouter.ai/api/v1"
 
 # API key. Prefer the OPENROUTER_API_KEY or OPENAI_API_KEY env var instead.
 api_key = ""
+
+# Coordinator prompt, worker suffix, and worker footer files.
+coordinator_prompt_file = "coordinator_prompt.md"
+worker_suffix_file = "worker_suffix.md"
+worker_footer_file = "worker_footer.md"
 
 # Extra text appended to the system prompt for every run.
 system_prompt = ""
@@ -128,6 +140,11 @@ api_base = "https://openrouter.ai/api/v1"
 
 # API key — prefer OPENROUTER_API_KEY or OPENAI_API_KEY env var instead.
 # api_key = ""
+
+# Coordinator prompt, worker suffix, and worker footer files.
+coordinator_prompt_file = "coordinator_prompt.md"
+worker_suffix_file = "worker_suffix.md"
+worker_footer_file = "worker_footer.md"
 
 # Extra text appended to the system prompt for every run.
 system_prompt = ""
@@ -233,10 +250,161 @@ def _deep_merge(
 
 def _load_toml_file(path: Path) -> dict[str, object]:
     try:
-        data = tomllib.loads(path.read_text())
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as exc:
         raise SystemExit(f"Invalid TOML in {path}: {exc}") from exc
     return data
+
+
+def _get_section(data: dict[str, object], key: str) -> dict[str, object]:
+    section = data.get(key, {})
+    if isinstance(section, dict):
+        return section
+    return {}
+
+
+def _get_prompt_file_source(
+    *,
+    local_section: dict[str, object],
+    local_config_path: Path | None,
+    global_section: dict[str, object],
+    global_config_path: Path | None,
+    key: str,
+) -> tuple[bool, str | None, Path | None]:
+    if key in local_section:
+        value = local_section.get(key)
+        return True, value if isinstance(value, str) else None, local_config_path
+    if key in global_section:
+        value = global_section.get(key)
+        return True, value if isinstance(value, str) else None, global_config_path
+    return False, None, None
+
+
+def _resolve_config_prompt_path(config_path: Path, file_path: str) -> Path:
+    prompt_path = Path(file_path).expanduser()
+    if prompt_path.is_absolute():
+        return prompt_path
+    return (config_path.parent / prompt_path).resolve()
+
+
+def _read_prompt_file(path: Path, *, label: str) -> str:
+    try:
+        size_bytes = path.stat().st_size
+    except FileNotFoundError:
+        raise
+    except PermissionError as exc:
+        raise SystemExit(f"Cannot read {label} {path}: permission denied.") from exc
+    except OSError as exc:
+        raise SystemExit(f"Cannot read {label} {path}: {exc}") from exc
+
+    if size_bytes > PROMPT_FILE_MAX_BYTES:
+        raise SystemExit(
+            f"Cannot read {label} {path}: file exceeds {PROMPT_FILE_MAX_BYTES} bytes."
+        )
+
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise
+    except PermissionError as exc:
+        raise SystemExit(f"Cannot read {label} {path}: permission denied.") from exc
+    except UnicodeDecodeError as exc:
+        raise SystemExit(f"Cannot read {label} {path}: file must be UTF-8.") from exc
+    except OSError as exc:
+        raise SystemExit(f"Cannot read {label} {path}: {exc}") from exc
+
+
+def _resolve_base_prompt_text(
+    *,
+    local_section: dict[str, object],
+    local_config_path: Path | None,
+    global_section: dict[str, object],
+    global_config_path: Path | None,
+    key: str,
+    fallback: str,
+) -> str:
+    configured, file_path, source_config_path = _get_prompt_file_source(
+        local_section=local_section,
+        local_config_path=local_config_path,
+        global_section=global_section,
+        global_config_path=global_config_path,
+        key=key,
+    )
+    if not configured:
+        return fallback
+    if not file_path or not file_path.strip() or source_config_path is None:
+        warnings.warn(
+            f"Configured coordinator.{key} is empty; falling back to built-in base prompt.",
+            stacklevel=2,
+        )
+        return fallback
+
+    resolved_path = _resolve_config_prompt_path(source_config_path, file_path)
+    try:
+        text = _read_prompt_file(
+            resolved_path,
+            label=f"coordinator.{key}",
+        )
+    except FileNotFoundError:
+        warnings.warn(
+            f"Configured coordinator.{key} {resolved_path} was not found; falling back "
+            "to the built-in base prompt.",
+            stacklevel=2,
+        )
+        return fallback
+
+    if not text.strip():
+        warnings.warn(
+            f"Configured coordinator.{key} {resolved_path} is empty; falling back to "
+            "the built-in base prompt.",
+            stacklevel=2,
+        )
+        return fallback
+    return text
+
+
+def _resolve_optional_prompt_text(
+    *,
+    local_section: dict[str, object],
+    local_config_path: Path | None,
+    global_section: dict[str, object],
+    global_config_path: Path | None,
+    key: str,
+    fallback: str,
+) -> str:
+    configured, file_path, source_config_path = _get_prompt_file_source(
+        local_section=local_section,
+        local_config_path=local_config_path,
+        global_section=global_section,
+        global_config_path=global_config_path,
+        key=key,
+    )
+    if not configured or not file_path or not file_path.strip() or source_config_path is None:
+        return fallback
+
+    resolved_path = _resolve_config_prompt_path(source_config_path, file_path)
+    try:
+        text = _read_prompt_file(
+            resolved_path,
+            label=f"coordinator.{key}",
+        )
+    except FileNotFoundError:
+        return fallback
+    if not text.strip():
+        return fallback
+    return text
+
+
+def _read_cli_prompt_extension(cli_system_prompt_file: str, cwd: Path) -> str:
+    prompt_path = Path(cli_system_prompt_file).expanduser()
+    if not prompt_path.is_absolute():
+        prompt_path = (cwd / prompt_path).resolve()
+    try:
+        return _read_prompt_file(prompt_path, label="CLI --system-prompt-file")
+    except FileNotFoundError:
+        raise SystemExit(
+            f"CLI --system-prompt-file not found: {prompt_path}"
+        ) from None
 
 
 def load_config(
@@ -250,7 +418,7 @@ def load_config(
     max_retries: int | None = None,
     max_depth: int | None = None,
     system_prompt: str | None = None,
-    system_prompt_file: str | None = None,
+    cli_system_prompt_file: str | None = None,
     allowed_agents: str | None = None,
     cwd: str | None = None,
 ) -> Config:
@@ -266,11 +434,11 @@ def load_config(
 
     global_data = _load_toml_file(global_path) if global_path else {}
     local_data = _load_toml_file(local_path) if local_path else {}
+    global_coordinator = _get_section(global_data, "coordinator")
+    local_coordinator = _get_section(local_data, "coordinator")
     config_data = _deep_merge(base=global_data, override=local_data)
 
-    coordinator = config_data.get("coordinator", {})
-    if not isinstance(coordinator, dict):
-        coordinator = {}
+    coordinator = _get_section(config_data, "coordinator")
     agents_section = config_data.get("agents", {})
     if not isinstance(agents_section, dict):
         agents_section = {}
@@ -288,8 +456,33 @@ def load_config(
         prompt_parts.append(config_prompt)
     if system_prompt:
         prompt_parts.append(system_prompt)
-    if system_prompt_file:
-        prompt_parts.append(Path(system_prompt_file).read_text())
+    if cli_system_prompt_file:
+        prompt_parts.append(_read_cli_prompt_extension(cli_system_prompt_file, start_dir))
+
+    coordinator_prompt = _resolve_base_prompt_text(
+        local_section=local_coordinator,
+        local_config_path=local_path,
+        global_section=global_coordinator,
+        global_config_path=global_path,
+        key="coordinator_prompt_file",
+        fallback=COORDINATOR_PROMPT,
+    )
+    worker_suffix = _resolve_optional_prompt_text(
+        local_section=local_coordinator,
+        local_config_path=local_path,
+        global_section=global_coordinator,
+        global_config_path=global_path,
+        key="worker_suffix_file",
+        fallback="",
+    )
+    worker_footer = _resolve_optional_prompt_text(
+        local_section=local_coordinator,
+        local_config_path=local_path,
+        global_section=global_coordinator,
+        global_config_path=global_path,
+        key="worker_footer_file",
+        fallback=DEFAULT_WORKER_FOOTER,
+    )
 
     env_model = os.environ.get("HARNESS_MODEL")
     env_api_base = os.environ.get("HARNESS_API_BASE")
@@ -338,6 +531,9 @@ def load_config(
         max_depth=max_depth
         if max_depth is not None
         else int(coordinator.get("max_depth", Config.max_depth)),
+        coordinator_prompt=coordinator_prompt,
+        worker_suffix=worker_suffix,
+        worker_footer=worker_footer,
         system_prompt_extension="\n\n".join(part for part in prompt_parts if part),
         output_dir=str(coordinator.get("output_dir", Config.output_dir)),
         context_limit=(

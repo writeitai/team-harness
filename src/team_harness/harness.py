@@ -96,7 +96,7 @@ class Harness:
             max_retries=self._max_retries,
             max_depth=self._max_depth,
             system_prompt=self._system_prompt,
-            system_prompt_file=self._system_prompt_file,
+            cli_system_prompt_file=self._system_prompt_file,
             allowed_agents=allowed_agents_str,
             cwd=self._cwd,
         )
