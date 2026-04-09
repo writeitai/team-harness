@@ -185,11 +185,21 @@ If the user or config provides extra system instructions, follow them unless
 they conflict with the rules above.
 """.strip()
 
+DEFAULT_WORKER_FOOTER = """---
+IMPORTANT — output requirements:
+- Write substantial artifacts to files when useful instead of relying only on
+  stdout.
+- Session output directory: {session_output_dir}
+  Place outputs, notes, and scratchpads there.
+- Report blockers, errors, and any final result clearly in your response.
+---""".strip()
+
 
 def build_system_prompt(
     config: object, allowed_types: list[str], skills: list, session_output_dir: str
 ) -> str:
-    prompt = COORDINATOR_PROMPT.format(
+    base_prompt = getattr(config, "coordinator_prompt", COORDINATOR_PROMPT)
+    prompt = base_prompt.format(
         allowed_agent_types=", ".join(allowed_types),
         cwd=getattr(config, "cwd", "."),
         current_utc_time=datetime.now(timezone.utc).isoformat(),
@@ -205,6 +215,19 @@ def build_system_prompt(
         parts.append(
             "Additional tools (skills) available:\n"
             + "\n".join(f"- {skill.name}: {skill.description}" for skill in skills)
+        )
+
+    worker_suffix = getattr(config, "worker_suffix", "")
+    if worker_suffix:
+        parts.append(
+            "\n".join(
+                [
+                    "The following suffix is automatically appended to every worker prompt.",
+                    "DO NOT duplicate these instructions in spawn_agent prompts.",
+                    "",
+                    worker_suffix,
+                ]
+            )
         )
 
     return "\n\n---\n\n".join(part for part in parts if part)

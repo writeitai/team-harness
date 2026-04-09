@@ -15,9 +15,12 @@ from team_harness.tracking.run_log import RunLogWriter
 
 
 @pytest.mark.asyncio
-async def test_spawn_agent_appends_output_instruction(tmp_path, config, manager, ui):
+async def test_spawn_agent_appends_suffix_before_output_instruction(
+    tmp_path, config, manager, ui
+):
     config.run_dir = tmp_path
     config.agent_templates = {"codex": "echo {prompt}"}
+    config.worker_suffix = "Always include a brief verification note."
     run_log = RunLogWriter(
         run_id="run_1",
         run_dir=tmp_path,
@@ -32,11 +35,14 @@ async def test_spawn_agent_appends_output_instruction(tmp_path, config, manager,
     await asyncio.sleep(0.1)
     state = manager.get(agent_id)
     data = json.loads((tmp_path / "run.json").read_text())
-    assert data["agents"][0]["full_prompt"].endswith(
-        agent_tools._build_worker_output_footer("")
-    )
-    assert "AGENT_SUMMARY.md" not in data["agents"][0]["full_prompt"]
-    assert "AGENT_PROGRESS.md" not in data["agents"][0]["full_prompt"]
+    full_prompt = data["agents"][0]["full_prompt"]
+    assert "hello" in full_prompt
+    prompt_index = full_prompt.index("hello")
+    suffix_index = full_prompt.index(config.worker_suffix)
+    footer = agent_tools._build_worker_output_footer("", config)
+    output_index = full_prompt.index(footer)
+    assert prompt_index < suffix_index < output_index
+    assert full_prompt.endswith(footer)
     assert state.agent_type == "codex"
 
 
