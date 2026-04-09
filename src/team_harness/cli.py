@@ -21,6 +21,7 @@ from team_harness.coordinator.system_prompt import build_system_prompt
 from team_harness.harness import _build_registry
 from team_harness.harness import _make_client
 from team_harness.harness import _make_run_id
+from team_harness.harness import _prepare_session_output_dir
 from team_harness.harness import _show_no_config_hint
 from team_harness.harness import _warn_provider_startup
 from team_harness.harness import Harness
@@ -264,6 +265,7 @@ async def _repl(**kwargs: Any) -> None:
     run_id = _make_run_id()
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    session_output_dir = _prepare_session_output_dir(config=config, session_id=run_id)
     config.run_dir = run_dir
     manager = AgentManager()
     client = _make_client(config)
@@ -299,7 +301,10 @@ async def _repl(**kwargs: Any) -> None:
             run_dir=run_dir,
         )
         system_prompt = build_system_prompt(
-            config=config, allowed_types=allowed_types, skills=skills
+            config=config,
+            allowed_types=allowed_types,
+            skills=skills,
+            session_output_dir=str(session_output_dir),
         )
         messages = [{"role": "system", "content": system_prompt}]
         turn_index = 0

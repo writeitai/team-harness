@@ -20,6 +20,7 @@ from team_harness.config import SKILLS_USER_DIR
 def test_default_model_is_gpt_5_4():
     assert Config().model == "gpt-5.4"
     assert Config().provider == "openai_compat"
+    assert Config().output_dir == "_outputs"
 
 
 def test_default_templates_updated():
@@ -86,6 +87,7 @@ model = "file-model"
 api_base = "https://file.example/v1"
 api_key = "file-key"
 allowed_agents = ["codex", "claude"]
+output_dir = "artifacts"
 shutdown_timeout_s = 12.5
 
 [agents.codex]
@@ -119,6 +121,7 @@ template = "myagent {prompt}"
     assert config.agent_templates["codex"] == "codex exec --model file-model {prompt}"
     assert config.agent_templates["myagent"] == "myagent {prompt}"
     assert config.shutdown_timeout_s == 12.5
+    assert config.output_dir == "artifacts"
     assert config.system_prompt_extension == "inline\n\nfrom file"
     assert config.global_config_path == global_path.resolve()
     assert config.local_config_path is None
@@ -259,7 +262,12 @@ def test_default_templates_use_th_for_harness():
 def test_default_config_text_uses_th_for_harness():
     default_config = _default_config_text()
     assert default_config.startswith("# th")
+    assert 'output_dir = "_outputs"' in default_config
     assert 'template = "th run {prompt}"' in default_config
+
+
+def test_local_config_text_includes_output_dir():
+    assert 'output_dir = "_outputs"' in config_module._local_config_text()
 
 
 def test_config_paths_remain_under_team_harness_dir():

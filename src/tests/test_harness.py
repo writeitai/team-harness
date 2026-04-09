@@ -236,6 +236,66 @@ async def test_harness_run_returns_result(monkeypatch, tmp_path):
     assert len(result.run_id) > 0
 
 
+@pytest.mark.asyncio
+async def test_harness_run_creates_session_output_dir_and_passes_it_to_prompt(
+    monkeypatch, tmp_path
+):
+    class FakeClient:
+        api_base = "http://localhost:11434/v1"
+        model = "test/model"
+        provider = "openai_compat"
+
+        async def get_models(self):
+            return {"data": []}
+
+        async def aclose(self):
+            return None
+
+    async def fake_resolve_model_limit(model_id, client, config):
+        return 128_000
+
+    async def fake_run(messages, config, run_log, ui, tool_registry, client, ctx):
+        messages.append({"role": "assistant", "content": "final answer"})
+
+    captured: dict[str, str] = {}
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    output_root = project_dir / "artifacts"
+
+    def fake_build_system_prompt(*, config, allowed_types, skills, session_output_dir):
+        captured["session_output_dir"] = session_output_dir
+        return "system"
+
+    monkeypatch.setattr(
+        "team_harness.harness._make_client", lambda config: FakeClient()
+    )
+    monkeypatch.setattr("team_harness.harness.RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
+    monkeypatch.setattr(
+        "team_harness.harness.validate_templates", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "team_harness.harness.resolve_model_limit", fake_resolve_model_limit
+    )
+    monkeypatch.setattr("team_harness.harness.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr(
+        "team_harness.harness.build_system_prompt", fake_build_system_prompt
+    )
+    monkeypatch.setattr("team_harness.harness.run", fake_run)
+
+    local_config = project_dir / ".team-harness" / "config.toml"
+    local_config.parent.mkdir()
+    local_config.write_text('[coordinator]\noutput_dir = "artifacts"\n')
+
+    harness = Harness(api_base="http://localhost:11434/v1", cwd=str(project_dir))
+    result = await harness.run("hello")
+
+    session_output_dir = config_module.Path(captured["session_output_dir"])
+    assert result.text == "final answer"
+    assert session_output_dir.parent == output_root
+    assert session_output_dir.is_dir()
+
+
 # ---------------------------------------------------------------------------
 # AgentSummary has no proc field
 # ---------------------------------------------------------------------------

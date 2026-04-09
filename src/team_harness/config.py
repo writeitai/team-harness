@@ -31,6 +31,7 @@ class Config:
     max_retries: int = 5
     max_depth: int = 3
     system_prompt_extension: str = ""
+    output_dir: str = "_outputs"
     context_limit: int | None = None
     shutdown_timeout_s: float = 10.0
     allowed_agents: list[str] | None = None
@@ -61,6 +62,9 @@ api_key = ""
 
 # Extra text appended to the system prompt for every run.
 system_prompt = ""
+
+# Base directory for per-session coordinator/worker artifacts.
+output_dir = "_outputs"
 
 # Maximum coordinator turns before the run stops.
 max_turns = 50
@@ -127,6 +131,9 @@ api_base = "https://openrouter.ai/api/v1"
 
 # Extra text appended to the system prompt for every run.
 system_prompt = ""
+
+# Base directory for per-session coordinator/worker artifacts.
+output_dir = "_outputs"
 
 # Maximum coordinator turns before the run stops.
 max_turns = 50
@@ -332,6 +339,7 @@ def load_config(
         if max_depth is not None
         else int(coordinator.get("max_depth", Config.max_depth)),
         system_prompt_extension="\n\n".join(part for part in prompt_parts if part),
+        output_dir=str(coordinator.get("output_dir", Config.output_dir)),
         context_limit=(
             int(coordinator["context_limit"])
             if coordinator.get("context_limit") is not None
