@@ -14,6 +14,7 @@ from team_harness.agents import spawner
 from team_harness.agents.manager import AgentState
 from team_harness.agents.registry import check_harness_depth
 from team_harness.tracking.models import AgentRecord
+from team_harness.tracking.worker_sessions import resume_info_for_agent_type
 
 if TYPE_CHECKING:
     from team_harness.agents.manager import AgentManager
@@ -570,6 +571,7 @@ def build_agent_tool_bindings(
         record = AgentRecord(
             id=agent_id,
             agent_type=agent_type,
+            coordinator_turn_index=None,
             status=state.status,
             cwd=cwd,
             prompt=prompt,
@@ -587,6 +589,7 @@ def build_agent_tool_bindings(
             spawned_at=state.spawn_time,
             stdout_log=str(stdout_log),
             stderr_log=str(stderr_log),
+            resume=resume_info_for_agent_type(agent_type),
         )
         run_log.record_agent_spawn(record)
         ui.agent_event(event="spawned", state=state)

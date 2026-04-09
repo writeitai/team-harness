@@ -1,5 +1,6 @@
 # pyright: reportMissingParameterType=false, reportArgumentType=false
 
+import asyncio
 import inspect
 import json
 
@@ -294,6 +295,9 @@ async def test_harness_run_creates_session_output_dir_and_passes_it_to_prompt(
     assert result.text == "final answer"
     assert session_output_dir.parent == output_root
     assert session_output_dir.is_dir()
+    manifest = session_output_dir / "worker_sessions.json"
+    assert manifest.exists()
+    assert json.loads(manifest.read_text())["workers"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +359,9 @@ async def test_harness_error_on_loop_failure(monkeypatch, tmp_path):
     assert run_json.exists()
     data = json.loads(run_json.read_text())
     assert data["end"] is not None
+    manifest = tmp_path / "_outputs" / run_dirs[0].name / "worker_sessions.json"
+    assert manifest.exists()
+    assert json.loads(manifest.read_text())["workers"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -487,6 +494,64 @@ async def test_build_agent_tool_bindings_produces_closures(tmp_path):
     )
     result = await list_fn()
     assert json.loads(result) == []
+
+
+@pytest.mark.asyncio
+async def test_build_agent_tool_bindings_spawn_records_resume_metadata(
+    monkeypatch, tmp_path
+):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    config = Config(
+        provider="openai_compat",
+        model="test/model",
+        api_base="http://localhost:9999",
+        api_key="test-key",
+        cwd=str(tmp_path),
+        run_dir=run_dir,
+        agent_templates={"codex": "echo {prompt}"},
+    )
+    manager = AgentManager()
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=run_dir,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    ui = SilentConsole()
+
+    async def fake_spawn(**kwargs):
+        return await asyncio.create_subprocess_exec("sh", "-lc", "exit 0")
+
+    monkeypatch.setattr("team_harness.tools.agent_tools.spawner.spawn", fake_spawn)
+    monkeypatch.setattr(
+        "team_harness.tools.agent_tools.spawner.build_command",
+        lambda **kwargs: ["codex", "exec"],
+    )
+
+    bindings = build_agent_tool_bindings(
+        manager=manager,
+        run_log=run_log,
+        config=config,
+        ui=ui,
+        allowed_types=["codex"],
+        session_output_dir=str(tmp_path / "outputs" / "run_1"),
+    )
+    spawn_fn = next(
+        fn for schema, fn in bindings if schema["function"]["name"] == "spawn_agent"
+    )
+
+    await spawn_fn(type="codex", prompt="hello", cwd=str(tmp_path))
+    await asyncio.sleep(0.1)
+
+    data = json.loads((run_dir / "run.json").read_text())
+    assert data["agents"][0]["resume"] == {
+        "supported": True,
+        "preferred_mode": "resume",
+        "provider_session_id": None,
+        "provider_session_path": None,
+    }
 
 
 # ---------------------------------------------------------------------------
