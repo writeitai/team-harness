@@ -9,6 +9,7 @@ import uuid
 from team_harness.agents.registry import build_command
 from team_harness.agents.registry import resolve_template
 from team_harness.agents.template import AgentTemplate
+from team_harness.agents.template import build_provider_env
 from team_harness.agents.template import build_template_env
 from team_harness.agents.template import template_uses_generated_uuid
 from team_harness.config import Config
@@ -67,12 +68,19 @@ async def spawn(
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Env merge order: parent environment is the base, the template's
-    # model env vars layer on top, and the caller's explicit extra_env
-    # wins over everything so tests and SDK users can override without
-    # having to fork the template.
+    # Env precedence (first loses, last wins on conflict):
+    #   1. os.environ             — parent shell; baseline
+    #   2. template.provider_env   — coarse provider-wide constants,
+    #                                e.g. ANTHROPIC_BASE_URL for OpenRouter.
+    #                                Values may contain {env:NAME}
+    #                                placeholders that resolve against
+    #                                os.environ at call time.
+    #   3. template.model_env_vars — per-model, dynamic; for Claude Code's
+    #                                three "main model" env vars etc.
+    #   4. caller extra_env         — explicit override for tests/SDK users.
+    provider_env = build_provider_env(template)
     template_env = build_template_env(template, effective_model=effective_model)
-    merged_env = {**os.environ, **template_env, **(extra_env or {})}
+    merged_env = {**os.environ, **provider_env, **template_env, **(extra_env or {})}
 
     stdout_file = stdout_path.open("wb")
     stderr_file = stderr_path.open("wb")

@@ -78,6 +78,7 @@ def test_build_command_codex_default_model_cleared_by_user_override():
         resume_flags=base.resume_flags,
         model_flag=base.model_flag,
         default_model=None,
+        reasoning_effort_flag=base.reasoning_effort_flag,
         session_capture=base.session_capture,
     )
     config = Config(agent_templates={"codex": override})
@@ -86,6 +87,86 @@ def test_build_command_codex_default_model_cleared_by_user_override():
 
     assert "--model" not in command
     assert "gpt-5.4" not in command
+
+
+# ---------------------------------------------------------------------------
+# reasoning_effort injection
+# ---------------------------------------------------------------------------
+
+
+def test_build_command_codex_with_reasoning_effort_high():
+    from team_harness.agents.template import AgentTemplate
+    from team_harness.agents.template import DEFAULT_AGENT_TEMPLATES
+
+    base = DEFAULT_AGENT_TEMPLATES["codex"]
+    override = AgentTemplate(
+        command=base.command,
+        shared_flags=base.shared_flags,
+        resume_prefix=base.resume_prefix,
+        resume_flags=base.resume_flags,
+        model_flag=base.model_flag,
+        default_model=base.default_model,
+        reasoning_effort="high",
+        reasoning_effort_flag=base.reasoning_effort_flag,
+        session_capture=base.session_capture,
+    )
+    config = Config(agent_templates={"codex": override})
+    command = build_command(agent_type="codex", prompt="do thing", config=config)
+
+    assert "-c" in command
+    i = command.index("-c")
+    assert command[i + 1] == "model_reasoning_effort=high"
+
+
+def test_build_command_claude_with_reasoning_effort_high():
+    from team_harness.agents.template import AgentTemplate
+    from team_harness.agents.template import DEFAULT_AGENT_TEMPLATES
+
+    base = DEFAULT_AGENT_TEMPLATES["claude"]
+    override = AgentTemplate(
+        command=base.command,
+        shared_flags=base.shared_flags,
+        resume_prefix=base.resume_prefix,
+        resume_flags=base.resume_flags,
+        model_flag=base.model_flag,
+        model_env_vars=base.model_env_vars,
+        reasoning_effort="high",
+        reasoning_effort_flag=base.reasoning_effort_flag,
+        session_capture=base.session_capture,
+    )
+    config = Config(agent_templates={"claude": override})
+    command = build_command(agent_type="claude", prompt="review", config=config)
+
+    assert "--effort" in command
+    i = command.index("--effort")
+    assert command[i + 1] == "high"
+
+
+def test_build_command_codex_no_reasoning_effort_by_default():
+    """The built-in codex default has reasoning_effort=None so even
+    though reasoning_effort_flag is set, no tokens are injected."""
+
+    command = build_command(agent_type="codex", prompt="do thing", config=Config())
+    assert "model_reasoning_effort=high" not in command
+    assert "-c" not in command
+
+
+def test_build_command_reasoning_effort_equals_form_single_token():
+    """A template that uses `--effort={effort}` as a single token (rather
+    than `--effort {effort}` as two tokens) still gets the substitution."""
+
+    from team_harness.agents.registry import build_command_from_template
+    from team_harness.agents.template import AgentTemplate
+
+    template = AgentTemplate(
+        command=("myagent",),
+        reasoning_effort="high",
+        reasoning_effort_flag=("--effort={effort}",),
+        model_flag=None,
+    )
+    command = build_command_from_template(template=template, prompt="go")
+    assert "--effort=high" in command
+    assert "--effort={effort}" not in command
 
 
 def test_build_command_default_gemini_resume_and_model_override():

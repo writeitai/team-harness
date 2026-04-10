@@ -26,8 +26,8 @@ def test_parse_structured_template_fields():
         },
     )
 
-    # Missing fields (default_model, model_env_vars) are inherited from
-    # the built-in codex default. default_model inherits "gpt-5.4".
+    # Missing fields (default_model, model_env_vars, reasoning_effort_flag)
+    # are inherited from the built-in codex default.
     assert template == AgentTemplate(
         command=("codex", "exec"),
         shared_flags=("--json",),
@@ -35,6 +35,7 @@ def test_parse_structured_template_fields():
         resume_flags=("{session_id}",),
         model_flag="--model",
         default_model="gpt-5.4",
+        reasoning_effort_flag=("-c", "model_reasoning_effort={effort}"),
         session_capture=SessionCapture(
             strategy="stream_json_event",
             match={"type": "thread.started"},
@@ -93,6 +94,129 @@ def test_parse_model_env_vars_inherits_from_base_when_absent():
 def test_parse_default_model_wrong_type_raises():
     with pytest.raises(SystemExit, match="default_model must be"):
         _parse_agent_template("myagent", {"command": ["myagent"], "default_model": 42})
+
+
+# ---------------------------------------------------------------------------
+# reasoning_effort / reasoning_effort_flag / provider_env
+# ---------------------------------------------------------------------------
+
+
+def test_parse_reasoning_effort_set():
+    template = _parse_agent_template(
+        "codex", {"command": ["codex", "exec"], "reasoning_effort": "high"}
+    )
+    assert template.reasoning_effort == "high"
+
+
+def test_parse_reasoning_effort_cleared_with_false():
+    template = _parse_agent_template(
+        "codex", {"command": ["codex", "exec"], "reasoning_effort": False}
+    )
+    assert template.reasoning_effort is None
+
+
+def test_parse_reasoning_effort_cleared_with_empty_string():
+    template = _parse_agent_template(
+        "codex", {"command": ["codex", "exec"], "reasoning_effort": ""}
+    )
+    assert template.reasoning_effort is None
+
+
+def test_parse_reasoning_effort_inherits_from_base_when_absent():
+    # Base has reasoning_effort=None, so inheritance returns None.
+    template = _parse_agent_template("codex", {"command": ["codex", "exec"]})
+    assert template.reasoning_effort is None
+
+
+def test_parse_reasoning_effort_wrong_type_raises():
+    with pytest.raises(SystemExit, match="reasoning_effort must be"):
+        _parse_agent_template(
+            "myagent", {"command": ["myagent"], "reasoning_effort": 42}
+        )
+
+
+def test_parse_reasoning_effort_flag_as_list_of_strings():
+    template = _parse_agent_template(
+        "myagent",
+        {"command": ["myagent"], "reasoning_effort_flag": ["--thinking", "{effort}"]},
+    )
+    assert template.reasoning_effort_flag == ("--thinking", "{effort}")
+
+
+def test_parse_reasoning_effort_flag_inherits_from_codex_base():
+    template = _parse_agent_template("codex", {"command": ["codex", "exec"]})
+    assert template.reasoning_effort_flag == ("-c", "model_reasoning_effort={effort}")
+
+
+def test_parse_reasoning_effort_flag_inherits_from_claude_base():
+    template = _parse_agent_template("claude", {"command": ["claude"]})
+    assert template.reasoning_effort_flag == ("--effort", "{effort}")
+
+
+def test_parse_provider_env_as_table():
+    template = _parse_agent_template(
+        "claude",
+        {
+            "command": ["claude"],
+            "provider_env": {
+                "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
+                "ANTHROPIC_AUTH_TOKEN": "{env:OPENROUTER_API_KEY}",
+                "ANTHROPIC_API_KEY": "",
+            },
+        },
+    )
+    # Order of keys in a Python dict is insertion order.
+    assert template.provider_env == (
+        ("ANTHROPIC_BASE_URL", "https://openrouter.ai/api"),
+        ("ANTHROPIC_AUTH_TOKEN", "{env:OPENROUTER_API_KEY}"),
+        ("ANTHROPIC_API_KEY", ""),
+    )
+
+
+def test_parse_provider_env_as_list_of_pairs():
+    template = _parse_agent_template(
+        "claude",
+        {
+            "command": ["claude"],
+            "provider_env": [
+                ["ANTHROPIC_BASE_URL", "https://openrouter.ai/api"],
+                ["ANTHROPIC_AUTH_TOKEN", "{env:OPENROUTER_API_KEY}"],
+            ],
+        },
+    )
+    assert template.provider_env == (
+        ("ANTHROPIC_BASE_URL", "https://openrouter.ai/api"),
+        ("ANTHROPIC_AUTH_TOKEN", "{env:OPENROUTER_API_KEY}"),
+    )
+
+
+def test_parse_provider_env_inherits_from_base_when_absent():
+    # Base has provider_env=() for all built-ins.
+    template = _parse_agent_template("claude", {"command": ["claude"]})
+    assert template.provider_env == ()
+
+
+def test_parse_provider_env_wrong_type_raises():
+    with pytest.raises(SystemExit, match="provider_env must be"):
+        _parse_agent_template("myagent", {"command": ["myagent"], "provider_env": 42})
+
+
+def test_parse_provider_env_list_of_pairs_invalid_shape():
+    with pytest.raises(SystemExit, match="two-element"):
+        _parse_agent_template(
+            "myagent",
+            {
+                "command": ["myagent"],
+                "provider_env": [["ANTHROPIC_BASE_URL"]],  # single-element list
+            },
+        )
+
+
+def test_parse_provider_env_table_with_non_string_value_raises():
+    with pytest.raises(SystemExit, match="string names to string values"):
+        _parse_agent_template(
+            "myagent", {"command": ["myagent"], "provider_env": {"KEY": 123}}
+        )
 
 
 def test_load_config_legacy_template_raises_migration_error(tmp_path):

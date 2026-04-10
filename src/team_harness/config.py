@@ -80,6 +80,10 @@ _STRUCTURED_AGENTS_BLOCK = """# Worker agent invocations. Each agent is describe
 # `thread.started` event and capture the session id for future resume.
 # `default_model` is the model passed to codex when the coordinator does
 # not override it via `spawn_agent(model="...")`.
+# `reasoning_effort_flag` tells the harness how to pass the level; set
+# `reasoning_effort` (commented) to actually enable it. See the
+# "Connecting workers to OpenRouter" recipe in the README for the
+# extra shared_flags entries that route codex through OpenRouter.
 [agents.codex]
 command = ["codex", "exec"]
 shared_flags = [
@@ -91,6 +95,8 @@ resume_prefix = ["resume"]
 resume_flags = ["{session_id}"]
 model_flag = "--model"
 default_model = "gpt-5.4"
+reasoning_effort_flag = ["-c", "model_reasoning_effort={effort}"]
+# reasoning_effort = "high"   # uncomment to pin a level (low|medium|high|xhigh)
 
 [agents.codex.session_capture]
 strategy = "stream_json_event"
@@ -135,7 +141,20 @@ model_env_vars = [
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
 ]
+reasoning_effort_flag = ["--effort", "{effort}"]
 # default_model = "claude-sonnet-4-6"   # uncomment to pin a default
+# reasoning_effort = "high"              # values: low|medium|high|max
+
+# OpenRouter recipe for Claude Code. Uncomment the block below AFTER
+# exporting OPENROUTER_API_KEY in your shell. The `{env:OPENROUTER_API_KEY}`
+# placeholder is resolved at spawn time from the parent environment, so
+# no secret lives in this file. `ANTHROPIC_API_KEY` MUST be set to the
+# empty string so Claude Code does not short-circuit to native
+# Anthropic auth. See README → "Connecting workers to OpenRouter".
+# [agents.claude.provider_env]
+# ANTHROPIC_BASE_URL = "https://openrouter.ai/api"
+# ANTHROPIC_AUTH_TOKEN = "{env:OPENROUTER_API_KEY}"
+# ANTHROPIC_API_KEY = ""
 
 [agents.claude.session_capture]
 strategy = "stream_json_event"
@@ -454,8 +473,53 @@ def _structured_agent_keys_present(section: dict[str, object]) -> bool:
             "model_flag",
             "model_env_vars",
             "default_model",
+            "reasoning_effort",
+            "reasoning_effort_flag",
+            "provider_env",
             "session_capture",
         )
+    )
+
+
+def _parse_provider_env(raw: object, *, agent_name: str) -> tuple[tuple[str, str], ...]:
+    """Parse a `provider_env` config value into a frozen tuple of
+    `(name, value)` pairs. Accepts either the TOML table form::
+
+        [agents.claude.provider_env]
+        ANTHROPIC_BASE_URL = "..."
+
+    or the list-of-pairs form::
+
+        provider_env = [["ANTHROPIC_BASE_URL", "..."]]
+    """
+
+    if isinstance(raw, dict):
+        pairs: list[tuple[str, str]] = []
+        for key, value in raw.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise SystemExit(
+                    f"agents.{agent_name}.provider_env entries must map "
+                    "string names to string values."
+                )
+            pairs.append((key, value))
+        return tuple(pairs)
+    if isinstance(raw, list):
+        pairs = []
+        for item in raw:
+            if (
+                not isinstance(item, list)
+                or len(item) != 2
+                or not all(isinstance(x, str) for x in item)
+            ):
+                raise SystemExit(
+                    f"agents.{agent_name}.provider_env list entries must be "
+                    "two-element [name, value] pairs of strings."
+                )
+            pairs.append((item[0], item[1]))
+        return tuple(pairs)
+    raise SystemExit(
+        f"agents.{agent_name}.provider_env must be a table or a list of "
+        "[name, value] pairs."
     )
 
 
@@ -552,6 +616,42 @@ def _parse_agent_template(agent_name: str, section: dict[str, object]) -> AgentT
                 f"agents.{agent_name}.default_model must be a string, "
                 "false, or omitted."
             )
+
+    # `reasoning_effort` — same inheritance/clearing semantics as default_model.
+    if "reasoning_effort" not in section:
+        reasoning_effort = base.reasoning_effort if base else None
+    else:
+        reasoning_effort_raw = section["reasoning_effort"]
+        if reasoning_effort_raw is False or reasoning_effort_raw == "":
+            reasoning_effort = None
+        elif isinstance(reasoning_effort_raw, str):
+            reasoning_effort = reasoning_effort_raw
+        else:
+            raise SystemExit(
+                f"agents.{agent_name}.reasoning_effort must be a string, "
+                "false, or omitted."
+            )
+
+    # `reasoning_effort_flag` — list of argv token strings with optional
+    # `{effort}` placeholders. Inherits from base when absent.
+    reasoning_effort_flag = (
+        _parse_string_tuple(
+            section["reasoning_effort_flag"], key="reasoning_effort_flag"
+        )
+        if "reasoning_effort_flag" in section
+        else base.reasoning_effort_flag
+        if base
+        else ()
+    )
+
+    # `provider_env` — accepts TOML table form or list-of-pairs form.
+    if "provider_env" not in section:
+        provider_env = base.provider_env if base else ()
+    else:
+        provider_env = _parse_provider_env(
+            section["provider_env"], agent_name=agent_name
+        )
+
     session_capture = (
         _parse_session_capture(section["session_capture"])
         if "session_capture" in section
@@ -569,6 +669,9 @@ def _parse_agent_template(agent_name: str, section: dict[str, object]) -> AgentT
         model_flag=model_flag,
         model_env_vars=model_env_vars,
         default_model=default_model,
+        reasoning_effort=reasoning_effort,
+        reasoning_effort_flag=reasoning_effort_flag,
+        provider_env=provider_env,
         session_capture=session_capture,
     )
 

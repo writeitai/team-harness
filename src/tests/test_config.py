@@ -706,6 +706,14 @@ def test_default_config_text_contains_verified_flag_tokens():
     assert '"ANTHROPIC_DEFAULT_HAIKU_MODEL"' not in text
     assert '"ANTHROPIC_SMALL_FAST_MODEL"' not in text
     assert '"CLAUDE_CODE_SUBAGENT_MODEL"' not in text
+    # Reasoning effort tokens present (commented default value, flag shape).
+    assert 'reasoning_effort_flag = ["-c", "model_reasoning_effort={effort}"]' in text
+    assert 'reasoning_effort_flag = ["--effort", "{effort}"]' in text
+    assert '# reasoning_effort = "high"' in text
+    # OpenRouter recipe for claude is present (even if commented out).
+    assert "[agents.claude.provider_env]" in text
+    assert "{env:OPENROUTER_API_KEY}" in text
+    assert 'ANTHROPIC_BASE_URL = "https://openrouter.ai/api"' in text
     # Harness
     assert 'command = ["th", "run"]' in text
     assert 'model_flag = "--model"' in text

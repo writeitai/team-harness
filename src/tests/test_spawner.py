@@ -36,16 +36,26 @@ async def test_spawn_creates_logs_and_uses_devnull(tmp_path):
 
 
 def _write_env_dump_script(path):
-    """Write a small shell script that dumps its ANTHROPIC_*/CODEX_* env
-    vars to the file named by $ENV_DUMP. Used to assert what env the
-    spawner actually passes to the child process."""
+    """Write a small shell script that dumps its ANTHROPIC_*/CODEX_*/
+    OPENROUTER_*/PROVIDER_* env vars to the file named by $ENV_DUMP.
+    Used to assert what env the spawner actually passes to the child
+    process."""
 
     path.write_text(
         "#!/bin/sh\n"
-        'printenv | grep -E "^(ANTHROPIC_|CODEX_)" > "$ENV_DUMP" || true\n'
+        'printenv | grep -E "^(ANTHROPIC_|CODEX_|OPENROUTER_|PROVIDER_)" '
+        '> "$ENV_DUMP" || true\n'
         "exit 0\n"
     )
     path.chmod(0o755)
+
+
+def _parse_env_dump(env_dump_path) -> dict[str, str]:
+    return {
+        line.split("=", 1)[0]: line.split("=", 1)[1]
+        for line in env_dump_path.read_text(encoding="utf-8").splitlines()
+        if "=" in line
+    }
 
 
 @pytest.mark.asyncio
@@ -246,9 +256,201 @@ async def test_spawn_caller_extra_env_overrides_template_env(tmp_path, monkeypat
     )
     await asyncio.wait_for(result.proc.wait(), 2)
 
-    dumped = {
-        line.split("=", 1)[0]: line.split("=", 1)[1]
-        for line in env_dump.read_text(encoding="utf-8").splitlines()
-        if "=" in line
-    }
+    dumped = _parse_env_dump(env_dump)
     assert dumped.get("ANTHROPIC_MODEL") == "caller-wins-model"
+
+
+# ---------------------------------------------------------------------------
+# provider_env — OpenRouter-style env var presets with {env:VAR} expansion
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_spawn_provider_env_expands_env_ref_when_set(tmp_path, monkeypatch):
+    from team_harness.agents.template import _clear_provider_env_warnings
+
+    _clear_provider_env_warnings()
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-123")
+
+    fake_claude = tmp_path / "fake-claude"
+    _write_env_dump_script(fake_claude)
+    env_dump = tmp_path / "env.txt"
+
+    config = Config(
+        agent_templates={
+            "claude": AgentTemplate(
+                command=(str(fake_claude),),
+                model_flag=None,
+                provider_env=(
+                    ("ANTHROPIC_BASE_URL", "https://openrouter.ai/api"),
+                    ("ANTHROPIC_AUTH_TOKEN", "{env:OPENROUTER_API_KEY}"),
+                    ("ANTHROPIC_API_KEY", ""),
+                ),
+            )
+        }
+    )
+    result = await spawn(
+        agent_id="agent_claude",
+        agent_type="claude",
+        prompt="hello",
+        cwd=tmp_path,
+        config=config,
+        log_dir=tmp_path / "logs",
+        extra_env={"ENV_DUMP": str(env_dump)},
+    )
+    await asyncio.wait_for(result.proc.wait(), 2)
+
+    dumped = _parse_env_dump(env_dump)
+    assert dumped.get("ANTHROPIC_BASE_URL") == "https://openrouter.ai/api"
+    assert dumped.get("ANTHROPIC_AUTH_TOKEN") == "sk-or-test-123"
+    assert dumped.get("ANTHROPIC_API_KEY") == ""
+
+
+@pytest.mark.asyncio
+async def test_spawn_provider_env_expands_env_ref_when_missing(tmp_path, monkeypatch):
+    from team_harness.agents.template import _clear_provider_env_warnings
+
+    _clear_provider_env_warnings()
+    monkeypatch.delenv("MY_MISSING_SECRET", raising=False)
+
+    fake_claude = tmp_path / "fake-claude"
+    _write_env_dump_script(fake_claude)
+    env_dump = tmp_path / "env.txt"
+
+    config = Config(
+        agent_templates={
+            "claude": AgentTemplate(
+                command=(str(fake_claude),),
+                model_flag=None,
+                provider_env=(("PROVIDER_SECRET", "{env:MY_MISSING_SECRET}"),),
+            )
+        }
+    )
+    with pytest.warns(UserWarning, match="MY_MISSING_SECRET"):
+        result = await spawn(
+            agent_id="agent_claude",
+            agent_type="claude",
+            prompt="hi",
+            cwd=tmp_path,
+            config=config,
+            log_dir=tmp_path / "logs",
+            extra_env={"ENV_DUMP": str(env_dump)},
+        )
+        await asyncio.wait_for(result.proc.wait(), 2)
+
+    dumped = _parse_env_dump(env_dump)
+    assert dumped.get("PROVIDER_SECRET") == ""
+
+
+@pytest.mark.asyncio
+async def test_spawn_provider_env_literal_passthrough(tmp_path):
+    """Values without any `{env:…}` placeholder are passed through
+    verbatim, including the empty-string blanking pattern used for
+    `ANTHROPIC_API_KEY`."""
+
+    fake_claude = tmp_path / "fake-claude"
+    _write_env_dump_script(fake_claude)
+    env_dump = tmp_path / "env.txt"
+
+    config = Config(
+        agent_templates={
+            "claude": AgentTemplate(
+                command=(str(fake_claude),),
+                model_flag=None,
+                provider_env=(
+                    ("ANTHROPIC_BASE_URL", "https://openrouter.ai/api"),
+                    ("ANTHROPIC_API_KEY", ""),
+                ),
+            )
+        }
+    )
+    result = await spawn(
+        agent_id="agent_claude",
+        agent_type="claude",
+        prompt="hi",
+        cwd=tmp_path,
+        config=config,
+        log_dir=tmp_path / "logs",
+        extra_env={"ENV_DUMP": str(env_dump)},
+    )
+    await asyncio.wait_for(result.proc.wait(), 2)
+
+    dumped = _parse_env_dump(env_dump)
+    assert dumped["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert dumped["ANTHROPIC_API_KEY"] == ""
+
+
+@pytest.mark.asyncio
+async def test_spawn_provider_env_merge_order_model_env_wins(tmp_path, monkeypatch):
+    """When provider_env and model_env_vars both declare the same name,
+    model_env_vars (later in merge order) wins."""
+
+    from team_harness.agents.template import _clear_provider_env_warnings
+
+    _clear_provider_env_warnings()
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+
+    fake_claude = tmp_path / "fake-claude"
+    _write_env_dump_script(fake_claude)
+    env_dump = tmp_path / "env.txt"
+
+    config = Config(
+        agent_templates={
+            "claude": AgentTemplate(
+                command=(str(fake_claude),),
+                model_flag=None,
+                default_model="dynamic-model",
+                model_env_vars=("ANTHROPIC_MODEL",),
+                provider_env=(("ANTHROPIC_MODEL", "literal-provider-value"),),
+            )
+        }
+    )
+    result = await spawn(
+        agent_id="agent_claude",
+        agent_type="claude",
+        prompt="hi",
+        cwd=tmp_path,
+        config=config,
+        log_dir=tmp_path / "logs",
+        extra_env={"ENV_DUMP": str(env_dump)},
+    )
+    await asyncio.wait_for(result.proc.wait(), 2)
+
+    dumped = _parse_env_dump(env_dump)
+    # model_env_vars layer (later in merge order) wins.
+    assert dumped["ANTHROPIC_MODEL"] == "dynamic-model"
+
+
+@pytest.mark.asyncio
+async def test_spawn_provider_env_caller_extra_env_wins(tmp_path, monkeypatch):
+    from team_harness.agents.template import _clear_provider_env_warnings
+
+    _clear_provider_env_warnings()
+    monkeypatch.setenv("OPENROUTER_API_KEY", "from-shell")
+
+    fake_claude = tmp_path / "fake-claude"
+    _write_env_dump_script(fake_claude)
+    env_dump = tmp_path / "env.txt"
+
+    config = Config(
+        agent_templates={
+            "claude": AgentTemplate(
+                command=(str(fake_claude),),
+                model_flag=None,
+                provider_env=(("ANTHROPIC_AUTH_TOKEN", "{env:OPENROUTER_API_KEY}"),),
+            )
+        }
+    )
+    result = await spawn(
+        agent_id="agent_claude",
+        agent_type="claude",
+        prompt="hi",
+        cwd=tmp_path,
+        config=config,
+        log_dir=tmp_path / "logs",
+        extra_env={"ENV_DUMP": str(env_dump), "ANTHROPIC_AUTH_TOKEN": "caller-wins"},
+    )
+    await asyncio.wait_for(result.proc.wait(), 2)
+
+    dumped = _parse_env_dump(env_dump)
+    assert dumped["ANTHROPIC_AUTH_TOKEN"] == "caller-wins"
