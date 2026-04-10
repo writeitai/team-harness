@@ -51,7 +51,6 @@ def test_harness_console_pause_stops_live_when_started(monkeypatch, tmp_path):
 
 
 def test_harness_console_resume_is_noop(monkeypatch, tmp_path):
-    """resume_after_input does not start Live — that happens in begin_turn."""
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
     console = HarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
@@ -93,3 +92,86 @@ def test_harness_console_resume_is_noop_when_not_started(monkeypatch, tmp_path):
 
     console._live.start.assert_not_called()
     console._live.update.assert_not_called()
+
+
+def test_harness_console_status_bar_prefixes_estimated_total(monkeypatch, tmp_path):
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    ctx = ContextTracker(model_id="m", model_limit=100)
+    ctx.update({"prompt_tokens": 20, "completion_tokens": 10})
+    ctx.set_estimated_total(
+        [{"role": "system", "content": "sys"}, {"role": "user", "content": "a" * 400}]
+    )
+    console = HarnessConsole(ctx, AgentManager(), tmp_path)
+
+    text = console._render_status_bar().plain
+
+    assert "ctx: ~" in text
+
+
+def test_ui_context_warning_mentions_clear(monkeypatch, tmp_path, capsys):
+    plain = PlainConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+
+    plain.context_warning()
+
+    output = capsys.readouterr().out
+    assert "/clear" in output
+    assert "/reset" not in output
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    rich = HarnessConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+    rich._console = MagicMock()
+
+    rich.context_warning()
+
+    printed = "".join(call.args[0] for call in rich._console.print.call_args_list)
+    assert "/clear" in printed
+    assert "/reset" not in printed
+
+
+def test_harness_console_shows_compacting_indicator(monkeypatch, tmp_path):
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    console = HarnessConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+
+    console.begin_compaction()
+    text = console._render_status_bar().plain
+
+    assert "compacting..." in text
+    console.end_compaction(100, 50)
+    assert console._compacting is False
+
+
+def test_harness_console_prints_post_compaction_notice(monkeypatch, tmp_path):
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    console = HarnessConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+    console._console = MagicMock()
+    console._live = MagicMock()
+    console._live_running = True
+
+    console.begin_compaction()
+    console.end_compaction(12_345, 6_789)
+
+    printed = " ".join(
+        str(call.args[0]) for call in console._console.print.call_args_list
+    )
+    assert "Context compacted: ~12,345 -> ~6,789 tokens" in printed
+
+
+def test_plain_console_prints_post_compaction_notice(tmp_path, capsys):
+    console = PlainConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+
+    console.begin_compaction()
+    console.end_compaction(12_345, 6_789)
+
+    output = capsys.readouterr().out
+    assert "Compacting conversation..." in output
+    assert "Context compacted: ~12,345 -> ~6,789 tokens" in output

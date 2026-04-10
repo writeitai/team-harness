@@ -56,6 +56,9 @@ class ConsoleBase(ABC):
     @abstractmethod
     def begin_turn(self, n: int) -> None: ...
 
+    def begin_compaction(self) -> None:
+        return None
+
     @abstractmethod
     def begin_streaming(self) -> None: ...
 
@@ -64,6 +67,9 @@ class ConsoleBase(ABC):
 
     @abstractmethod
     def end_streaming(self) -> None: ...
+
+    def end_compaction(self, before_tokens: int, after_tokens: int) -> None:
+        return None
 
     @abstractmethod
     def end_turn(self) -> None: ...
@@ -180,6 +186,9 @@ class PlainConsole(ConsoleBase):
     def begin_turn(self, n: int) -> None:
         print(f"\n{self._prefix()} [Turn {n}]")
 
+    def begin_compaction(self) -> None:
+        print(f"{self._prefix()} Compacting conversation...")
+
     def begin_streaming(self) -> None:
         return None
 
@@ -188,6 +197,11 @@ class PlainConsole(ConsoleBase):
 
     def end_streaming(self) -> None:
         return None
+
+    def end_compaction(self, before_tokens: int, after_tokens: int) -> None:
+        print(
+            f"{self._prefix()} Context compacted: ~{before_tokens:,} -> ~{after_tokens:,} tokens"
+        )
 
     def end_turn(self) -> None:
         print()
@@ -206,7 +220,7 @@ class PlainConsole(ConsoleBase):
         print(f"{self._prefix()}   {state.agent_type} {state.id[:6]}  {event}")
 
     def context_warning(self) -> None:
-        print(f"{self._prefix()} ⚠ Context at {self._ctx.pct:.0f}% — consider /reset")
+        print(f"{self._prefix()} ⚠ Context at {self._ctx.pct:.0f}% — consider /clear")
 
     def reset_separator(self) -> None:
         print(f"{self._prefix()} --- Context reset ---")
@@ -231,6 +245,7 @@ class HarnessConsole(ConsoleBase):
         self._run_dir = run_dir
         self._turn = 0
         self._start = time.monotonic()
+        self._compacting = False
         self._console = Console(highlight=False)
         self._live = Live(
             self._render_live(),
@@ -304,6 +319,11 @@ class HarnessConsole(ConsoleBase):
             self._live_running = False
         self._streaming = True
 
+    def begin_compaction(self) -> None:
+        self._compacting = True
+        if self._live_running:
+            self._live.update(self._render_live())
+
     def stream_token(self, token: str) -> None:
         self._console.print(
             token, end="", markup=False, highlight=False, soft_wrap=True
@@ -318,6 +338,14 @@ class HarnessConsole(ConsoleBase):
             self._live.update(self._render_live())
             self._live_running = True
         self._streaming = False
+
+    def end_compaction(self, before_tokens: int, after_tokens: int) -> None:
+        self._compacting = False
+        if self._live_running:
+            self._live.update(self._render_live())
+        self._console.print(
+            f"Context compacted: ~{before_tokens:,} -> ~{after_tokens:,} tokens"
+        )
 
     def end_turn(self) -> None:
         if self._live_running:
@@ -350,7 +378,7 @@ class HarnessConsole(ConsoleBase):
 
     def context_warning(self) -> None:
         self._console.print(
-            f"\n  [bold red]⚠ Context at {self._ctx.pct:.0f}% — consider /reset[/bold red]\n"
+            f"\n  [bold red]⚠ Context at {self._ctx.pct:.0f}% — consider /clear[/bold red]\n"
         )
 
     def reset_separator(self) -> None:
@@ -449,21 +477,32 @@ class HarnessConsole(ConsoleBase):
         ctx_color = "red" if pct >= 80 else "yellow" if pct >= 60 else "cyan"
         running = self._manager.running_count()
         total = len(self._manager.list_all())
-        return Text.assemble(
+        total_prefix = "~" if self._ctx.has_estimate else ""
+        parts: list[tuple[str, str]] = [
             (" ctx: ", "dim"),
-            (f"{self._ctx.total:,}/{self._ctx.model_limit:,} ({pct:.0f}%)", ctx_color),
+            (
+                f"{total_prefix}{self._ctx.total:,}/{self._ctx.model_limit:,} ({pct:.0f}%)",
+                ctx_color,
+            ),
             ("  │  ", "dim"),
             (
                 f"agents: {running} running / {total} total",
                 "yellow" if running else "dim",
             ),
-            ("  │  ", "dim"),
-            (f"turn: {self._turn}", "dim"),
-            ("  │  ", "dim"),
-            (_fmt_elapsed(elapsed), "green"),
-            ("  │  ", "dim"),
-            (f"model: {self._ctx.model_id}", "dim"),
+        ]
+        if self._compacting:
+            parts.extend([("  │  ", "dim"), ("compacting...", "yellow")])
+        parts.extend(
+            [
+                ("  │  ", "dim"),
+                (f"turn: {self._turn}", "dim"),
+                ("  │  ", "dim"),
+                (_fmt_elapsed(elapsed), "green"),
+                ("  │  ", "dim"),
+                (f"model: {self._ctx.model_id}", "dim"),
+            ]
         )
+        return Text.assemble(*parts)
 
     def _load_todos(self) -> list[dict]:
         todo_path = self._run_dir / "todo.json"
