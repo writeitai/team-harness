@@ -208,6 +208,39 @@ def test_build_command_default_claude_contains_verbose():
     ]
 
 
+def test_build_command_default_openhands_fresh():
+    command = build_command(agent_type="openhands", prompt="do thing", config=Config())
+
+    assert command == [
+        "openhands",
+        "--headless",
+        "--json",
+        "--override-with-envs",
+        "-t",
+        "do thing",
+    ]
+
+
+def test_build_command_openhands_explicit_model_does_not_change_argv():
+    command = build_command(
+        agent_type="openhands",
+        prompt="do thing",
+        config=Config(),
+        model="anthropic/claude-sonnet-4-6",
+    )
+
+    # model_flag is None so --model is not injected.
+    assert command == [
+        "openhands",
+        "--headless",
+        "--json",
+        "--override-with-envs",
+        "-t",
+        "do thing",
+    ]
+    assert "--model" not in command
+
+
 def test_build_command_model_override_noop_when_model_flag_is_none():
     command = build_command(
         agent_type="pi", prompt="do thing", config=Config(), model="ignored"

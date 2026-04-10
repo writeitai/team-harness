@@ -1,6 +1,6 @@
 # team-harness
 
-A lightweight, model-agnostic multi-agent orchestration harness. It runs a coordinator LLM through either an OpenAI-compatible API or an experimental Codex subscription backend and lets that coordinator spawn external worker CLIs (Codex, Gemini, Claude Code, opencode, pi, or nested th runs) as tool-use actions.
+A lightweight, model-agnostic multi-agent orchestration harness. It runs a coordinator LLM through either an OpenAI-compatible API or an experimental Codex subscription backend and lets that coordinator spawn external worker CLIs (Codex, Gemini, Claude Code, opencode, pi, OpenHands, or nested th runs) as tool-use actions.
 
 ## Installation
 
@@ -24,12 +24,14 @@ uv run th --help
 ## Prerequisites
 
 Worker CLIs must be installed and authenticated separately. You do not need all of them; restrict a run with `--agents codex,gemini` to use only the ones you have.
+Install with `pip install openhands` (the PyPI distribution name is `openhands`, provided by the OpenHands-CLI repo).
 
 | Worker    | Install docs                                                |
 |-----------|-------------------------------------------------------------|
 | `codex`   | [Codex CLI](https://github.com/openai/codex)               |
 | `gemini`  | [Gemini CLI](https://github.com/google-gemini/gemini-cli)  |
 | `claude`  | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) |
+| `openhands` | [OpenHands CLI](https://github.com/OpenHands/OpenHands-CLI) |
 | `opencode`| [opencode](https://github.com/opencode-ai/opencode)        |
 | `pi`      | [pi](https://github.com/badlogic/pi-mono)                  |
 
@@ -219,6 +221,12 @@ strategy = "stream_json_event"
 match = { type = "system", subtype = "init" }
 field_path = ["session_id"]
 
+[agents.openhands]
+command = ["openhands"]
+shared_flags = ["--headless", "--json", "--override-with-envs"]
+prompt_flag = "-t"
+model_env_vars = ["LLM_MODEL"]
+
 [agents.opencode]
 command = ["opencode"]
 
@@ -229,6 +237,12 @@ command = ["pi", "--print", "--no-session"]
 command = ["th", "run"]
 model_flag = "--model"
 ```
+
+OpenHands runs are not auto-resumable from team-harness today. The `--json` output format is not parseable as stream-json.
+
+`--override-with-envs` is required so `LLM_MODEL` injection works. A side-effect is that any `LLM_MODEL`, `LLM_API_KEY`, or `LLM_BASE_URL` already set in your shell will also be picked up by the worker. Unset or override them if you want deterministic per-run behavior.
+
+Custom `[agents.openhands]` sections in existing `.team-harness/config.toml` files will, after upgrade, inherit the new built-in defaults for any fields they do not explicitly set (including `shared_flags`). If your custom section was a standalone agent that coincidentally used the name `openhands`, rename it or explicitly clear inherited fields (e.g. `shared_flags = []`, `prompt_flag = false`, `model_env_vars = []`).
 
 ### Prompt configuration
 
@@ -320,6 +334,16 @@ required field is `command`; everything else has sensible defaults.
 command = ["my-custom-cli"]
 shared_flags = ["--mode", "auto"]
 model_flag = "--model"   # set to `false` if the CLI has no model flag
+```
+
+Some CLIs use env-based model injection instead of a `--model` flag. OpenHands is the built-in example:
+
+```toml
+[agents.openhands]
+command = ["openhands"]
+shared_flags = ["--headless", "--json", "--override-with-envs"]
+model_flag = false
+model_env_vars = ["LLM_MODEL"]
 ```
 
 The new type appears automatically in the coordinator's `spawn_agent` tool.

@@ -192,7 +192,16 @@ field_path = ["session_id"]
 # ANTHROPIC_API_KEY = ""
 # -----------------------------------------------------------------------
 
-
+# OpenHands worker. `--override-with-envs` is required or `LLM_MODEL`
+# is ignored by OpenHands-CLI. `session_capture` is intentionally
+# omitted: `--json` emits multi-line pretty JSON blocks delimited by
+# `--JSON Event--`, which the harness cannot parse as stream-json today.
+# That also means resume is not wired up for this worker.
+[agents.openhands]
+command = ["openhands"]
+shared_flags = ["--headless", "--json", "--override-with-envs"]
+prompt_flag = "-t"
+model_env_vars = ["LLM_MODEL"]
 
 [agents.opencode]
 command = ["opencode"]
@@ -259,7 +268,7 @@ shutdown_timeout_s = 10.0
 min_agent_lifetime_before_kill_s = 600.0
 
 # Restrict which agent types the coordinator can spawn. Leave commented to allow all.
-# allowed_agents = ["codex", "gemini", "claude", "opencode", "pi", "harness"]
+# allowed_agents = ["codex", "gemini", "claude", "openhands", "opencode", "pi", "harness"]
 
 # --- Experimental Codex subscription coordinator ---
 # provider = "codex"
@@ -321,7 +330,7 @@ shutdown_timeout_s = 10.0
 min_agent_lifetime_before_kill_s = 600.0
 
 # Restrict which agent types the coordinator can spawn. Leave commented to allow all.
-# allowed_agents = ["codex", "gemini", "claude", "opencode", "pi", "harness"]
+# allowed_agents = ["codex", "gemini", "claude", "openhands", "opencode", "pi", "harness"]
 
 # --- Experimental Codex subscription coordinator ---
 # provider = "codex"

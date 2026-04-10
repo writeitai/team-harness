@@ -31,6 +31,7 @@ AGENT_COLORS: dict[str, str] = {
     "codex": "blue",
     "gemini": "green",
     "claude": "magenta",
+    "openhands": "bright_cyan",
     "opencode": "cyan",
     "harness": "yellow",
     "pi": "bright_red",
