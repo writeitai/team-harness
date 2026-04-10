@@ -69,18 +69,9 @@ DEFAULT_AGENT_TEMPLATES: dict[str, AgentTemplate] = {
             field_path=("session_id",),
         ),
     ),
-    "opencode": AgentTemplate(
-        command=("opencode",),
-        model_flag=None,
-    ),
-    "pi": AgentTemplate(
-        command=("pi", "--print", "--no-session"),
-        model_flag=None,
-    ),
-    "harness": AgentTemplate(
-        command=("th", "run"),
-        model_flag="--model",
-    ),
+    "opencode": AgentTemplate(command=("opencode",), model_flag=None),
+    "pi": AgentTemplate(command=("pi", "--print", "--no-session"), model_flag=None),
+    "harness": AgentTemplate(command=("th", "run"), model_flag="--model"),
 }
 
 

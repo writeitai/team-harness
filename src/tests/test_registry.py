@@ -135,14 +135,7 @@ def test_build_command_from_template_substitutes_generated_uuid_and_session_id()
         generated_uuid="gen-456",
     )
 
-    assert command == [
-        "tool",
-        "--session-id",
-        "gen-456",
-        "--resume",
-        "sid-123",
-        "go",
-    ]
+    assert command == ["tool", "--session-id", "gen-456", "--resume", "sid-123", "go"]
 
 
 def test_build_command_legacy_template_still_works():
@@ -152,7 +145,7 @@ def test_build_command_legacy_template_still_works():
         agent_type="codex", prompt='Say "hello" && echo $HOME', config=config
     )
 
-    assert command == ['echo', 'PROMPT=Say "hello" && echo $HOME']
+    assert command == ["echo", 'PROMPT=Say "hello" && echo $HOME']
 
 
 def test_build_command_duplicate_model_warning_uses_legacy_template():
@@ -171,10 +164,7 @@ def test_build_command_duplicate_model_warning_uses_legacy_template():
 def test_build_command_missing_resume_session_id_raises():
     with pytest.raises(ValueError, match="session_id"):
         build_command(
-            agent_type="codex",
-            prompt="resume",
-            config=Config(),
-            mode="resume",
+            agent_type="codex", prompt="resume", config=Config(), mode="resume"
         )
 
 

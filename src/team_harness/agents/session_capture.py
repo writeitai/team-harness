@@ -9,9 +9,7 @@ from team_harness.agents.template import template_uses_generated_uuid
 
 
 def extract_session_id(
-    template: AgentTemplate,
-    stdout_bytes: bytes,
-    pre_generated_uuid: str | None,
+    template: AgentTemplate, stdout_bytes: bytes, pre_generated_uuid: str | None
 ) -> str | None:
     if pre_generated_uuid is not None and template_uses_generated_uuid(template):
         return pre_generated_uuid

@@ -70,9 +70,7 @@ def _write_init_files(config_path: Path, config_text: str, force: bool) -> None:
         config_path.parent / "coordinator_system_message.md", COORDINATOR_PROMPT
     )
     _write_sidecar_file(config_path.parent / "worker_suffix.md", "")
-    _write_sidecar_file(
-        config_path.parent / "worker_footer.md", DEFAULT_WORKER_FOOTER
-    )
+    _write_sidecar_file(config_path.parent / "worker_footer.md", DEFAULT_WORKER_FOOTER)
 
 
 @main.command()

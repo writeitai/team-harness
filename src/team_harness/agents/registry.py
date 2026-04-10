@@ -38,11 +38,7 @@ def _tokenize_template(template: str) -> list[str]:
 
 
 def _substitute_template_token(
-    token: str,
-    *,
-    prompt: str,
-    session_id: str | None,
-    generated_uuid: str | None,
+    token: str, *, prompt: str, session_id: str | None, generated_uuid: str | None
 ) -> str:
     result = token.replace("{prompt}", prompt)
     if "{session_id}" in result:

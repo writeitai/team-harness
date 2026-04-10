@@ -75,8 +75,5 @@ async def spawn(
         stdout_file.close()
         stderr_file.close()
     return SpawnResult(
-        proc=proc,
-        command=command,
-        template=template,
-        generated_uuid=generated_uuid,
+        proc=proc, command=command, template=template, generated_uuid=generated_uuid
     )

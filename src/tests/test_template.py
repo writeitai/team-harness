@@ -46,8 +46,7 @@ def test_load_config_legacy_template_only_emits_no_warning(tmp_path):
     config_path = tmp_path / ".team-harness" / "config.toml"
     config_path.parent.mkdir()
     config_path.write_text(
-        '[agents.codex]\ntemplate = "codex exec --yolo {prompt}"\n',
-        encoding="utf-8",
+        '[agents.codex]\ntemplate = "codex exec --yolo {prompt}"\n', encoding="utf-8"
     )
 
     with warnings.catch_warnings(record=True) as caught:

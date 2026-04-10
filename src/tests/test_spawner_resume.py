@@ -11,9 +11,7 @@ from team_harness.config import Config
 
 def _write_capture_script(path):
     path.write_text(
-        "#!/bin/sh\n"
-        "printf '%s\\n' \"$@\" > \"$CAPTURE_FILE\"\n",
-        encoding="utf-8",
+        '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$CAPTURE_FILE"\n', encoding="utf-8"
     )
     path.chmod(0o755)
 
@@ -64,10 +62,7 @@ async def test_spawn_fresh_passes_prompt_and_model_override(tmp_path):
     _write_capture_script(fake_tool)
     config = Config(
         agent_templates={
-            "codex": AgentTemplate(
-                command=(str(fake_tool),),
-                shared_flags=("--json",),
-            )
+            "codex": AgentTemplate(command=(str(fake_tool),), shared_flags=("--json",))
         }
     )
 

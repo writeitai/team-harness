@@ -45,7 +45,9 @@ def test_init_creates_local_config(monkeypatch, tmp_path):
     result = runner.invoke(main, ["init"])
 
     config_path = tmp_path / ".team-harness" / "config.toml"
-    coordinator_prompt_path = tmp_path / ".team-harness" / "coordinator_system_message.md"
+    coordinator_prompt_path = (
+        tmp_path / ".team-harness" / "coordinator_system_message.md"
+    )
     worker_suffix_path = tmp_path / ".team-harness" / "worker_suffix.md"
     worker_footer_path = tmp_path / ".team-harness" / "worker_footer.md"
     assert result.exit_code == 0
@@ -89,8 +91,7 @@ def test_init_force_overwrites_local(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert "Project-level team-harness config." in config_path.read_text()
     assert (
-        coordinator_prompt_path.read_text(encoding="utf-8")
-        == "keep coordinator prompt"
+        coordinator_prompt_path.read_text(encoding="utf-8") == "keep coordinator prompt"
     )
     assert worker_suffix_path.read_text(encoding="utf-8") == "keep worker suffix"
     assert worker_footer_path.read_text(encoding="utf-8") == "keep worker footer"
@@ -106,15 +107,13 @@ def test_init_force_creates_missing_sidecars(monkeypatch, tmp_path):
     result = runner.invoke(main, ["init", "--force"])
 
     assert result.exit_code == 0
-    assert (
-        config_path.parent / "coordinator_system_message.md"
-    ).read_text(encoding="utf-8") == (
-        COORDINATOR_PROMPT
-    )
+    assert (config_path.parent / "coordinator_system_message.md").read_text(
+        encoding="utf-8"
+    ) == (COORDINATOR_PROMPT)
     assert (config_path.parent / "worker_suffix.md").read_text(encoding="utf-8") == ""
-    assert (
-        config_path.parent / "worker_footer.md"
-    ).read_text(encoding="utf-8") == DEFAULT_WORKER_FOOTER
+    assert (config_path.parent / "worker_footer.md").read_text(
+        encoding="utf-8"
+    ) == DEFAULT_WORKER_FOOTER
 
 
 def test_init_global_creates_global_config(monkeypatch, tmp_path):
@@ -127,15 +126,13 @@ def test_init_global_creates_global_config(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert global_path.exists()
     assert 'model = "gpt-5.4"' in global_path.read_text()
-    assert (
-        global_path.parent / "coordinator_system_message.md"
-    ).read_text(encoding="utf-8") == (
-        COORDINATOR_PROMPT
-    )
+    assert (global_path.parent / "coordinator_system_message.md").read_text(
+        encoding="utf-8"
+    ) == (COORDINATOR_PROMPT)
     assert (global_path.parent / "worker_suffix.md").read_text(encoding="utf-8") == ""
-    assert (
-        global_path.parent / "worker_footer.md"
-    ).read_text(encoding="utf-8") == DEFAULT_WORKER_FOOTER
+    assert (global_path.parent / "worker_footer.md").read_text(
+        encoding="utf-8"
+    ) == DEFAULT_WORKER_FOOTER
     assert str(global_path) in result.output
 
 

@@ -122,7 +122,9 @@ def _build_running_snapshot(
         "stderr_bytes_total": stderr_total,
         "stdout_bytes_delta_since_last_check": stdout_delta,
         "stderr_bytes_delta_since_last_check": stderr_delta,
-        "seconds_since_last_output": int(last_output_age) if last_output_age is not None else None,
+        "seconds_since_last_output": int(last_output_age)
+        if last_output_age is not None
+        else None,
         "is_alive": is_alive,
         "recent_stderr_tail": stderr_tail,
         "advisory": advisory,
@@ -164,23 +166,31 @@ def _should_refuse_kill(
     age = snapshot["seconds_since_last_output"]
     stderr_delta = int(snapshot["stderr_bytes_delta_since_last_check"])  # type: ignore[arg-type]
     too_young = elapsed < min_lifetime_s
-    actively_producing = (
-        isinstance(age, int) and age < 120
-    ) or stderr_delta > 0
+    actively_producing = (isinstance(age, int) and age < 120) or stderr_delta > 0
     if too_young:
         reason = (
             f"Agent is only {elapsed}s old (floor is {int(min_lifetime_s)}s). "
             "Re-enter wait_for_any and inspect stderr/stdout before escalating. "
             "If stderr is growing, the agent is healthy — continue waiting."
         )
-        return True, {"killed": False, "refused": True, "reason": reason, "snapshot": snapshot}
+        return True, {
+            "killed": False,
+            "refused": True,
+            "reason": reason,
+            "snapshot": snapshot,
+        }
     if actively_producing:
         reason = (
             f"Agent produced output very recently (age={age}s, "
             f"stderr_delta={stderr_delta}). It is actively working. "
             "Re-enter wait_for_any."
         )
-        return True, {"killed": False, "refused": True, "reason": reason, "snapshot": snapshot}
+        return True, {
+            "killed": False,
+            "refused": True,
+            "reason": reason,
+            "snapshot": snapshot,
+        }
     return False, snapshot
 
 
@@ -450,10 +460,7 @@ async def _watch_agent(agent_id: str) -> None:
 
 
 async def _capture_session_id_task(
-    *,
-    agent_id: str,
-    template: AgentTemplate,
-    pre_generated_uuid: str | None,
+    *, agent_id: str, template: AgentTemplate, pre_generated_uuid: str | None
 ) -> None:
     manager, run_log, _, _ = _require_setup()
     state = manager.get(agent_id)
@@ -929,9 +936,7 @@ def build_agent_tool_bindings(
             finished_id = tasks[next(iter(done))]
             finished_state = manager.get(finished_id)
             elapsed = int(
-                (
-                    datetime.now(timezone.utc) - finished_state.spawn_time
-                ).total_seconds()
+                (datetime.now(timezone.utc) - finished_state.spawn_time).total_seconds()
             )
             return json.dumps(
                 {
@@ -941,9 +946,7 @@ def build_agent_tool_bindings(
                     "status": _status_from_state(finished_state),
                     "elapsed_seconds": elapsed,
                     "running": [
-                        _build_running_snapshot(
-                            manager.get(aid), advance_cursors=True
-                        )
+                        _build_running_snapshot(manager.get(aid), advance_cursors=True)
                         for aid in agent_ids
                         if aid != finished_id
                     ],
@@ -959,9 +962,7 @@ def build_agent_tool_bindings(
                     "finished_agent_id": None,
                     "timed_out": True,
                     "running": [
-                        _build_running_snapshot(
-                            manager.get(aid), advance_cursors=True
-                        )
+                        _build_running_snapshot(manager.get(aid), advance_cursors=True)
                         for aid in agent_ids
                     ],
                     "patience_policy": _patience_policy(config),
@@ -980,9 +981,7 @@ def build_agent_tool_bindings(
                 }
             )
         if not force:
-            floor = float(
-                getattr(config, "min_agent_lifetime_before_kill_s", 600.0)
-            )
+            floor = float(getattr(config, "min_agent_lifetime_before_kill_s", 600.0))
             refused, payload = _should_refuse_kill(state, min_lifetime_s=floor)
             if refused:
                 return json.dumps(payload)

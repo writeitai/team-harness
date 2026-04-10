@@ -340,9 +340,7 @@ def _parse_session_capture(raw: object) -> SessionCapture | None:
         match_value = dict(match)
     field_path_value = _parse_field_path(raw.get("field_path"))
     capture = SessionCapture(
-        strategy=strategy_value,
-        match=match_value,
-        field_path=field_path_value,
+        strategy=strategy_value, match=match_value, field_path=field_path_value
     )
     if capture.strategy == "stream_json_event" and (
         capture.match is None or capture.field_path is None
@@ -370,10 +368,7 @@ def _structured_agent_keys_present(section: dict[str, object]) -> bool:
     )
 
 
-def _parse_agent_template(
-    agent_name: str,
-    section: dict[str, object],
-) -> AgentTemplate:
+def _parse_agent_template(agent_name: str, section: dict[str, object]) -> AgentTemplate:
     base = DEFAULT_AGENT_TEMPLATES.get(agent_name)
     command_raw = section.get("command")
     if command_raw is None:
@@ -571,10 +566,7 @@ def _resolve_base_prompt_text(
 
     resolved_path = _resolve_config_prompt_path(source_config_path, file_path)
     try:
-        text = _read_prompt_file(
-            resolved_path,
-            label=f"coordinator.{display_key}",
-        )
+        text = _read_prompt_file(resolved_path, label=f"coordinator.{display_key}")
     except FileNotFoundError:
         warnings.warn(
             f"Configured coordinator.{display_key} {resolved_path} was not found; "
@@ -610,15 +602,17 @@ def _resolve_optional_prompt_text(
         new_key=key,
         old_key=key,
     )
-    if not configured or not file_path or not file_path.strip() or source_config_path is None:
+    if (
+        not configured
+        or not file_path
+        or not file_path.strip()
+        or source_config_path is None
+    ):
         return fallback
 
     resolved_path = _resolve_config_prompt_path(source_config_path, file_path)
     try:
-        text = _read_prompt_file(
-            resolved_path,
-            label=f"coordinator.{key}",
-        )
+        text = _read_prompt_file(resolved_path, label=f"coordinator.{key}")
     except FileNotFoundError:
         return fallback
     if not text.strip():
@@ -633,9 +627,7 @@ def _read_cli_prompt_extension(cli_system_prompt_file: str, cwd: Path) -> str:
     try:
         return _read_prompt_file(prompt_path, label="CLI --system-prompt-file")
     except FileNotFoundError:
-        raise SystemExit(
-            f"CLI --system-prompt-file not found: {prompt_path}"
-        ) from None
+        raise SystemExit(f"CLI --system-prompt-file not found: {prompt_path}") from None
 
 
 def _coordinator_int(
@@ -711,7 +703,9 @@ def load_config(
     if system_prompt:
         prompt_parts.append(system_prompt)
     if cli_system_prompt_file:
-        prompt_parts.append(_read_cli_prompt_extension(cli_system_prompt_file, start_dir))
+        prompt_parts.append(
+            _read_cli_prompt_extension(cli_system_prompt_file, start_dir)
+        )
 
     coordinator_system_message = _resolve_base_prompt_text(
         local_section=local_coordinator,

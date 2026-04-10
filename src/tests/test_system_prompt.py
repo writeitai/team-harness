@@ -99,14 +99,14 @@ def test_build_system_prompt_uses_config_coordinator_prompt():
 
 
 def test_build_system_prompt_includes_suffix_note_when_present():
-    config = Config(
-        worker_suffix="Follow the repo conventions.",
-        cwd="/tmp/project",
-    )
+    config = Config(worker_suffix="Follow the repo conventions.", cwd="/tmp/project")
 
     prompt = build_system_prompt(config, ["codex"], [], session_output_dir="/tmp/out")
 
-    assert "The following suffix is automatically appended to every worker prompt." in prompt
+    assert (
+        "The following suffix is automatically appended to every worker prompt."
+        in prompt
+    )
     assert "DO NOT duplicate these instructions in spawn_agent prompts." in prompt
     assert "Follow the repo conventions." in prompt
 
@@ -116,7 +116,10 @@ def test_build_system_prompt_omits_suffix_section_when_empty():
 
     prompt = build_system_prompt(config, ["codex"], [], session_output_dir="/tmp/out")
 
-    assert "The following suffix is automatically appended to every worker prompt." not in prompt
+    assert (
+        "The following suffix is automatically appended to every worker prompt."
+        not in prompt
+    )
     assert "DO NOT duplicate these instructions in spawn_agent prompts." not in prompt
 
 
