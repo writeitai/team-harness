@@ -37,13 +37,13 @@ async def test_spawn_creates_logs_and_uses_devnull(tmp_path):
 
 def _write_env_dump_script(path):
     """Write a small shell script that dumps its ANTHROPIC_*/CODEX_*/
-    OPENROUTER_*/PROVIDER_* env vars to the file named by $ENV_DUMP.
+    LLM_*/OPENROUTER_*/PROVIDER_* env vars to the file named by $ENV_DUMP.
     Used to assert what env the spawner actually passes to the child
     process."""
 
     path.write_text(
         "#!/bin/sh\n"
-        'printenv | grep -E "^(ANTHROPIC_|CODEX_|OPENROUTER_|PROVIDER_)" '
+        'printenv | grep -E "^(ANTHROPIC_|CODEX_|LLM_|OPENROUTER_|PROVIDER_)" '
         '> "$ENV_DUMP" || true\n'
         "exit 0\n"
     )
@@ -454,3 +454,60 @@ async def test_spawn_provider_env_caller_extra_env_wins(tmp_path, monkeypatch):
 
     dumped = _parse_env_dump(env_dump)
     assert dumped["ANTHROPIC_AUTH_TOKEN"] == "caller-wins"
+
+
+# ---------------------------------------------------------------------------
+# OpenHands — env-only model injection (no --model flag)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_spawn_openhands_sets_llm_model_env_without_model_flag(
+    tmp_path, monkeypatch
+):
+    """OpenHands has no --model flag; model override must land in
+    LLM_MODEL env, and the argv must be exactly the template shape."""
+
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+
+    fake_openhands = tmp_path / "fake-openhands"
+    fake_openhands.write_text(
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$@" > "$ARGV_DUMP"\n'
+        'printenv | grep -E "^(ANTHROPIC_|CODEX_|LLM_)" > "$ENV_DUMP" || true\n'
+        "exit 0\n"
+    )
+    fake_openhands.chmod(0o755)
+    argv_dump = tmp_path / "argv.txt"
+    env_dump = tmp_path / "env.txt"
+
+    config = Config(
+        agent_templates={
+            "openhands": AgentTemplate(
+                command=(str(fake_openhands),),
+                shared_flags=("--headless", "--json", "--override-with-envs"),
+                prompt_flag="-t",
+                prompt_position="tail",
+                model_flag=None,
+                model_env_vars=("LLM_MODEL",),
+            )
+        }
+    )
+    result = await spawn(
+        agent_id="agent_openhands",
+        agent_type="openhands",
+        prompt="hello",
+        cwd=tmp_path,
+        config=config,
+        log_dir=tmp_path / "logs",
+        extra_env={"ARGV_DUMP": str(argv_dump), "ENV_DUMP": str(env_dump)},
+        model="anthropic/claude-sonnet-4-6",
+    )
+    await asyncio.wait_for(result.proc.wait(), 2)
+
+    argv = argv_dump.read_text(encoding="utf-8").splitlines()
+    assert argv == ["--headless", "--json", "--override-with-envs", "-t", "hello"]
+    assert "--model" not in argv
+
+    dumped = _parse_env_dump(env_dump)
+    assert dumped.get("LLM_MODEL") == "anthropic/claude-sonnet-4-6"
