@@ -81,9 +81,7 @@ _STRUCTURED_AGENTS_BLOCK = """# Worker agent invocations. Each agent is describe
 # `default_model` is the model passed to codex when the coordinator does
 # not override it via `spawn_agent(model="...")`.
 # `reasoning_effort_flag` tells the harness how to pass the level; set
-# `reasoning_effort` (commented) to actually enable it. See the
-# "Connecting workers to OpenRouter" recipe in the README for the
-# extra shared_flags entries that route codex through OpenRouter.
+# `reasoning_effort` (commented) to actually enable it.
 [agents.codex]
 command = ["codex", "exec"]
 shared_flags = [
@@ -102,6 +100,37 @@ reasoning_effort_flag = ["-c", "model_reasoning_effort={effort}"]
 strategy = "stream_json_event"
 match = { type = "thread.started" }
 field_path = ["thread_id"]
+
+# --- OpenRouter recipe for Codex ---------------------------------------
+# By default the codex worker talks to its native provider (the one codex
+# is logged in to). To route codex through OpenRouter instead, export
+# OPENROUTER_API_KEY in your shell and uncomment the alternate block
+# below (and comment out the [agents.codex] block above). Codex reads
+# OPENROUTER_API_KEY directly via the env_key setting, so no
+# provider_env is needed.
+#
+# [agents.codex]
+# command = ["codex", "exec"]
+# shared_flags = [
+#     "--dangerously-bypass-approvals-and-sandbox",
+#     "--skip-git-repo-check",
+#     "--json",
+#     "-c", "model_provider=openrouter",
+#     "-c", 'model_providers.openrouter.name="openrouter"',
+#     "-c", 'model_providers.openrouter.base_url="https://openrouter.ai/api/v1"',
+#     "-c", 'model_providers.openrouter.env_key="OPENROUTER_API_KEY"',
+# ]
+# resume_prefix = ["resume"]
+# resume_flags = ["{session_id}"]
+# model_flag = "--model"
+# default_model = "openai/gpt-5.3-codex"    # OpenRouter-flavoured model name
+# reasoning_effort_flag = ["-c", "model_reasoning_effort={effort}"]
+#
+# [agents.codex.session_capture]
+# strategy = "stream_json_event"
+# match = { type = "thread.started" }
+# field_path = ["thread_id"]
+# -----------------------------------------------------------------------
 
 # Gemini worker. `stream-json` gives us a parseable session id in the
 # initial `init` event.
@@ -145,16 +174,22 @@ reasoning_effort_flag = ["--effort", "{effort}"]
 # default_model = "claude-sonnet-4-6"   # uncomment to pin a default
 # reasoning_effort = "high"              # values: low|medium|high|max
 
-# OpenRouter recipe for Claude Code. Uncomment the block below AFTER
-# exporting OPENROUTER_API_KEY in your shell. The `{env:OPENROUTER_API_KEY}`
-# placeholder is resolved at spawn time from the parent environment, so
+# --- OpenRouter recipe for Claude Code ---------------------------------
+# By default the claude worker talks to native Anthropic (or whichever
+# provider your existing ANTHROPIC_* shell env points at). To route
+# claude through OpenRouter instead, export OPENROUTER_API_KEY in your
+# shell and uncomment the block below. The `{env:OPENROUTER_API_KEY}`
+# placeholder is resolved at spawn time from the parent environment so
 # no secret lives in this file. `ANTHROPIC_API_KEY` MUST be set to the
 # empty string so Claude Code does not short-circuit to native
-# Anthropic auth. See README → "Connecting workers to OpenRouter".
+# Anthropic auth. Also uncomment `default_model` above and point it at
+# an OpenRouter-flavoured model name like "anthropic/claude-opus-4.6".
+#
 # [agents.claude.provider_env]
 # ANTHROPIC_BASE_URL = "https://openrouter.ai/api"
 # ANTHROPIC_AUTH_TOKEN = "{env:OPENROUTER_API_KEY}"
 # ANTHROPIC_API_KEY = ""
+# -----------------------------------------------------------------------
 
 [agents.claude.session_capture]
 strategy = "stream_json_event"
