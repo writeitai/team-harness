@@ -40,7 +40,7 @@ Worker CLIs must be installed and authenticated separately. You do not need all 
 export OPENROUTER_API_KEY="sk-or-..."
 
 # Create a project-local config in ./.team-harness/
-# Creates config.toml, coordinator_prompt.md, worker_suffix.md, and worker_footer.md
+# Creates config.toml, coordinator_system_message.md, worker_suffix.md, and worker_footer.md
 th init
 
 # Single-shot run
@@ -141,7 +141,7 @@ Example global config:
 provider = "openai_compat"
 model = "gpt-5.4"
 api_base = "https://openrouter.ai/api/v1"
-coordinator_prompt_file = "coordinator_prompt.md"
+coordinator_system_message_file = "coordinator_system_message.md"
 worker_suffix_file = "worker_suffix.md"
 worker_footer_file = "worker_footer.md"
 system_prompt = ""
@@ -173,7 +173,7 @@ template = "th run {prompt}"
 | File                | Purpose                                                                     |
 |---------------------|-----------------------------------------------------------------------------|
 | `config.toml`            | All coordinator and agent settings                                          |
-| `coordinator_prompt.md`  | Editable coordinator base prompt (seeded from the built-in default)         |
+| `coordinator_system_message.md`  | Editable coordinator base prompt (seeded from the built-in default)         |
 | `worker_suffix.md`       | Text automatically appended to every spawned worker prompt (empty by default)|
 | `worker_footer.md`       | Default worker output requirements template, editable per project           |
 
@@ -181,18 +181,18 @@ Prompt-related config keys:
 
 | Key                       | Purpose                                                                    |
 |---------------------------|----------------------------------------------------------------------------|
-| `coordinator_prompt_file` | Path to the coordinator base prompt file                                   |
+| `coordinator_system_message_file` | Path to the coordinator base prompt file                                   |
 | `worker_suffix_file`      | Path to text appended to every spawned worker prompt                       |
 | `worker_footer_file`      | Path to the worker footer template appended after the suffix               |
 | `system_prompt`           | Inline extension text appended after the coordinator base prompt           |
 
-**`coordinator_prompt_file`** — Points to the coordinator base prompt file. If the file is missing, a warning is emitted and the built-in default is used. If no key is configured, the built-in default is used silently.
+**`coordinator_system_message_file`** — Points to the coordinator base prompt file. If the file is missing, a warning is emitted and the built-in default is used. If no key is configured, the built-in default is used silently.
 
 **`worker_suffix_file`** — Points to a file whose contents are appended to every spawned worker prompt. The coordinator is told that this suffix exists so it does not duplicate those instructions. If the file is missing or empty, no suffix is appended.
 
 **`worker_footer_file`** — Points to a file whose contents define the footer appended to every spawned worker prompt. The footer should usually keep the `{session_output_dir}` placeholder so workers are told where to write artifacts. If the file is missing or empty, the built-in footer is used.
 
-**`system_prompt`** — Inline text appended as an extension after the base prompt. This is separate from `coordinator_prompt_file` and is additive.
+**`system_prompt`** — Inline text appended as an extension after the base prompt. This is separate from `coordinator_system_message_file` and is additive.
 
 **CLI `--system-prompt-file`** — Reads extra text from a file and appends it as a runtime extension. This is an extension source (like `system_prompt`), not a base prompt replacement. CLI paths resolve relative to the current working directory.
 
@@ -214,7 +214,7 @@ model = "codex-mini-latest"
 
 ### Project-level configuration
 
-`th init` writes `./.team-harness/config.toml`, `coordinator_prompt.md`, `worker_suffix.md`, and `worker_footer.md`. Local config discovery walks upward from the effective `--cwd` and the nearest ancestor config overrides the global file.
+`th init` writes `./.team-harness/config.toml`, `coordinator_system_message.md`, `worker_suffix.md`, and `worker_footer.md`. Local config discovery walks upward from the effective `--cwd` and the nearest ancestor config overrides the global file.
 
 Lists replace rather than extend. For example, setting `[coordinator].allowed_agents` in a local config replaces the global list instead of appending to it.
 
@@ -226,9 +226,9 @@ deliverables there. The harness also writes a compact
 worker for the run. Relative `output_dir` values resolve against the effective
 `--cwd`.
 
-`th init --force` overwrites `config.toml` but preserves existing `coordinator_prompt.md`, `worker_suffix.md`, and `worker_footer.md` files to protect user customizations. Missing sidecar files are re-created.
+`th init --force` overwrites `config.toml` but preserves existing `coordinator_system_message.md`, `worker_suffix.md`, and `worker_footer.md` files to protect user customizations. Missing sidecar files are re-created.
 
-Project-level `.team-harness/config.toml`, `.team-harness/coordinator_prompt.md`, `.team-harness/worker_suffix.md`, and `.team-harness/worker_footer.md` should normally be committed to version control so prompt behavior is reproducible across contributors and CI.
+Project-level `.team-harness/config.toml`, `.team-harness/coordinator_system_message.md`, `.team-harness/worker_suffix.md`, and `.team-harness/worker_footer.md` should normally be committed to version control so prompt behavior is reproducible across contributors and CI.
 
 ### Configuration resolution order
 

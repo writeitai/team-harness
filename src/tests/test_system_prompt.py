@@ -3,9 +3,9 @@
 from types import SimpleNamespace
 
 from team_harness.config import Config
+from team_harness.coordinator.system_prompt import build_system_prompt
 from team_harness.coordinator.system_prompt import COORDINATOR_PROMPT
 from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
-from team_harness.coordinator.system_prompt import build_system_prompt
 
 
 def test_system_prompt_contains_coordinator_identity():
@@ -33,7 +33,9 @@ def test_system_prompt_contains_values_and_monitoring_guidance():
     assert "Rigor:" in prompt
     assert "Patience:" in prompt
     assert "`wait_for_any`" in prompt
-    assert "`read_new_agent_output`" in prompt
+    assert "Patience Protocol" in prompt
+    assert "HARD FLOOR" in prompt
+    assert "STDERR GROWTH RULE" in prompt
     assert "Use the todo tools aggressively." in prompt
 
 
@@ -97,14 +99,14 @@ def test_build_system_prompt_uses_config_coordinator_prompt():
 
 
 def test_build_system_prompt_includes_suffix_note_when_present():
-    config = Config(
-        worker_suffix="Follow the repo conventions.",
-        cwd="/tmp/project",
-    )
+    config = Config(worker_suffix="Follow the repo conventions.", cwd="/tmp/project")
 
     prompt = build_system_prompt(config, ["codex"], [], session_output_dir="/tmp/out")
 
-    assert "The following suffix is automatically appended to every worker prompt." in prompt
+    assert (
+        "The following suffix is automatically appended to every worker prompt."
+        in prompt
+    )
     assert "DO NOT duplicate these instructions in spawn_agent prompts." in prompt
     assert "Follow the repo conventions." in prompt
 
@@ -114,7 +116,10 @@ def test_build_system_prompt_omits_suffix_section_when_empty():
 
     prompt = build_system_prompt(config, ["codex"], [], session_output_dir="/tmp/out")
 
-    assert "The following suffix is automatically appended to every worker prompt." not in prompt
+    assert (
+        "The following suffix is automatically appended to every worker prompt."
+        not in prompt
+    )
     assert "DO NOT duplicate these instructions in spawn_agent prompts." not in prompt
 
 

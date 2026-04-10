@@ -93,6 +93,7 @@ def config(tmp_path: Path) -> Config:
         api_key="test-key",
         cwd=str(tmp_path),
         run_dir=run_dir,
+        min_agent_lifetime_before_kill_s=0.0,
     )
 
 

@@ -40,6 +40,7 @@ class AgentRecord(BaseModel):
     exit_code: int | None = None
     stdout_log: str
     stderr_log: str
+    session_id: str | None = None
     resume: "WorkerResumeInfo | None" = None
 
 

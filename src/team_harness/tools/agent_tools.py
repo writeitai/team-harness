@@ -13,6 +13,8 @@ import uuid
 from team_harness.agents import spawner
 from team_harness.agents.manager import AgentState
 from team_harness.agents.registry import check_harness_depth
+from team_harness.agents.session_capture import capture_session_id_from_path
+from team_harness.agents.template import AgentTemplate
 from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
 from team_harness.tracking.models import AgentRecord
 from team_harness.tracking.worker_sessions import resume_info_for_agent_type
@@ -31,6 +33,8 @@ _session_output_dir: str = ""
 
 _output_cursors: dict[str, int] = {}
 _output_locks: dict[str, asyncio.Lock] = {}
+_wait_stdout_cursors: dict[str, int] = {}
+_wait_stderr_cursors: dict[str, int] = {}
 
 
 def _build_worker_output_footer(
@@ -42,6 +46,152 @@ def _build_worker_output_footer(
         else DEFAULT_WORKER_FOOTER
     )
     return template.format(session_output_dir=output_dir)
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except FileNotFoundError:
+        return 0
+
+
+def _tail_text(path: Path, n_chars: int) -> str:
+    if not path.exists():
+        return ""
+    with path.open("rb") as handle:
+        size = path.stat().st_size
+        handle.seek(max(0, size - n_chars * 2))
+        return handle.read().decode(errors="replace")[-n_chars:]
+
+
+def _seconds_since_last_output(stdout_log: Path, stderr_log: Path) -> float | None:
+    mtimes: list[float] = []
+    for path in (stdout_log, stderr_log):
+        try:
+            mtimes.append(path.stat().st_mtime)
+        except FileNotFoundError:
+            continue
+    if not mtimes:
+        return None
+    return max(0.0, datetime.now(timezone.utc).timestamp() - max(mtimes))
+
+
+def _build_running_snapshot(
+    state: AgentState, *, advance_cursors: bool
+) -> dict[str, object]:
+    now = datetime.now(timezone.utc)
+    elapsed = int((now - state.spawn_time).total_seconds())
+    stdout_total = _file_size(state.stdout_log)
+    stderr_total = _file_size(state.stderr_log)
+    stdout_prev = _wait_stdout_cursors.get(state.id, 0)
+    stderr_prev = _wait_stderr_cursors.get(state.id, 0)
+    stdout_delta = max(0, stdout_total - stdout_prev)
+    stderr_delta = max(0, stderr_total - stderr_prev)
+    if advance_cursors:
+        _wait_stdout_cursors[state.id] = stdout_total
+        _wait_stderr_cursors[state.id] = stderr_total
+    last_output_age = _seconds_since_last_output(state.stdout_log, state.stderr_log)
+    is_alive = state.proc.returncode is None
+    stderr_tail = _tail_text(state.stderr_log, 400)
+
+    if not is_alive:
+        advisory = "Process has exited. Read the full output with read_agent_output."
+    elif stderr_delta > 0 or stdout_delta > 0:
+        advisory = (
+            f"HEALTHY — producing output. {stdout_delta} new stdout bytes and "
+            f"{stderr_delta} new stderr bytes since last check. "
+            "DO NOT kill. Re-enter wait_for_any."
+        )
+    elif last_output_age is not None and last_output_age < 120:
+        advisory = (
+            f"HEALTHY — output file was touched {int(last_output_age)}s ago. "
+            "DO NOT kill. Re-enter wait_for_any."
+        )
+    else:
+        advisory = (
+            f"QUIET — no new output for {int(last_output_age) if last_output_age else -1}s. "
+            "Investigate with read_agent_output before considering kill_agent."
+        )
+
+    return {
+        "agent_id": state.id,
+        "agent_type": state.agent_type,
+        "status": _status_from_state(state),
+        "elapsed_seconds": elapsed,
+        "stdout_bytes_total": stdout_total,
+        "stderr_bytes_total": stderr_total,
+        "stdout_bytes_delta_since_last_check": stdout_delta,
+        "stderr_bytes_delta_since_last_check": stderr_delta,
+        "seconds_since_last_output": int(last_output_age)
+        if last_output_age is not None
+        else None,
+        "is_alive": is_alive,
+        "recent_stderr_tail": stderr_tail,
+        "advisory": advisory,
+    }
+
+
+def _patience_policy(config: "Config | None") -> dict[str, object]:
+    floor = float(
+        getattr(config, "min_agent_lifetime_before_kill_s", 600.0) if config else 600.0
+    )
+    return {
+        "min_wait_before_kill_seconds": floor,
+        "stderr_growth_free_kill_window_seconds": 120,
+        "typical_durations": {
+            "codex_planning": "20-45 min",
+            "gemini_research": "15-30 min",
+            "claude_review": "5-15 min",
+        },
+        "rationale": (
+            "timed_out=true means the agents are STILL RUNNING. This is the expected "
+            "and normal outcome for any non-trivial task. Re-enter wait_for_any with "
+            "a longer timeout. Only consider kill_agent if the agent has been quiet "
+            "for >= 20 minutes AND you have read the full output and confirmed the "
+            "trajectory is wrong."
+        ),
+    }
+
+
+def _should_refuse_kill(
+    state: AgentState, *, min_lifetime_s: float
+) -> tuple[bool, dict[str, object]]:
+    # A zero (or negative) floor disables the patience backstop entirely —
+    # this is the escape hatch for tests and users who need legacy behavior.
+    if min_lifetime_s <= 0:
+        snapshot = _build_running_snapshot(state, advance_cursors=False)
+        return False, snapshot
+    snapshot = _build_running_snapshot(state, advance_cursors=False)
+    elapsed = int(snapshot["elapsed_seconds"])  # type: ignore[arg-type]
+    age = snapshot["seconds_since_last_output"]
+    stderr_delta = int(snapshot["stderr_bytes_delta_since_last_check"])  # type: ignore[arg-type]
+    too_young = elapsed < min_lifetime_s
+    actively_producing = (isinstance(age, int) and age < 120) or stderr_delta > 0
+    if too_young:
+        reason = (
+            f"Agent is only {elapsed}s old (floor is {int(min_lifetime_s)}s). "
+            "Re-enter wait_for_any and inspect stderr/stdout before escalating. "
+            "If stderr is growing, the agent is healthy — continue waiting."
+        )
+        return True, {
+            "killed": False,
+            "refused": True,
+            "reason": reason,
+            "snapshot": snapshot,
+        }
+    if actively_producing:
+        reason = (
+            f"Agent produced output very recently (age={age}s, "
+            f"stderr_delta={stderr_delta}). It is actively working. "
+            "Re-enter wait_for_any."
+        )
+        return True, {
+            "killed": False,
+            "refused": True,
+            "reason": reason,
+            "snapshot": snapshot,
+        }
+    return False, snapshot
 
 
 AGENT_STATUS_SCHEMA = {
@@ -236,7 +386,7 @@ async def spawn_agent(**kwargs: object) -> str:
         Path(output_path) if output_path else run_dir / f"{agent_id}_stdout.log"
     )
     stderr_log = run_dir / f"{agent_id}_stderr.log"
-    proc = await spawner.spawn(
+    spawn_result = await spawner.spawn(
         agent_id=agent_id,
         agent_type=agent_type,
         prompt=full_prompt,
@@ -248,16 +398,23 @@ async def spawn_agent(**kwargs: object) -> str:
         extra_flags=flags,
         allowed_agents=agents if agent_type == "harness" else None,
         output_path=output_path,
+        mode=str(kwargs.get("mode", "fresh")),
+        resume_session_id=(
+            str(kwargs["resume_from_session_id"])
+            if kwargs.get("resume_from_session_id") is not None
+            else None
+        ),
     )
     state = AgentState(
         id=agent_id,
         agent_type=agent_type,
         prompt=prompt,
         cwd=cwd,
-        proc=proc,
+        proc=spawn_result.proc,
         spawn_time=datetime.now(timezone.utc),
         stdout_log=stdout_log,
         stderr_log=stderr_log,
+        session_id=spawn_result.generated_uuid,
     )
     manager.register(state)
     record = AgentRecord(
@@ -267,23 +424,23 @@ async def spawn_agent(**kwargs: object) -> str:
         cwd=cwd,
         prompt=prompt,
         full_prompt=full_prompt,
-        command=spawner.build_command(
-            agent_type=agent_type,
-            prompt=full_prompt,
-            config=config,
-            model=model,
-            extra_flags=flags,
-            allowed_agents=agents if agent_type == "harness" else None,
-        )
-        if hasattr(spawner, "build_command")
-        else [],
+        command=spawn_result.command,
         spawned_at=state.spawn_time,
         stdout_log=str(stdout_log),
         stderr_log=str(stderr_log),
+        session_id=state.session_id,
     )
     run_log.record_agent_spawn(record)
     ui.agent_event(event="spawned", state=state)
     asyncio.ensure_future(_watch_agent(agent_id))
+    if isinstance(spawn_result.template, AgentTemplate):
+        asyncio.ensure_future(
+            _capture_session_id_task(
+                agent_id=agent_id,
+                template=spawn_result.template,
+                pre_generated_uuid=spawn_result.generated_uuid,
+            )
+        )
     return agent_id
 
 
@@ -300,6 +457,22 @@ async def _watch_agent(agent_id: str) -> None:
             status=state.status,
         )
         ui.agent_event(event="done" if exit_code == 0 else "failed", state=state)
+
+
+async def _capture_session_id_task(
+    *, agent_id: str, template: AgentTemplate, pre_generated_uuid: str | None
+) -> None:
+    manager, run_log, _, _ = _require_setup()
+    state = manager.get(agent_id)
+    session_id = await capture_session_id_from_path(
+        stdout_path=state.stdout_log,
+        template=template,
+        pre_generated_uuid=pre_generated_uuid,
+        stop_event=asyncio.Event(),
+    )
+    if session_id is not None:
+        state.session_id = session_id
+        run_log.update_agent(agent_id, session_id=session_id)
 
 
 def _status_from_state(state: AgentState) -> str:
@@ -410,7 +583,7 @@ async def wait_for_agents(
 
 
 async def wait_for_any(agent_ids: list[str], timeout: float | None = None) -> str:
-    manager, _, _, _ = _require_setup()
+    manager, _, config, _ = _require_setup()
     if not agent_ids:
         return json.dumps({"agent_id": None, "timed_out": False, "running": []})
     tasks = {
@@ -425,25 +598,59 @@ async def wait_for_any(agent_ids: list[str], timeout: float | None = None) -> st
         for pending_task in pending:
             pending_task.cancel()
         finished_id = tasks[next(iter(done))]
+        running_ids = [aid for aid in agent_ids if aid != finished_id]
+        finished_state = manager.get(finished_id)
+        elapsed = int(
+            (datetime.now(timezone.utc) - finished_state.spawn_time).total_seconds()
+        )
         return json.dumps(
             {
                 "agent_id": finished_id,
+                "finished_agent_id": finished_id,
                 "timed_out": False,
                 "status": await agent_status(finished_id),
+                "elapsed_seconds": elapsed,
+                "running": [
+                    _build_running_snapshot(manager.get(aid), advance_cursors=True)
+                    for aid in running_ids
+                ],
+                "patience_policy": _patience_policy(config),
             }
         )
     except asyncio.TimeoutError:
         for task in tasks:
             task.cancel()
-        return json.dumps({"agent_id": None, "timed_out": True, "running": agent_ids})
+        return json.dumps(
+            {
+                "agent_id": None,
+                "finished_agent_id": None,
+                "timed_out": True,
+                "running": [
+                    _build_running_snapshot(manager.get(aid), advance_cursors=True)
+                    for aid in agent_ids
+                ],
+                "patience_policy": _patience_policy(config),
+            }
+        )
 
 
-async def kill_agent(agent_id: str) -> str:
-    manager, run_log, _, ui = _require_setup()
+async def kill_agent(agent_id: str, *, force: bool = False) -> str:
+    manager, run_log, config, ui = _require_setup()
     state = manager.get(agent_id)
     if state.proc.returncode is not None:
         manager.poll_exit_codes()
-        return f"Agent {agent_id} already finished."
+        return json.dumps(
+            {
+                "killed": False,
+                "refused": False,
+                "message": f"Agent {agent_id} already finished.",
+            }
+        )
+    if not force:
+        floor = float(getattr(config, "min_agent_lifetime_before_kill_s", 600.0))
+        refused, payload = _should_refuse_kill(state, min_lifetime_s=floor)
+        if refused:
+            return json.dumps(payload)
     manager.kill(agent_id)
     try:
         await asyncio.wait_for(state.proc.wait(), timeout=5)
@@ -460,7 +667,14 @@ async def kill_agent(agent_id: str) -> str:
         status="killed",
     )
     ui.agent_event(event="killed", state=state)
-    return f"Killed {agent_id}."
+    return json.dumps(
+        {
+            "killed": True,
+            "refused": False,
+            "agent_id": agent_id,
+            "message": f"Killed {agent_id}.",
+        }
+    )
 
 
 def _elapsed(state: AgentState) -> str:
@@ -543,7 +757,7 @@ def build_agent_tool_bindings(
             Path(output_path) if output_path else run_dir / f"{agent_id}_stdout.log"
         )
         stderr_log = run_dir / f"{agent_id}_stderr.log"
-        proc = await spawner.spawn(
+        spawn_result = await spawner.spawn(
             agent_id=agent_id,
             agent_type=agent_type,
             prompt=full_prompt,
@@ -555,16 +769,23 @@ def build_agent_tool_bindings(
             extra_flags=flags,
             allowed_agents=agents_arg if agent_type == "harness" else None,
             output_path=output_path,
+            mode=str(kwargs.get("mode", "fresh")),
+            resume_session_id=(
+                str(kwargs["resume_from_session_id"])
+                if kwargs.get("resume_from_session_id") is not None
+                else None
+            ),
         )
         state = AgentState(
             id=agent_id,
             agent_type=agent_type,
             prompt=prompt,
             cwd=cwd,
-            proc=proc,
+            proc=spawn_result.proc,
             spawn_time=datetime.now(timezone.utc),
             stdout_log=stdout_log,
             stderr_log=stderr_log,
+            session_id=spawn_result.generated_uuid,
         )
         manager.register(state)
         record = AgentRecord(
@@ -575,19 +796,11 @@ def build_agent_tool_bindings(
             cwd=cwd,
             prompt=prompt,
             full_prompt=full_prompt,
-            command=spawner.build_command(
-                agent_type=agent_type,
-                prompt=full_prompt,
-                config=config,
-                model=model_val,
-                extra_flags=flags,
-                allowed_agents=agents_arg if agent_type == "harness" else None,
-            )
-            if hasattr(spawner, "build_command")
-            else [],
+            command=spawn_result.command,
             spawned_at=state.spawn_time,
             stdout_log=str(stdout_log),
             stderr_log=str(stderr_log),
+            session_id=state.session_id,
             resume=resume_info_for_agent_type(agent_type),
         )
         run_log.record_agent_spawn(record)
@@ -606,7 +819,22 @@ def build_agent_tool_bindings(
                 )
                 ui.agent_event(event="done" if exit_code == 0 else "failed", state=s)
 
+        async def _capture_session() -> None:
+            if not isinstance(spawn_result.template, AgentTemplate):
+                return
+            session_id = await capture_session_id_from_path(
+                stdout_path=stdout_log,
+                template=spawn_result.template,
+                pre_generated_uuid=spawn_result.generated_uuid,
+                stop_event=asyncio.Event(),
+            )
+            if session_id is not None:
+                s = manager.get(agent_id)
+                s.session_id = session_id
+                run_log.update_agent(agent_id, session_id=session_id)
+
         asyncio.ensure_future(_watch())
+        asyncio.ensure_future(_capture_session())
         return agent_id
 
     async def _agent_status(agent_id: str) -> str:
@@ -706,25 +934,57 @@ def build_agent_tool_bindings(
             for pending_task in pending:
                 pending_task.cancel()
             finished_id = tasks[next(iter(done))]
+            finished_state = manager.get(finished_id)
+            elapsed = int(
+                (datetime.now(timezone.utc) - finished_state.spawn_time).total_seconds()
+            )
             return json.dumps(
                 {
                     "agent_id": finished_id,
+                    "finished_agent_id": finished_id,
                     "timed_out": False,
-                    "status": _status_from_state(manager.get(finished_id)),
+                    "status": _status_from_state(finished_state),
+                    "elapsed_seconds": elapsed,
+                    "running": [
+                        _build_running_snapshot(manager.get(aid), advance_cursors=True)
+                        for aid in agent_ids
+                        if aid != finished_id
+                    ],
+                    "patience_policy": _patience_policy(config),
                 }
             )
         except asyncio.TimeoutError:
             for task in tasks:
                 task.cancel()
             return json.dumps(
-                {"agent_id": None, "timed_out": True, "running": agent_ids}
+                {
+                    "agent_id": None,
+                    "finished_agent_id": None,
+                    "timed_out": True,
+                    "running": [
+                        _build_running_snapshot(manager.get(aid), advance_cursors=True)
+                        for aid in agent_ids
+                    ],
+                    "patience_policy": _patience_policy(config),
+                }
             )
 
-    async def _kill_agent(agent_id: str) -> str:
+    async def _kill_agent(agent_id: str, *, force: bool = False) -> str:
         state = manager.get(agent_id)
         if state.proc.returncode is not None:
             manager.poll_exit_codes()
-            return f"Agent {agent_id} already finished."
+            return json.dumps(
+                {
+                    "killed": False,
+                    "refused": False,
+                    "message": f"Agent {agent_id} already finished.",
+                }
+            )
+        if not force:
+            floor = float(getattr(config, "min_agent_lifetime_before_kill_s", 600.0))
+            refused, payload = _should_refuse_kill(state, min_lifetime_s=floor)
+            if refused:
+                return json.dumps(payload)
         manager.kill(agent_id)
         try:
             await asyncio.wait_for(state.proc.wait(), timeout=5)
@@ -741,7 +1001,14 @@ def build_agent_tool_bindings(
             status="killed",
         )
         ui.agent_event(event="killed", state=state)
-        return f"Killed {agent_id}."
+        return json.dumps(
+            {
+                "killed": True,
+                "refused": False,
+                "agent_id": agent_id,
+                "message": f"Killed {agent_id}.",
+            }
+        )
 
     return [
         (spawn_agent_schema(allowed_types), _spawn_agent),

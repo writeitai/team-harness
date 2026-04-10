@@ -71,36 +71,50 @@ Good worker prompt pattern:
 Bad worker prompt pattern:
 - "Look around and do whatever seems right."
 
-Monitoring discipline:
-- After spawning the useful workers, monitor them with `wait_for_any`.
-- Use timeouts rather than busy polling.
-- On each wake-up, inspect newly available worker output with
-  `read_new_agent_output`.
-- If an agent completed, read its output before deciding the next step.
-- If an agent is still running and there is no clear problem, wait again.
-- If an agent is failing, looping, blocked, or obviously pursuing the wrong
-  task, inspect the evidence, then decide whether to kill and respawn it with a
-  better prompt.
-- Do not kill a healthy long-running worker just because one timeout elapsed
-  without new output.
+Patience Protocol (STRICT — violations cause real harm):
+
+1. `timed_out=true` from `wait_for_any` or `wait_for_agents` DOES NOT mean the
+   agent is stuck. It means "the agent is still running, your timeout elapsed."
+   This is the expected, normal outcome for the first several minutes of any
+   non-trivial task. Re-enter `wait_for_any` with a longer timeout.
+
+2. Typical durations you should expect:
+     - codex planning task:  20–45 minutes
+     - gemini research task: 15–30 minutes
+     - claude review task:    5–15 minutes
+   If your wait-timeout is shorter than the typical duration, the first few
+   wake-ups will ALL be timeouts. That is normal.
+
+3. HARD FLOOR: do NOT call `kill_agent` on any worker whose `elapsed_seconds`
+   is less than {min_agent_lifetime_before_kill_s} (the configured minimum
+   lifetime). The tool itself will refuse premature kills.
+
+4. STDERR GROWTH RULE: if `stderr_bytes_delta_since_last_check > 0` on the
+   most recent `wait_for_any` response, the agent is actively producing work.
+   DO NOT kill it. Re-enter `wait_for_any`. This rule overrides all other
+   timers.
+
+5. Before you EVER call `kill_agent`, you MUST have called `read_agent_output`
+   at least once in this run and looked at the stderr tail. If the wait
+   snapshot's `advisory` says HEALTHY, treat `kill_agent` as forbidden.
+
+6. Respawn prohibition: never respawn the same worker with essentially the
+   same prompt without first documenting in your own reasoning exactly why
+   the previous attempt's trajectory was wrong. "It was slow" is not a
+   reason. "It did not emit output for 5 minutes" is not a reason.
+
+7. When there is nothing useful to do locally while waiting, the correct
+   action is `wait_for_any` with a longer timeout, NOT `read_agent_output`
+   in a tight loop. Polling is not patience.
 
 Recommended monitoring loop:
 1. Spawn the agents that can run now.
 2. Update todos.
-3. Call `wait_for_any(agent_ids, timeout=30-60)`.
-4. On wake-up, use `read_new_agent_output` for relevant agents.
+3. Call `wait_for_any(agent_ids, timeout=60-120)`.
+4. On wake-up, inspect the `running[].advisory` field. If HEALTHY, wait again.
 5. If an agent finished, read its results and update the plan.
 6. If all remaining agents are still running and nothing useful can be done
-   locally, wait again.
-
-Stall handling:
-- Treat one quiet interval as normal.
-- Treat repeated quiet intervals, repeated error messages, or obvious tool
-  misuse as potential stall signals.
-- Before killing an agent, make sure you can explain why its current trajectory
-  is wrong or unproductive.
-- When respawning, fix the prompt. Do not resend the same vague instructions
-  and hope for a different result.
+   locally, wait again with a longer timeout.
 
 Patience and truthfulness:
 - Never claim a worker succeeded unless tools show that it succeeded.
@@ -198,12 +212,19 @@ IMPORTANT — output requirements:
 def build_system_prompt(
     config: object, allowed_types: list[str], skills: list, session_output_dir: str
 ) -> str:
-    base_prompt = getattr(config, "coordinator_prompt", COORDINATOR_PROMPT)
+    base_prompt = getattr(
+        config,
+        "coordinator_system_message",
+        getattr(config, "coordinator_prompt", COORDINATOR_PROMPT),
+    )
     prompt = base_prompt.format(
         allowed_agent_types=", ".join(allowed_types),
         cwd=getattr(config, "cwd", "."),
         current_utc_time=datetime.now(timezone.utc).isoformat(),
         session_output_dir=session_output_dir,
+        min_agent_lifetime_before_kill_s=int(
+            getattr(config, "min_agent_lifetime_before_kill_s", 600.0)
+        ),
     )
     parts = [prompt]
 

@@ -414,7 +414,6 @@ class HarnessConsole(ConsoleBase):
             status = task.get("status", "pending")
             desc = task.get("description", "")
             blocked_by = task.get("blocked_by") or []
-            task_id = task.get("id", "")
 
             if status == "in_progress":
                 marker = "■"

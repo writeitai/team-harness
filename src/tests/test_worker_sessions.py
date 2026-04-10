@@ -64,10 +64,7 @@ def test_build_worker_sessions_manifest_shape_and_absolute_paths(tmp_path):
                 "provider_session_id": None,
                 "provider_session_path": None,
             },
-            "resume": {
-                "supported": True,
-                "preferred_mode": "resume",
-            },
+            "resume": {"supported": True, "preferred_mode": "resume"},
         }
     ]
 

@@ -5,8 +5,8 @@ import pytest
 
 from team_harness import config as config_module
 from team_harness.cli import _prepare_task
-from team_harness.config import _default_config_text
 from team_harness.config import _deep_merge
+from team_harness.config import _default_config_text
 from team_harness.config import _parse_provider
 from team_harness.config import Config
 from team_harness.config import CONFIG_PATH
@@ -151,13 +151,10 @@ template = "myagent {prompt}"
 
 def test_coordinator_prompt_file_supplies_coordinator_prompt(tmp_path, monkeypatch):
     global_path = _write_global_config(
-        tmp_path,
-        monkeypatch,
-        ['coordinator_prompt_file = "coordinator_prompt.md"'],
+        tmp_path, monkeypatch, ['coordinator_prompt_file = "coordinator_prompt.md"']
     )
     (global_path.parent / "coordinator_prompt.md").write_text(
-        "project base prompt",
-        encoding="utf-8",
+        "project base prompt", encoding="utf-8"
     )
 
     config = load_config(cwd=str(tmp_path / "project"))
@@ -167,13 +164,10 @@ def test_coordinator_prompt_file_supplies_coordinator_prompt(tmp_path, monkeypat
 
 def test_local_coordinator_prompt_file_overrides_global(tmp_path, monkeypatch):
     global_path = _write_global_config(
-        tmp_path,
-        monkeypatch,
-        ['coordinator_prompt_file = "coordinator_prompt.md"'],
+        tmp_path, monkeypatch, ['coordinator_prompt_file = "coordinator_prompt.md"']
     )
     (global_path.parent / "coordinator_prompt.md").write_text(
-        "global base prompt",
-        encoding="utf-8",
+        "global base prompt", encoding="utf-8"
     )
     local_path = tmp_path / "project" / ".team-harness" / "config.toml"
     local_path.parent.mkdir(parents=True)
@@ -182,8 +176,7 @@ def test_local_coordinator_prompt_file_overrides_global(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     (local_path.parent / "coordinator_prompt.md").write_text(
-        "local base prompt",
-        encoding="utf-8",
+        "local base prompt", encoding="utf-8"
     )
 
     config = load_config(cwd=str(tmp_path / "project"))
@@ -212,9 +205,7 @@ def test_absolute_base_prompt_paths_work(tmp_path, monkeypatch):
     prompt_path = tmp_path / "absolute-base.md"
     prompt_path.write_text("absolute prompt", encoding="utf-8")
     _write_global_config(
-        tmp_path,
-        monkeypatch,
-        [f'coordinator_prompt_file = "{prompt_path}"'],
+        tmp_path, monkeypatch, [f'coordinator_prompt_file = "{prompt_path}"']
     )
 
     config = load_config(cwd=str(tmp_path / "project"))
@@ -242,9 +233,7 @@ def test_missing_or_empty_worker_suffix_file_becomes_empty_string(
     tmp_path, monkeypatch, file_content
 ):
     global_path = _write_global_config(
-        tmp_path,
-        monkeypatch,
-        ['worker_suffix_file = "worker_suffix.md"'],
+        tmp_path, monkeypatch, ['worker_suffix_file = "worker_suffix.md"']
     )
     suffix_path = global_path.parent / "worker_suffix.md"
     if file_content is not None:
@@ -257,9 +246,7 @@ def test_missing_or_empty_worker_suffix_file_becomes_empty_string(
 
 def test_prompt_file_permission_errors_raise_system_exit(tmp_path, monkeypatch):
     global_path = _write_global_config(
-        tmp_path,
-        monkeypatch,
-        ['coordinator_prompt_file = "coordinator_prompt.md"'],
+        tmp_path, monkeypatch, ['coordinator_prompt_file = "coordinator_prompt.md"']
     )
     prompt_path = (global_path.parent / "coordinator_prompt.md").resolve()
     prompt_path.write_text("restricted prompt", encoding="utf-8")
@@ -278,9 +265,7 @@ def test_prompt_file_permission_errors_raise_system_exit(tmp_path, monkeypatch):
 
 def test_non_utf8_prompt_files_raise_system_exit(tmp_path, monkeypatch):
     global_path = _write_global_config(
-        tmp_path,
-        monkeypatch,
-        ['coordinator_prompt_file = "coordinator_prompt.md"'],
+        tmp_path, monkeypatch, ['coordinator_prompt_file = "coordinator_prompt.md"']
     )
     (global_path.parent / "coordinator_prompt.md").write_bytes(b"\xff\xfe\x00\x00")
 
@@ -290,13 +275,10 @@ def test_non_utf8_prompt_files_raise_system_exit(tmp_path, monkeypatch):
 
 def test_oversized_prompt_files_raise_system_exit(tmp_path, monkeypatch):
     global_path = _write_global_config(
-        tmp_path,
-        monkeypatch,
-        ['coordinator_prompt_file = "coordinator_prompt.md"'],
+        tmp_path, monkeypatch, ['coordinator_prompt_file = "coordinator_prompt.md"']
     )
     (global_path.parent / "coordinator_prompt.md").write_text(
-        "a" * (PROMPT_FILE_MAX_BYTES + 1),
-        encoding="utf-8",
+        "a" * (PROMPT_FILE_MAX_BYTES + 1), encoding="utf-8"
     )
 
     with pytest.raises(SystemExit, match="exceeds"):
@@ -310,9 +292,7 @@ def test_cli_system_prompt_file_backward_compatibility(tmp_path, monkeypatch):
     (cwd / "prompt.txt").write_text("from cwd relative file", encoding="utf-8")
 
     config = load_config(
-        system_prompt="inline",
-        cli_system_prompt_file="prompt.txt",
-        cwd=str(cwd),
+        system_prompt="inline", cli_system_prompt_file="prompt.txt", cwd=str(cwd)
     )
 
     assert config.system_prompt_extension == "inline\n\nfrom cwd relative file"
@@ -320,13 +300,10 @@ def test_cli_system_prompt_file_backward_compatibility(tmp_path, monkeypatch):
 
 def test_worker_suffix_file_supplies_worker_suffix(tmp_path, monkeypatch):
     global_path = _write_global_config(
-        tmp_path,
-        monkeypatch,
-        ['worker_suffix_file = "worker_suffix.md"'],
+        tmp_path, monkeypatch, ['worker_suffix_file = "worker_suffix.md"']
     )
     (global_path.parent / "worker_suffix.md").write_text(
-        "Always verify your work.",
-        encoding="utf-8",
+        "Always verify your work.", encoding="utf-8"
     )
 
     config = load_config(cwd=str(tmp_path / "project"))
@@ -336,23 +313,18 @@ def test_worker_suffix_file_supplies_worker_suffix(tmp_path, monkeypatch):
 
 def test_local_worker_suffix_file_overrides_global(tmp_path, monkeypatch):
     global_path = _write_global_config(
-        tmp_path,
-        monkeypatch,
-        ['worker_suffix_file = "worker_suffix.md"'],
+        tmp_path, monkeypatch, ['worker_suffix_file = "worker_suffix.md"']
     )
     (global_path.parent / "worker_suffix.md").write_text(
-        "global suffix",
-        encoding="utf-8",
+        "global suffix", encoding="utf-8"
     )
     local_path = tmp_path / "project" / ".team-harness" / "config.toml"
     local_path.parent.mkdir(parents=True)
     local_path.write_text(
-        '[coordinator]\nworker_suffix_file = "worker_suffix.md"\n',
-        encoding="utf-8",
+        '[coordinator]\nworker_suffix_file = "worker_suffix.md"\n', encoding="utf-8"
     )
     (local_path.parent / "worker_suffix.md").write_text(
-        "local suffix",
-        encoding="utf-8",
+        "local suffix", encoding="utf-8"
     )
 
     config = load_config(cwd=str(tmp_path / "project"))
@@ -362,13 +334,10 @@ def test_local_worker_suffix_file_overrides_global(tmp_path, monkeypatch):
 
 def test_worker_footer_file_supplies_worker_footer(tmp_path, monkeypatch):
     global_path = _write_global_config(
-        tmp_path,
-        monkeypatch,
-        ['worker_footer_file = "worker_footer.md"'],
+        tmp_path, monkeypatch, ['worker_footer_file = "worker_footer.md"']
     )
     (global_path.parent / "worker_footer.md").write_text(
-        "Artifacts live in {session_output_dir}.",
-        encoding="utf-8",
+        "Artifacts live in {session_output_dir}.", encoding="utf-8"
     )
 
     config = load_config(cwd=str(tmp_path / "project"))
@@ -378,9 +347,7 @@ def test_worker_footer_file_supplies_worker_footer(tmp_path, monkeypatch):
 
 def test_missing_worker_footer_file_uses_default(tmp_path, monkeypatch):
     _write_global_config(
-        tmp_path,
-        monkeypatch,
-        ['worker_footer_file = "missing-worker-footer.md"'],
+        tmp_path, monkeypatch, ['worker_footer_file = "missing-worker-footer.md"']
     )
 
     config = load_config(cwd=str(tmp_path / "project"))
@@ -390,9 +357,7 @@ def test_missing_worker_footer_file_uses_default(tmp_path, monkeypatch):
 
 def test_empty_coordinator_prompt_file_warns_and_falls_back(tmp_path, monkeypatch):
     global_path = _write_global_config(
-        tmp_path,
-        monkeypatch,
-        ['coordinator_prompt_file = "coordinator_prompt.md"'],
+        tmp_path, monkeypatch, ['coordinator_prompt_file = "coordinator_prompt.md"']
     )
     (global_path.parent / "coordinator_prompt.md").write_text("", encoding="utf-8")
 
@@ -406,13 +371,10 @@ def test_whitespace_only_coordinator_prompt_file_warns_and_falls_back(
     tmp_path, monkeypatch
 ):
     global_path = _write_global_config(
-        tmp_path,
-        monkeypatch,
-        ['coordinator_prompt_file = "coordinator_prompt.md"'],
+        tmp_path, monkeypatch, ['coordinator_prompt_file = "coordinator_prompt.md"']
     )
     (global_path.parent / "coordinator_prompt.md").write_text(
-        "   \n  \n",
-        encoding="utf-8",
+        "   \n  \n", encoding="utf-8"
     )
 
     with pytest.warns(UserWarning, match="coordinator_prompt_file"):
@@ -425,10 +387,7 @@ def test_cli_system_prompt_file_missing_raises_system_exit(tmp_path, monkeypatch
     _write_global_config(tmp_path, monkeypatch, [])
 
     with pytest.raises(SystemExit, match="not found"):
-        load_config(
-            cli_system_prompt_file="nonexistent.md",
-            cwd=str(tmp_path),
-        )
+        load_config(cli_system_prompt_file="nonexistent.md", cwd=str(tmp_path))
 
 
 def test_local_overrides_global_model(tmp_path, monkeypatch):
@@ -568,7 +527,10 @@ def test_default_config_text_uses_th_for_harness():
     assert default_config.startswith("# th")
     assert 'output_dir = "_outputs"' in default_config
     assert 'template = "th run {prompt}"' in default_config
-    assert 'coordinator_prompt_file = "coordinator_prompt.md"' in default_config
+    assert (
+        'coordinator_system_message_file = "coordinator_system_message.md"'
+        in default_config
+    )
     assert 'worker_suffix_file = "worker_suffix.md"' in default_config
     assert 'worker_footer_file = "worker_footer.md"' in default_config
 

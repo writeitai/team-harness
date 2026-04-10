@@ -522,13 +522,17 @@ async def test_build_agent_tool_bindings_spawn_records_resume_metadata(
     ui = SilentConsole()
 
     async def fake_spawn(**kwargs):
-        return await asyncio.create_subprocess_exec("sh", "-lc", "exit 0")
+        from team_harness.agents.spawner import SpawnResult
+
+        proc = await asyncio.create_subprocess_exec("sh", "-lc", "exit 0")
+        return SpawnResult(
+            proc=proc,
+            command=["codex", "exec"],
+            template="echo {prompt}",
+            generated_uuid=None,
+        )
 
     monkeypatch.setattr("team_harness.tools.agent_tools.spawner.spawn", fake_spawn)
-    monkeypatch.setattr(
-        "team_harness.tools.agent_tools.spawner.build_command",
-        lambda **kwargs: ["codex", "exec"],
-    )
 
     bindings = build_agent_tool_bindings(
         manager=manager,
@@ -694,7 +698,9 @@ async def test_todo_tool_bindings_isolate_path(tmp_path):
     read_b = next(fn for s, fn in bindings_b if s["function"]["name"] == "todo_read")
 
     # Write via A
-    result = await write_a(tasks=[{"id": "1", "description": "test", "status": "completed"}])
+    result = await write_a(
+        tasks=[{"id": "1", "description": "test", "status": "completed"}]
+    )
     assert "1 tasks" in result
 
     # Read from A should have the task
