@@ -92,8 +92,9 @@ async def test_read_new_output_waits_and_kills(tmp_path, config, manager, ui):
         "timed_out": False,
         "running": [],
     }
-    result = await agent_tools.kill_agent("agent_1")
-    assert result == "Killed agent_1."
+    result = json.loads(await agent_tools.kill_agent("agent_1"))
+    assert result["killed"] is True
+    assert result["agent_id"] == "agent_1"
     await asyncio.sleep(0.1)
     assert not any(
         event == "done" and agent_id == "agent_1" for event, agent_id in ui.agent_events
@@ -175,10 +176,11 @@ async def test_list_agents_shows_killed_status(tmp_path, config, manager, ui):
     agent_id = await agent_tools.spawn_agent(
         type="codex", prompt="hello", cwd=str(tmp_path)
     )
-    result = await agent_tools.kill_agent(agent_id)
+    result = json.loads(await agent_tools.kill_agent(agent_id))
     payload = json.loads(await agent_tools.list_agents())
 
-    assert result == f"Killed {agent_id}."
+    assert result["killed"] is True
+    assert result["agent_id"] == agent_id
     assert len(payload) == 1
     assert payload[0]["id"] == agent_id
     assert payload[0]["type"] == "codex"
@@ -246,9 +248,10 @@ async def test_kill_agent_updates_manager_and_run_log(tmp_path, config, manager,
     )
     agent_tools.setup(manager, run_log, config, ui)
 
-    result = await agent_tools.kill_agent("agent_1")
+    result = json.loads(await agent_tools.kill_agent("agent_1"))
 
-    assert result == "Killed agent_1."
+    assert result["killed"] is True
+    assert result["agent_id"] == "agent_1"
     assert state.status == "killed"
     assert state.finished_at is not None
     assert state.exit_code is not None

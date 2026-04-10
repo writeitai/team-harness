@@ -5,8 +5,8 @@ import pytest
 
 from team_harness import config as config_module
 from team_harness.cli import _prepare_task
-from team_harness.config import _default_config_text
 from team_harness.config import _deep_merge
+from team_harness.config import _default_config_text
 from team_harness.config import _parse_provider
 from team_harness.config import Config
 from team_harness.config import CONFIG_PATH
@@ -568,7 +568,10 @@ def test_default_config_text_uses_th_for_harness():
     assert default_config.startswith("# th")
     assert 'output_dir = "_outputs"' in default_config
     assert 'template = "th run {prompt}"' in default_config
-    assert 'coordinator_prompt_file = "coordinator_prompt.md"' in default_config
+    assert (
+        'coordinator_system_message_file = "coordinator_system_message.md"'
+        in default_config
+    )
     assert 'worker_suffix_file = "worker_suffix.md"' in default_config
     assert 'worker_footer_file = "worker_footer.md"' in default_config
 

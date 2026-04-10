@@ -15,9 +15,9 @@ from team_harness.config import load_config
 from team_harness.config import LOCAL_CONFIG_DIR_NAME
 from team_harness.config import RUNS_DIR
 from team_harness.coordinator.loop import run_one_turn
+from team_harness.coordinator.system_prompt import build_system_prompt
 from team_harness.coordinator.system_prompt import COORDINATOR_PROMPT
 from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
-from team_harness.coordinator.system_prompt import build_system_prompt
 from team_harness.harness import _build_registry
 from team_harness.harness import _finalize_run
 from team_harness.harness import _graceful_shutdown
@@ -67,7 +67,7 @@ def _write_sidecar_file(path: Path, text: str) -> None:
 def _write_init_files(config_path: Path, config_text: str, force: bool) -> None:
     _write_config_file(path=config_path, text=config_text, force=force)
     _write_sidecar_file(
-        config_path.parent / "coordinator_prompt.md", COORDINATOR_PROMPT
+        config_path.parent / "coordinator_system_message.md", COORDINATOR_PROMPT
     )
     _write_sidecar_file(config_path.parent / "worker_suffix.md", "")
     _write_sidecar_file(

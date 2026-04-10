@@ -522,13 +522,17 @@ async def test_build_agent_tool_bindings_spawn_records_resume_metadata(
     ui = SilentConsole()
 
     async def fake_spawn(**kwargs):
-        return await asyncio.create_subprocess_exec("sh", "-lc", "exit 0")
+        from team_harness.agents.spawner import SpawnResult
+
+        proc = await asyncio.create_subprocess_exec("sh", "-lc", "exit 0")
+        return SpawnResult(
+            proc=proc,
+            command=["codex", "exec"],
+            template="echo {prompt}",
+            generated_uuid=None,
+        )
 
     monkeypatch.setattr("team_harness.tools.agent_tools.spawner.spawn", fake_spawn)
-    monkeypatch.setattr(
-        "team_harness.tools.agent_tools.spawner.build_command",
-        lambda **kwargs: ["codex", "exec"],
-    )
 
     bindings = build_agent_tool_bindings(
         manager=manager,

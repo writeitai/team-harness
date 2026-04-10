@@ -85,16 +85,21 @@ class RunLogWriter:
         self,
         agent_id: str,
         *,
-        exit_code: int,
-        finished_at: datetime,
+        exit_code: int | None = None,
+        finished_at: datetime | None = None,
         status: str | None = None,
+        session_id: str | None = None,
     ) -> None:
         for record in self._log.agents:
             if record.id == agent_id:
-                record.exit_code = exit_code
-                record.finished_at = finished_at
+                if exit_code is not None:
+                    record.exit_code = exit_code
+                if finished_at is not None:
+                    record.finished_at = finished_at
                 if status is not None:
                     record.status = status
+                if session_id is not None:
+                    record.session_id = session_id
                 break
         self._flush()
 

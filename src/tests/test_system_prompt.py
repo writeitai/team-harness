@@ -3,9 +3,9 @@
 from types import SimpleNamespace
 
 from team_harness.config import Config
+from team_harness.coordinator.system_prompt import build_system_prompt
 from team_harness.coordinator.system_prompt import COORDINATOR_PROMPT
 from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
-from team_harness.coordinator.system_prompt import build_system_prompt
 
 
 def test_system_prompt_contains_coordinator_identity():
@@ -33,7 +33,9 @@ def test_system_prompt_contains_values_and_monitoring_guidance():
     assert "Rigor:" in prompt
     assert "Patience:" in prompt
     assert "`wait_for_any`" in prompt
-    assert "`read_new_agent_output`" in prompt
+    assert "Patience Protocol" in prompt
+    assert "HARD FLOOR" in prompt
+    assert "STDERR GROWTH RULE" in prompt
     assert "Use the todo tools aggressively." in prompt
 
 

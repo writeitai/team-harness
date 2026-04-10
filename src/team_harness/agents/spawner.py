@@ -1,9 +1,24 @@
+from __future__ import annotations
+
 import asyncio
+from dataclasses import dataclass
 import os
 from pathlib import Path
+import uuid
 
 from team_harness.agents.registry import build_command
+from team_harness.agents.registry import resolve_template
+from team_harness.agents.template import AgentTemplate
+from team_harness.agents.template import template_uses_generated_uuid
 from team_harness.config import Config
+
+
+@dataclass(frozen=True)
+class SpawnResult:
+    proc: asyncio.subprocess.Process
+    command: list[str]
+    template: str | AgentTemplate
+    generated_uuid: str | None
 
 
 async def spawn(
@@ -18,11 +33,21 @@ async def spawn(
     extra_flags: list[str] | None = None,
     allowed_agents: list[str] | None = None,
     output_path: str | None = None,
-) -> asyncio.subprocess.Process:
+    mode: str = "fresh",
+    resume_session_id: str | None = None,
+) -> SpawnResult:
+    template = resolve_template(agent_type=agent_type, config=config)
+    generated_uuid: str | None = None
+    if isinstance(template, AgentTemplate) and template_uses_generated_uuid(template):
+        generated_uuid = str(uuid.uuid4())
+
     command = build_command(
         agent_type=agent_type,
         prompt=prompt,
         config=config,
+        mode=mode,
+        resume_session_id=resume_session_id,
+        generated_uuid=generated_uuid,
         model=model,
         extra_flags=extra_flags,
         allowed_agents=allowed_agents,
@@ -49,4 +74,9 @@ async def spawn(
     finally:
         stdout_file.close()
         stderr_file.close()
-    return proc
+    return SpawnResult(
+        proc=proc,
+        command=command,
+        template=template,
+        generated_uuid=generated_uuid,
+    )

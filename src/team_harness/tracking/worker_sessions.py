@@ -18,7 +18,7 @@ def resume_info_for_agent_type(agent_type: str) -> WorkerResumeInfo:
     if agent_type == "gemini":
         return WorkerResumeInfo(supported=True, preferred_mode="resume")
     if agent_type == "claude":
-        return WorkerResumeInfo(supported=True, preferred_mode="continue")
+        return WorkerResumeInfo(supported=True, preferred_mode="resume")
     if agent_type == "opencode":
         return WorkerResumeInfo(supported=True, preferred_mode="continue")
     return WorkerResumeInfo(supported=False, preferred_mode=None)
@@ -48,6 +48,7 @@ def build_worker_sessions_manifest(
             stderr_path=str(Path(record.stderr_log).resolve()),
             session=WorkerSessionInfo(
                 log_path=str(Path(record.stdout_log).resolve()),
+                provider_session_id=record.session_id,
             ),
             resume=record.resume or resume_info_for_agent_type(record.agent_type),
         )

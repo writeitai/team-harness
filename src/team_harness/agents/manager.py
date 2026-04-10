@@ -15,6 +15,7 @@ class AgentState:
     spawn_time: datetime
     stdout_log: Path
     stderr_log: Path
+    session_id: str | None = None
     status: str = "running"
     exit_code: int | None = None
     finished_at: datetime | None = None
