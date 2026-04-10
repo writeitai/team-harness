@@ -714,6 +714,13 @@ def test_default_config_text_contains_verified_flag_tokens():
     assert "[agents.claude.provider_env]" in text
     assert "{env:OPENROUTER_API_KEY}" in text
     assert 'ANTHROPIC_BASE_URL = "https://openrouter.ai/api"' in text
+    # OpenRouter recipe for codex is also present. Every line of the
+    # commented block is prefixed with `# ` so the default sample stays
+    # pointed at the native provider.
+    assert "OpenRouter recipe for Codex" in text
+    assert '#     "-c", "model_provider=openrouter",' in text
+    assert 'openrouter.base_url="https://openrouter.ai/api/v1"' in text
+    assert '# default_model = "openai/gpt-5.3-codex"' in text
     # Harness
     assert 'command = ["th", "run"]' in text
     assert 'model_flag = "--model"' in text
