@@ -35,7 +35,7 @@ async def test_full_run_mock_api(tmp_path, monkeypatch):
                                         id="1",
                                         function=FunctionRecord(
                                             name="todo_write",
-                                            arguments='{"tasks":[{"id":"1","description":"x","status":"done"}]}',
+                                            arguments='{"tasks":[{"id":"1","description":"x","status":"completed"}]}',
                                         ),
                                     )
                                 ],
