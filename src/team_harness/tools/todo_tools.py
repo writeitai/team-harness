@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 _todo_path: Path | None = None
-_VALID_STATUSES = {"pending", "in_progress", "done", "blocked"}
+_VALID_STATUSES = ("pending", "in_progress", "completed", "blocked")
 
 TODO_WRITE_SCHEMA = {
     "type": "function",
@@ -22,7 +22,11 @@ TODO_WRITE_SCHEMA = {
                         "properties": {
                             "id": {"type": "string"},
                             "description": {"type": "string"},
-                            "status": {"type": "string"},
+                            "status": {
+                                "type": "string",
+                                "enum": list(_VALID_STATUSES),
+                                "description": "Task state. One of: pending, in_progress, completed, blocked.",
+                            },
                             "priority": {"type": "string"},
                             "blocked_by": {
                                 "type": "array",

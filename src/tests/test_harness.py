@@ -694,7 +694,7 @@ async def test_todo_tool_bindings_isolate_path(tmp_path):
     read_b = next(fn for s, fn in bindings_b if s["function"]["name"] == "todo_read")
 
     # Write via A
-    result = await write_a(tasks=[{"id": "1", "description": "test", "status": "done"}])
+    result = await write_a(tasks=[{"id": "1", "description": "test", "status": "completed"}])
     assert "1 tasks" in result
 
     # Read from A should have the task

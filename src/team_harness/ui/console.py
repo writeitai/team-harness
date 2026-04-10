@@ -419,7 +419,7 @@ class HarnessConsole(ConsoleBase):
             if status == "in_progress":
                 marker = "■"
                 style = "bold yellow"
-            elif status == "done":
+            elif status == "completed":
                 marker = "✓"
                 style = "green"
             elif status == "blocked":
