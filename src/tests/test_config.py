@@ -688,6 +688,8 @@ def test_default_config_text_contains_verified_flag_tokens():
     assert "[agents.codex.session_capture]" in text
     assert 'match = { type = "thread.started" }' in text
     assert 'field_path = ["thread_id"]' in text
+    # Codex default model — the whole point of this follow-up.
+    assert 'default_model = "gpt-5.4"' in text
     # Gemini
     assert 'prompt_flag = "-p"' in text
     assert "[agents.gemini.session_capture]" in text
@@ -697,6 +699,13 @@ def test_default_config_text_contains_verified_flag_tokens():
     assert '"--dangerously-skip-permissions"' in text
     assert "[agents.claude.session_capture]" in text
     assert 'match = { type = "system", subtype = "init" }' in text
+    # Claude model_env_vars — the 3 'main model' ones, NOT the haiku ones.
+    assert '"ANTHROPIC_MODEL"' in text
+    assert '"ANTHROPIC_DEFAULT_SONNET_MODEL"' in text
+    assert '"ANTHROPIC_DEFAULT_OPUS_MODEL"' in text
+    assert '"ANTHROPIC_DEFAULT_HAIKU_MODEL"' not in text
+    assert '"ANTHROPIC_SMALL_FAST_MODEL"' not in text
+    assert '"CLAUDE_CODE_SUBAGENT_MODEL"' not in text
     # Harness
     assert 'command = ["th", "run"]' in text
     assert 'model_flag = "--model"' in text

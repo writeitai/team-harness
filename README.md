@@ -167,6 +167,7 @@ shared_flags = [
 resume_prefix = ["resume"]
 resume_flags = ["{session_id}"]
 model_flag = "--model"
+default_model = "gpt-5.4"
 
 [agents.codex.session_capture]
 strategy = "stream_json_event"
@@ -195,6 +196,12 @@ shared_flags = [
 ]
 resume_flags = ["--resume", "{session_id}"]
 model_flag = "--model"
+model_env_vars = [
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+]
+# default_model = "claude-sonnet-4-6"   # uncomment to pin a default
 
 [agents.claude.session_capture]
 strategy = "stream_json_event"
@@ -320,6 +327,81 @@ Placeholders that can appear inside `shared_flags`, `resume_prefix`, or
 Session ids can be captured from a worker's stream-json output via a
 `[agents.<name>.session_capture]` sub-table with `strategy`, `match`, and
 `field_path` (see the codex/gemini/claude examples above).
+
+### Setting a default model
+
+Two config keys control the model a worker runs with:
+
+- **`default_model`** — the model used when the coordinator does not pass
+  an explicit `model=...` in its `spawn_agent` tool call. Absent = no
+  default; worker CLI uses its own internal default.
+- **`model_flag`** — the CLI flag name used to inject the model into the
+  argv, e.g. `"--model"`.
+
+Precedence:
+
+| Source | Priority |
+|---|---|
+| Explicit `spawn_agent(model="…")` from the coordinator | 1 (highest) |
+| `[agents.<name>].default_model` | 2 |
+| Worker CLI's own internal default | 3 (fallback) |
+
+Note: `[coordinator].model` controls the **coordinator's own** model (the
+one used to talk to OpenRouter / Codex). It does NOT flow through to
+workers. Per-agent defaults come from `[agents.<name>].default_model`.
+
+#### Codex example
+
+```toml
+[agents.codex]
+command = ["codex", "exec"]
+default_model = "gpt-5.4"    # every codex spawn gets --model gpt-5.4
+```
+
+Clear a default on a specific agent with `default_model = false` (or an
+empty string). This is useful if the built-in default is wrong for your
+setup.
+
+#### Claude example — env-var model injection
+
+Claude Code does not rely solely on `--model`. Several internal code
+paths (`getBestModel`, the Max-subscriber branch of `getDefaultMainLoopModel`)
+bypass `ANTHROPIC_MODEL` and read `ANTHROPIC_DEFAULT_OPUS_MODEL` or
+`ANTHROPIC_DEFAULT_SONNET_MODEL` directly. Setting just `ANTHROPIC_MODEL`
+is not enough for a deterministic override.
+
+Templates can declare `model_env_vars` — a list of env var names that the
+spawner will set to the effective model on every spawn:
+
+```toml
+[agents.claude]
+command = ["claude"]
+shared_flags = [
+    "-p",
+    "--dangerously-skip-permissions",
+    "--output-format", "stream-json",
+    "--verbose",
+]
+model_flag = "--model"
+model_env_vars = [
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+]
+default_model = "claude-sonnet-4-6"   # optional; leave unset to let the
+                                      # coordinator decide per spawn
+```
+
+The built-in `claude` default intentionally lists **only** those three
+env vars and does **not** touch `ANTHROPIC_DEFAULT_HAIKU_MODEL`,
+`ANTHROPIC_SMALL_FAST_MODEL`, or `CLAUDE_CODE_SUBAGENT_MODEL` — cheap
+auxiliary helpers keep running on haiku. If your own shell environment
+sets any of those, they pass through to the worker unchanged (the
+harness only merges its own env vars on top of `os.environ`).
+
+Merge order for child process env: `os.environ` < template `model_env_vars`
+< caller's explicit `extra_env`. A test or SDK caller can always override
+a template env var by passing `extra_env={"ANTHROPIC_MODEL": "…"}`.
 
 ### Migrating from legacy single-string templates
 

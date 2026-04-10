@@ -58,6 +58,9 @@ def build_command_from_template(
     if mode not in {"fresh", "resume"}:
         raise ValueError(f"Unsupported spawn mode {mode!r}")
 
+    # Effective model: explicit argument wins over template default.
+    effective_model = model if model is not None else template.default_model
+
     def _substitute(tokens: tuple[str, ...]) -> list[str]:
         return [
             _substitute_template_token(
@@ -82,8 +85,8 @@ def build_command_from_template(
         command.extend(prompt_args)
 
     command.extend(_substitute(template.shared_flags))
-    if model is not None and template.model_flag is not None:
-        command.extend([template.model_flag, model])
+    if effective_model is not None and template.model_flag is not None:
+        command.extend([template.model_flag, effective_model])
     if mode == "resume":
         command.extend(_substitute(template.resume_flags))
     if extra_flags:

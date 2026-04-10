@@ -26,18 +26,73 @@ def test_parse_structured_template_fields():
         },
     )
 
+    # Missing fields (default_model, model_env_vars) are inherited from
+    # the built-in codex default. default_model inherits "gpt-5.4".
     assert template == AgentTemplate(
         command=("codex", "exec"),
         shared_flags=("--json",),
         resume_prefix=("resume",),
         resume_flags=("{session_id}",),
         model_flag="--model",
+        default_model="gpt-5.4",
         session_capture=SessionCapture(
             strategy="stream_json_event",
             match={"type": "thread.started"},
             field_path=("thread_id",),
         ),
     )
+
+
+def test_parse_default_model_override_as_string():
+    template = _parse_agent_template(
+        "codex", {"command": ["codex", "exec"], "default_model": "gpt-5.4-turbo"}
+    )
+    assert template.default_model == "gpt-5.4-turbo"
+
+
+def test_parse_default_model_cleared_with_false():
+    template = _parse_agent_template(
+        "codex", {"command": ["codex", "exec"], "default_model": False}
+    )
+    assert template.default_model is None
+
+
+def test_parse_default_model_cleared_with_empty_string():
+    template = _parse_agent_template(
+        "codex", {"command": ["codex", "exec"], "default_model": ""}
+    )
+    assert template.default_model is None
+
+
+def test_parse_default_model_inherits_from_base_when_absent():
+    template = _parse_agent_template("codex", {"command": ["codex", "exec"]})
+    assert template.default_model == "gpt-5.4"
+
+
+def test_parse_model_env_vars_override():
+    template = _parse_agent_template(
+        "claude",
+        {"command": ["claude"], "model_env_vars": ["ANTHROPIC_MODEL", "CUSTOM_ENV"]},
+    )
+    assert template.model_env_vars == ("ANTHROPIC_MODEL", "CUSTOM_ENV")
+
+
+def test_parse_model_env_vars_inherits_from_base_when_absent():
+    template = _parse_agent_template("claude", {"command": ["claude"]})
+    # Claude's built-in default sets the three main-model env vars and
+    # deliberately omits the haiku ones.
+    assert template.model_env_vars == (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    )
+    assert "ANTHROPIC_DEFAULT_HAIKU_MODEL" not in template.model_env_vars
+    assert "ANTHROPIC_SMALL_FAST_MODEL" not in template.model_env_vars
+
+
+def test_parse_default_model_wrong_type_raises():
+    with pytest.raises(SystemExit, match="default_model must be"):
+        _parse_agent_template("myagent", {"command": ["myagent"], "default_model": 42})
 
 
 def test_load_config_legacy_template_raises_migration_error(tmp_path):

@@ -9,6 +9,7 @@ import uuid
 from team_harness.agents.registry import build_command
 from team_harness.agents.registry import resolve_template
 from team_harness.agents.template import AgentTemplate
+from team_harness.agents.template import build_template_env
 from team_harness.agents.template import template_uses_generated_uuid
 from team_harness.config import Config
 
@@ -41,6 +42,12 @@ async def spawn(
     if template_uses_generated_uuid(template):
         generated_uuid = str(uuid.uuid4())
 
+    # Effective model: explicit spawn argument wins over the template's
+    # declared default. Used for BOTH `--model` flag injection and for
+    # any env-var injection declared by the template (e.g. claude's
+    # ANTHROPIC_* vars).
+    effective_model = model if model is not None else template.default_model
+
     command = build_command(
         agent_type=agent_type,
         prompt=prompt,
@@ -48,7 +55,7 @@ async def spawn(
         mode=mode,
         resume_session_id=resume_session_id,
         generated_uuid=generated_uuid,
-        model=model,
+        model=effective_model,
         extra_flags=extra_flags,
         allowed_agents=allowed_agents,
     )
@@ -60,6 +67,13 @@ async def spawn(
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Env merge order: parent environment is the base, the template's
+    # model env vars layer on top, and the caller's explicit extra_env
+    # wins over everything so tests and SDK users can override without
+    # having to fork the template.
+    template_env = build_template_env(template, effective_model=effective_model)
+    merged_env = {**os.environ, **template_env, **(extra_env or {})}
+
     stdout_file = stdout_path.open("wb")
     stderr_file = stderr_path.open("wb")
     try:
@@ -69,7 +83,7 @@ async def spawn(
             stdin=asyncio.subprocess.DEVNULL,
             stdout=stdout_file,
             stderr=stderr_file,
-            env={**os.environ, **(extra_env or {})},
+            env=merged_env,
         )
     finally:
         stdout_file.close()

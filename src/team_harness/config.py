@@ -78,6 +78,8 @@ _STRUCTURED_AGENTS_BLOCK = """# Worker agent invocations. Each agent is describe
 
 # Codex worker. `--json` is required so the harness can parse the initial
 # `thread.started` event and capture the session id for future resume.
+# `default_model` is the model passed to codex when the coordinator does
+# not override it via `spawn_agent(model="...")`.
 [agents.codex]
 command = ["codex", "exec"]
 shared_flags = [
@@ -88,6 +90,7 @@ shared_flags = [
 resume_prefix = ["resume"]
 resume_flags = ["{session_id}"]
 model_flag = "--model"
+default_model = "gpt-5.4"
 
 [agents.codex.session_capture]
 strategy = "stream_json_event"
@@ -110,6 +113,13 @@ field_path = ["session_id"]
 
 # Claude Code worker. `--verbose` is mandatory when `-p` and
 # `--output-format stream-json` are combined (Claude CLI requirement).
+# Claude reads its model from several env vars, not just --model. We
+# set the three "main model" vars together (ANTHROPIC_MODEL plus the
+# opus/sonnet alias resolvers) so overriding the model is deterministic
+# across all of Claude Code's internal code paths. We deliberately do
+# NOT set ANTHROPIC_DEFAULT_HAIKU_MODEL / ANTHROPIC_SMALL_FAST_MODEL /
+# CLAUDE_CODE_SUBAGENT_MODEL so cheap auxiliary helpers stay cheap.
+# `default_model` is left unset by default — configure per-project.
 [agents.claude]
 command = ["claude"]
 shared_flags = [
@@ -120,6 +130,12 @@ shared_flags = [
 ]
 resume_flags = ["--resume", "{session_id}"]
 model_flag = "--model"
+model_env_vars = [
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+]
+# default_model = "claude-sonnet-4-6"   # uncomment to pin a default
 
 [agents.claude.session_capture]
 strategy = "stream_json_event"
@@ -436,6 +452,8 @@ def _structured_agent_keys_present(section: dict[str, object]) -> bool:
             "prompt_flag",
             "prompt_position",
             "model_flag",
+            "model_env_vars",
+            "default_model",
             "session_capture",
         )
     )
@@ -509,6 +527,31 @@ def _parse_agent_template(agent_name: str, section: dict[str, object]) -> AgentT
         key="model_flag",
         fallback=base.model_flag if base else "--model",
     )
+    model_env_vars = (
+        _parse_string_tuple(section["model_env_vars"], key="model_env_vars")
+        if "model_env_vars" in section
+        else base.model_env_vars
+        if base
+        else ()
+    )
+    # `default_model` accepts:
+    #   - absent (key not present)                → inherit from base
+    #   - `false`                                  → explicitly clear (None)
+    #   - `""` (empty string)                      → explicitly clear (None)
+    #   - any non-empty string                     → use that value
+    if "default_model" not in section:
+        default_model = base.default_model if base else None
+    else:
+        default_model_raw = section["default_model"]
+        if default_model_raw is False or default_model_raw == "":
+            default_model = None
+        elif isinstance(default_model_raw, str):
+            default_model = default_model_raw
+        else:
+            raise SystemExit(
+                f"agents.{agent_name}.default_model must be a string, "
+                "false, or omitted."
+            )
     session_capture = (
         _parse_session_capture(section["session_capture"])
         if "session_capture" in section
@@ -524,6 +567,8 @@ def _parse_agent_template(agent_name: str, section: dict[str, object]) -> AgentT
         prompt_flag=prompt_flag,
         prompt_position=prompt_position,
         model_flag=model_flag,
+        model_env_vars=model_env_vars,
+        default_model=default_model,
         session_capture=session_capture,
     )
 

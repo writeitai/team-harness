@@ -16,12 +16,16 @@ from team_harness.config import Config
 def test_build_command_default_codex_fresh():
     command = build_command(agent_type="codex", prompt="do thing", config=Config())
 
+    # The built-in codex default includes default_model="gpt-5.4" so the
+    # --model flag is injected even without an explicit override.
     assert command == [
         "codex",
         "exec",
         "--dangerously-bypass-approvals-and-sandbox",
         "--skip-git-repo-check",
         "--json",
+        "--model",
+        "gpt-5.4",
         "do thing",
     ]
 
@@ -42,9 +46,46 @@ def test_build_command_default_codex_resume():
         "--dangerously-bypass-approvals-and-sandbox",
         "--skip-git-repo-check",
         "--json",
+        "--model",
+        "gpt-5.4",
         "sid-123",
         "continue",
     ]
+
+
+def test_build_command_codex_explicit_model_overrides_default():
+    command = build_command(
+        agent_type="codex", prompt="do thing", config=Config(), model="gpt-5.4-mini"
+    )
+
+    # Explicit model wins over template.default_model.
+    assert "--model" in command
+    assert "gpt-5.4-mini" in command
+    assert "gpt-5.4" not in command
+
+
+def test_build_command_codex_default_model_cleared_by_user_override():
+    from team_harness.agents.template import AgentTemplate
+    from team_harness.agents.template import DEFAULT_AGENT_TEMPLATES
+
+    # A user override that explicitly sets default_model=None should
+    # restore the "no --model flag at all" behavior.
+    base = DEFAULT_AGENT_TEMPLATES["codex"]
+    override = AgentTemplate(
+        command=base.command,
+        shared_flags=base.shared_flags,
+        resume_prefix=base.resume_prefix,
+        resume_flags=base.resume_flags,
+        model_flag=base.model_flag,
+        default_model=None,
+        session_capture=base.session_capture,
+    )
+    config = Config(agent_templates={"codex": override})
+
+    command = build_command(agent_type="codex", prompt="do thing", config=config)
+
+    assert "--model" not in command
+    assert "gpt-5.4" not in command
 
 
 def test_build_command_default_gemini_resume_and_model_override():
