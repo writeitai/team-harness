@@ -174,20 +174,22 @@ def test_make_console_defaults_to_silent_when_args_missing():
 
 def test_make_console_silent_no_ops():
     console = SilentConsole()
-    console.start()
-    console.stop()
-    console.begin_turn(0)
-    console.begin_streaming()
-    console.stream_token("x")
-    console.end_streaming()
-    console.end_turn()
+    assert console.start() is None
+    assert console.stop() is None
+    assert console.begin_turn(0) is None
+    assert console.begin_compaction() is None
+    assert console.begin_streaming() is None
+    assert console.stream_token("x") is None
+    assert console.end_streaming() is None
+    assert console.end_compaction(10, 5) is None
+    assert console.end_turn() is None
     tc = console.tool_call_start(name="test", args={})
-    tc.result("ok", is_error=False)
-    console.agent_event(event="spawned", state=None)
-    console.context_warning()
-    console.reset_separator()
-    console.print("hello")
-    console.print_agent_panel_inline()
+    assert tc.result("ok", is_error=False) is None
+    assert console.agent_event(event="spawned", state=None) is None
+    assert console.context_warning() is None
+    assert console.reset_separator() is None
+    assert console.print("hello") is None
+    assert console.print_agent_panel_inline() is None
 
 
 # ---------------------------------------------------------------------------

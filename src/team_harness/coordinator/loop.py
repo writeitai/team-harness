@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from openai import APIStatusError
 
 from team_harness.coordinator.client import CoordinatorAPIError
+from team_harness.tracking.context import get_auto_compact_threshold
 from team_harness.tracking.models import ToolCallRecord as RunLogToolCallRecord
 
 if TYPE_CHECKING:
@@ -16,6 +17,41 @@ if TYPE_CHECKING:
     from team_harness.tracking.context import ContextTracker
     from team_harness.tracking.run_log import RunLogWriter
     from team_harness.ui.console import ConsoleBase
+
+_COMPACT_BOUNDARY_TEXT = (
+    "The earlier conversation history was compacted for context management.\n"
+    "Treat the next user message as an authoritative summary of the removed history.\n"
+    "Continue from it without mentioning the compaction unless the user asks."
+)
+_COMPACT_SUMMARY_PREFIX = "Compact summary of earlier conversation:\n\n"
+_COMPACTION_SYSTEM_PROMPT = """You are compacting a coding-session transcript for continuation in the same harness.
+Write a faithful continuation summary for the next model call.
+
+Rules:
+- Do not invent work, files, edits, commands, test results, tool outputs, or decisions.
+- Preserve the user's goal, constraints, decisions, current implementation state, important commands, important outputs, errors, and remaining work.
+- If something is uncertain, say that it is uncertain.
+- Preserve exact filenames, commands, errors, branch names, environment details, and pending tasks whenever they still matter.
+- Preserve the state of any spawned workers or agents if the transcript mentions them, including type, status, cwd, and last meaningful output.
+- Ensure the summary is significantly smaller than the original transcript.
+- Target under 10k tokens.
+- Keep the summary dense and implementation-focused.
+- Do not address the user.
+- Do not ask follow-up questions.
+- In "Active files & recent edits", write one bullet per file: filename plus a brief description of what changed.
+- Output Markdown with these sections exactly:
+  1. Goal
+  2. Decisions
+  3. Current state
+  4. Outstanding work
+  5. Architectural constraints & technical context
+  6. Active files & recent edits
+"""
+_COMPACTION_FAILURE_WARNING = "Auto-compaction failed; continuing without compaction."
+_COMPACTION_BREAKER_WARNING = (
+    "Auto-compaction disabled for this session after 3 failures. "
+    "Use /clear to reset context."
+)
 
 
 class MaxRetriesExceeded(RuntimeError):
@@ -64,6 +100,14 @@ async def run_one_turn(
 ) -> tuple[bool, int]:
     ui.begin_turn(turn_index)
     messages_before = last_logged_index
+    threshold = get_auto_compact_threshold(ctx.model_id, ctx.model_limit)
+    if _should_compact(messages=messages, ctx=ctx, threshold=threshold):
+        compacted = await _perform_compaction(
+            messages=messages, client=client, ctx=ctx, ui=ui
+        )
+        if compacted:
+            messages_before = 0
+
     tools = tool_registry.get_all_schemas()
     ui.begin_streaming()
     try:
@@ -169,6 +213,134 @@ async def run_one_turn(
     )
     ui.end_turn()
     return False, new_last_logged
+
+
+def _should_compact(
+    messages: list[dict], ctx: "ContextTracker", threshold: int
+) -> bool:
+    if ctx.breaker_tripped:
+        return False
+    if not messages or messages[-1]["role"] != "user":
+        return False
+    exact_total = ctx.prompt_tokens + ctx.completion_tokens
+    return exact_total >= threshold
+
+
+async def _perform_compaction(
+    messages: list[dict],
+    client: "CoordinatorLike",
+    ctx: "ContextTracker",
+    ui: "ConsoleBase",
+) -> bool:
+    assert messages and messages[-1]["role"] == "user"
+    before_tokens = ctx.prompt_tokens + ctx.completion_tokens
+    after_tokens = before_tokens
+    try:
+        ui.begin_compaction()
+    except Exception:
+        pass
+    try:
+        original_system = messages[0]
+        pending_user = messages[-1]
+        rendered_transcript = _render_transcript(messages[1:-1])
+        try:
+            response = await client.chat(
+                messages=[
+                    {"role": "system", "content": _COMPACTION_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Summarize the following conversation so the same model "
+                            "can continue the work after the earlier history is removed.\n"
+                            "Preserve exact filenames, commands, errors, decisions, "
+                            "constraints, and pending tasks whenever they still matter.\n\n"
+                            "Conversation transcript:\n\n"
+                            f"{rendered_transcript}"
+                        ),
+                    },
+                ],
+                tools=[],
+                stream=False,
+                token_callback=None,
+            )
+        except Exception:
+            _record_compaction_failure(ctx=ctx, ui=ui)
+            return False
+        content = response.choices[0].message.content
+        if content is None or not content.strip():
+            _record_compaction_failure(ctx=ctx, ui=ui)
+            return False
+        replacement_messages = _build_summary_messages(
+            original_system=original_system,
+            summary_text=content.strip(),
+            pending_user=pending_user,
+        )
+        messages[:] = replacement_messages
+        ctx.consecutive_compact_failures = 0
+        ctx.breaker_tripped = False
+        after_tokens = _approximate_tokens(messages)
+        return True
+    finally:
+        try:
+            ui.end_compaction(before_tokens, after_tokens)
+        except Exception:
+            pass
+
+
+def _record_compaction_failure(ctx: "ContextTracker", ui: "ConsoleBase") -> None:
+    ctx.consecutive_compact_failures += 1
+    if ctx.consecutive_compact_failures >= 3:
+        ctx.breaker_tripped = True
+        ui.print(_COMPACTION_BREAKER_WARNING)
+        return
+    ui.print(_COMPACTION_FAILURE_WARNING)
+
+
+def _build_summary_messages(
+    original_system: dict, summary_text: str, pending_user: dict
+) -> list[dict]:
+    return [
+        original_system,
+        {"role": "system", "content": _COMPACT_BOUNDARY_TEXT},
+        {"role": "user", "content": _COMPACT_SUMMARY_PREFIX + summary_text},
+        pending_user,
+    ]
+
+
+def _render_transcript(messages: list[dict]) -> str:
+    rendered_messages: list[str] = []
+    for message in messages:
+        lines = [f"role: {message.get('role', '')}"]
+        if "tool_call_id" in message:
+            lines.append(f"tool_call_id: {message['tool_call_id']}")
+        if "tool_calls" in message:
+            lines.append(
+                "tool_calls: "
+                + json.dumps(message["tool_calls"], sort_keys=True, ensure_ascii=True)
+            )
+        content = message.get("content")
+        if content is not None:
+            lines.append(str(content))
+        rendered_messages.append("\n".join(lines))
+    return "\n\n".join(rendered_messages)
+
+
+def _approximate_tokens(messages: list[dict]) -> int:
+    chars = 0
+    for message in messages:
+        role = message.get("role")
+        if isinstance(role, str):
+            chars += len(role)
+        content = message.get("content")
+        if isinstance(content, str):
+            chars += len(content)
+        tool_calls = message.get("tool_calls")
+        if tool_calls:
+            chars += len(json.dumps(tool_calls, sort_keys=True))
+        tool_call_id = message.get("tool_call_id")
+        if isinstance(tool_call_id, str):
+            chars += len(tool_call_id)
+    return max(1, chars // 4)
 
 
 async def _chat_with_retry(

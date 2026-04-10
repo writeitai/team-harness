@@ -320,7 +320,7 @@ async def _repl(**kwargs: Any) -> None:
                 if not raw:
                     continue
                 match raw:
-                    case "/reset":
+                    case "/clear" | "/reset":
                         messages.clear()
                         messages.append({"role": "system", "content": system_prompt})
                         ctx.reset()
@@ -341,6 +341,7 @@ async def _repl(**kwargs: Any) -> None:
                         ui.print(str(run_log.path))
                     case _:
                         messages.append({"role": "user", "content": raw})
+                        ctx.set_estimated_total(messages)
                         should_continue = True
                         while should_continue:
                             should_continue, last_logged_index = await run_one_turn(
