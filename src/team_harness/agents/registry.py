@@ -6,6 +6,7 @@ import warnings
 
 from team_harness.agents.template import AgentTemplate
 from team_harness.agents.template import DEFAULT_AGENT_TEMPLATES
+from team_harness.agents.template import render_reasoning_effort_flags
 from team_harness.config import Config
 
 
@@ -87,6 +88,9 @@ def build_command_from_template(
     command.extend(_substitute(template.shared_flags))
     if effective_model is not None and template.model_flag is not None:
         command.extend([template.model_flag, effective_model])
+    # Reasoning-effort tokens go between shared_flags/model and
+    # resume_flags so they are present in both fresh and resume modes.
+    command.extend(render_reasoning_effort_flags(template))
     if mode == "resume":
         command.extend(_substitute(template.resume_flags))
     if extra_flags:

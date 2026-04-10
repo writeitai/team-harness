@@ -168,6 +168,8 @@ resume_prefix = ["resume"]
 resume_flags = ["{session_id}"]
 model_flag = "--model"
 default_model = "gpt-5.4"
+reasoning_effort_flag = ["-c", "model_reasoning_effort={effort}"]
+# reasoning_effort = "high"   # uncomment to pin a level
 
 [agents.codex.session_capture]
 strategy = "stream_json_event"
@@ -201,7 +203,16 @@ model_env_vars = [
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
 ]
+reasoning_effort_flag = ["--effort", "{effort}"]
 # default_model = "claude-sonnet-4-6"   # uncomment to pin a default
+# reasoning_effort = "high"               # values: low|medium|high|max
+
+# Uncomment the provider_env block to route claude through OpenRouter.
+# See "Connecting workers to OpenRouter" below for the full recipe.
+# [agents.claude.provider_env]
+# ANTHROPIC_BASE_URL = "https://openrouter.ai/api"
+# ANTHROPIC_AUTH_TOKEN = "{env:OPENROUTER_API_KEY}"
+# ANTHROPIC_API_KEY = ""
 
 [agents.claude.session_capture]
 strategy = "stream_json_event"
@@ -399,9 +410,113 @@ auxiliary helpers keep running on haiku. If your own shell environment
 sets any of those, they pass through to the worker unchanged (the
 harness only merges its own env vars on top of `os.environ`).
 
-Merge order for child process env: `os.environ` < template `model_env_vars`
-< caller's explicit `extra_env`. A test or SDK caller can always override
-a template env var by passing `extra_env={"ANTHROPIC_MODEL": "…"}`.
+Merge order for child process env: `os.environ` < template `provider_env`
+< template `model_env_vars` < caller's explicit `extra_env`. A test or
+SDK caller can always override a template env var by passing
+`extra_env={"ANTHROPIC_MODEL": "…"}`.
+
+### Reasoning effort
+
+Worker CLIs that expose a reasoning-effort knob are configured via two
+fields:
+
+- **`reasoning_effort`** — the value (e.g. `"high"`). Absent = no
+  injection, worker CLI uses its own default.
+- **`reasoning_effort_flag`** — the argv token shape, with a literal
+  `{effort}` placeholder that the harness substitutes at render time.
+  This ships with a sensible default per built-in agent so users
+  normally only set `reasoning_effort`.
+
+Per-CLI shapes and allowed values:
+
+| Worker | `reasoning_effort_flag` | Allowed values |
+|---|---|---|
+| codex  | `["-c", "model_reasoning_effort={effort}"]` | `low`, `medium`, `high`, `xhigh` |
+| claude | `["--effort", "{effort}"]` | `low`, `medium`, `high`, `max` |
+| gemini | (not supported upstream) | — |
+
+The harness does **not** validate the value against a per-CLI enum. Pass
+what the worker CLI accepts; invalid levels are reported by the worker.
+
+Example — pin codex to high effort:
+
+```toml
+[agents.codex]
+reasoning_effort = "high"
+```
+
+Clear a default with `reasoning_effort = false` (same convention as
+`default_model`).
+
+### Connecting workers to OpenRouter
+
+team-harness can route worker CLIs through OpenRouter so the same
+OpenRouter account that fuels the coordinator also fuels each worker.
+This relies on a third template field, `provider_env` — a list of env
+vars the spawner sets on the child process. Values may contain
+`{env:VARNAME}` placeholders that are resolved from the parent shell at
+spawn time, so API keys stay in your shell and never touch `config.toml`.
+
+Before either recipe: export your OpenRouter key in your shell once:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+```
+
+#### Codex via OpenRouter
+
+Codex reads its provider config from a `-c` command-line override (or
+the `~/.codex/config.toml` file). Add the `-c` tokens to the codex
+template's `shared_flags`:
+
+```toml
+[agents.codex]
+command = ["codex", "exec"]
+shared_flags = [
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--skip-git-repo-check",
+    "--json",
+    "-c", "model_provider=openrouter",
+    "-c", 'model_providers.openrouter.name="openrouter"',
+    "-c", 'model_providers.openrouter.base_url="https://openrouter.ai/api/v1"',
+    "-c", 'model_providers.openrouter.env_key="OPENROUTER_API_KEY"',
+]
+default_model = "openai/gpt-5.3-codex"   # the OpenRouter-flavoured model name
+```
+
+No `provider_env` needed — codex reads `OPENROUTER_API_KEY` itself via
+the `env_key` setting.
+
+#### Claude Code via OpenRouter
+
+Claude Code reads its provider config from env vars. Add a
+`[agents.claude.provider_env]` sub-table:
+
+```toml
+[agents.claude]
+default_model = "anthropic/claude-opus-4.6"   # OpenRouter-flavoured model name
+
+[agents.claude.provider_env]
+ANTHROPIC_BASE_URL = "https://openrouter.ai/api"
+ANTHROPIC_AUTH_TOKEN = "{env:OPENROUTER_API_KEY}"
+ANTHROPIC_API_KEY = ""   # must be empty — prevents Claude Code from falling back to native auth
+```
+
+The `{env:OPENROUTER_API_KEY}` placeholder is resolved from `os.environ`
+at spawn time. If the variable is missing, the harness warns once and
+substitutes an empty string (the child will then fail its own auth with
+a clear message).
+
+Note: the three `ANTHROPIC_DEFAULT_*_MODEL` env vars from the "Setting a
+default model" section continue to work and layer on top of
+`provider_env` — setting `default_model = "anthropic/claude-opus-4.6"`
+above populates all three of them automatically.
+
+#### Gemini via OpenRouter
+
+Not supported by the upstream `gemini` CLI — it authenticates directly
+against Google APIs with no OpenAI-compatible base-URL mode. The harness
+does not ship a recipe.
 
 ### Migrating from legacy single-string templates
 
