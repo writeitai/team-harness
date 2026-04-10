@@ -4,13 +4,14 @@ import click
 import pytest
 
 from team_harness import config as config_module
+from team_harness.agents.template import DEFAULT_AGENT_TEMPLATES
 from team_harness.cli import _prepare_task
 from team_harness.config import _deep_merge
 from team_harness.config import _default_config_text
+from team_harness.config import _local_config_text
 from team_harness.config import _parse_provider
 from team_harness.config import Config
 from team_harness.config import CONFIG_PATH
-from team_harness.config import DEFAULT_TEMPLATES
 from team_harness.config import find_local_config
 from team_harness.config import load_config
 from team_harness.config import PROMPT_FILE_MAX_BYTES
@@ -42,12 +43,11 @@ def test_default_model_is_gpt_5_4():
     assert Config().worker_footer == DEFAULT_WORKER_FOOTER
 
 
-def test_default_templates_updated():
-    assert (
-        DEFAULT_TEMPLATES["codex"]
-        == 'codex exec --yolo --model gpt-5.4 PROMPT="{prompt}"'
-    )
-    assert DEFAULT_TEMPLATES["gemini"] == 'gemini --approval-mode=yolo -p "{prompt}"'
+def test_default_agent_templates_structured_shape():
+    assert DEFAULT_AGENT_TEMPLATES["codex"].command == ("codex", "exec")
+    assert "--json" in DEFAULT_AGENT_TEMPLATES["codex"].shared_flags
+    assert DEFAULT_AGENT_TEMPLATES["claude"].command == ("claude",)
+    assert "--verbose" in DEFAULT_AGENT_TEMPLATES["claude"].shared_flags
 
 
 def test_find_local_config_in_cwd(tmp_path):
@@ -110,10 +110,11 @@ output_dir = "artifacts"
 shutdown_timeout_s = 12.5
 
 [agents.codex]
-template = "codex exec --model file-model {prompt}"
+command = ["codex", "exec"]
 
 [agents.myagent]
-template = "myagent {prompt}"
+command = ["myagent"]
+model_flag = false
 """
     )
     monkeypatch.setattr(config_module, "CONFIG_PATH", global_path)
@@ -137,8 +138,9 @@ template = "myagent {prompt}"
     assert config.api_base == "https://cli.example/v1"
     assert config.api_key == "cli-key"
     assert config.allowed_agents == ["codex", "gemini"]
-    assert config.agent_templates["codex"] == "codex exec --model file-model {prompt}"
-    assert config.agent_templates["myagent"] == "myagent {prompt}"
+    # The file override sets command via structured form.
+    assert config.agent_templates["codex"].command == ("codex", "exec")
+    assert config.agent_templates["myagent"].command == ("myagent",)
     assert config.shutdown_timeout_s == 12.5
     assert config.output_dir == "artifacts"
     assert config.system_prompt_extension == "inline\n\nfrom file"
@@ -410,10 +412,10 @@ def test_local_preserves_global_agent_templates(tmp_path, monkeypatch):
     global_path.write_text(
         """
 [agents.codex]
-template = "codex global {prompt}"
+command = ["codex", "global"]
 
 [agents.claude]
-template = "claude global {prompt}"
+command = ["claude", "global"]
 """
     )
     local_path = tmp_path / "project" / ".team-harness" / "config.toml"
@@ -423,10 +425,8 @@ template = "claude global {prompt}"
 
     config = load_config(cwd=str(tmp_path / "project"))
 
-    assert config.agent_templates == {
-        "codex": "codex global {prompt}",
-        "claude": "claude global {prompt}",
-    }
+    assert config.agent_templates["codex"].command == ("codex", "global")
+    assert config.agent_templates["claude"].command == ("claude", "global")
     assert config.allowed_agents == ["claude"]
 
 
@@ -440,7 +440,7 @@ def test_local_only_config_uses_defaults_plus_local(tmp_path, monkeypatch):
 allowed_agents = ["gemini"]
 
 [agents.gemini]
-template = "gemini local {prompt}"
+command = ["gemini", "local"]
 """
     )
     monkeypatch.setattr(config_module, "CONFIG_PATH", global_path)
@@ -450,7 +450,7 @@ template = "gemini local {prompt}"
     assert config.model == "gpt-5.4"
     assert config.api_base == "https://openrouter.ai/api/v1"
     assert config.allowed_agents == ["gemini"]
-    assert config.agent_templates["gemini"] == "gemini local {prompt}"
+    assert config.agent_templates["gemini"].command == ("gemini", "local")
     assert config.global_config_path is None
     assert config.local_config_path == local_path.resolve()
 
@@ -518,15 +518,24 @@ def test_no_config_uses_defaults_without_creating_global_file(tmp_path, monkeypa
     assert not global_path.exists()
 
 
-def test_default_templates_use_th_for_harness():
-    assert DEFAULT_TEMPLATES["harness"] == "th run {prompt}"
+def test_default_agent_templates_use_th_for_harness():
+    assert DEFAULT_AGENT_TEMPLATES["harness"].command == ("th", "run")
+    assert DEFAULT_AGENT_TEMPLATES["harness"].model_flag == "--model"
 
 
-def test_default_config_text_uses_th_for_harness():
+def test_default_config_text_uses_structured_agents():
     default_config = _default_config_text()
     assert default_config.startswith("# th")
     assert 'output_dir = "_outputs"' in default_config
-    assert 'template = "th run {prompt}"' in default_config
+    # Legacy single-string form must not appear anywhere.
+    import re
+
+    assert re.search(r"(?m)^template\s*=\s*\"", default_config) is None
+    # Structured form is visible.
+    assert "[agents.codex]" in default_config
+    assert 'command = ["codex", "exec"]' in default_config
+    assert "[agents.codex.session_capture]" in default_config
+    assert 'command = ["th", "run"]' in default_config
     assert (
         'coordinator_system_message_file = "coordinator_system_message.md"'
         in default_config
@@ -535,8 +544,171 @@ def test_default_config_text_uses_th_for_harness():
     assert 'worker_footer_file = "worker_footer.md"' in default_config
 
 
-def test_local_config_text_includes_output_dir():
-    assert 'output_dir = "_outputs"' in config_module._local_config_text()
+def test_local_config_text_uses_structured_agents():
+    local_config = _local_config_text()
+    assert 'output_dir = "_outputs"' in local_config
+    import re
+
+    assert re.search(r"(?m)^template\s*=\s*\"", local_config) is None
+    assert "[agents.codex]" in local_config
+    assert 'command = ["codex", "exec"]' in local_config
+
+
+def _write_sample_and_load(
+    tmp_path, monkeypatch, sample_text: str, *, as_global: bool = True
+) -> Config:
+    if as_global:
+        path = tmp_path / "home" / ".team-harness" / "config.toml"
+    else:
+        path = tmp_path / "project" / ".team-harness" / "config.toml"
+    path.parent.mkdir(parents=True)
+    path.write_text(sample_text, encoding="utf-8")
+    if as_global:
+        monkeypatch.setattr(config_module, "CONFIG_PATH", path)
+        return load_config(cwd=str(tmp_path))
+    else:
+        monkeypatch.setattr(
+            config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml"
+        )
+        return load_config(cwd=str(path.parent.parent))
+
+
+def test_default_config_text_roundtrip_matches_builtin_defaults(tmp_path, monkeypatch):
+    """The shipped `th init` sample must parse back to the exact built-in
+    defaults. This is the canonical check that the docs don't drift from
+    the real defaults."""
+
+    config = _write_sample_and_load(
+        tmp_path, monkeypatch, _default_config_text(), as_global=True
+    )
+    for name, expected in DEFAULT_AGENT_TEMPLATES.items():
+        assert name in config.agent_templates, f"missing agent {name}"
+        assert config.agent_templates[name] == expected, (
+            f"agent {name} mismatch: got {config.agent_templates[name]}, "
+            f"expected {expected}"
+        )
+
+
+def test_local_config_text_roundtrip_matches_builtin_defaults(tmp_path, monkeypatch):
+    config = _write_sample_and_load(
+        tmp_path, monkeypatch, _local_config_text(), as_global=False
+    )
+    for name, expected in DEFAULT_AGENT_TEMPLATES.items():
+        assert name in config.agent_templates, f"missing agent {name}"
+        assert config.agent_templates[name] == expected
+
+
+def test_load_config_legacy_template_raises_migration_error(tmp_path, monkeypatch):
+    path = tmp_path / "home" / ".team-harness" / "config.toml"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        '[agents.codex]\ntemplate = "codex exec --yolo {prompt}"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(config_module, "CONFIG_PATH", path)
+
+    with pytest.raises(SystemExit) as exc:
+        load_config(cwd=str(tmp_path))
+
+    message = str(exc.value)
+    assert "agents.codex.template" in message
+    assert "no longer supported" in message
+    assert "structured form" in message or "command = [" in message
+    assert "README.md" in message or "th init --force" in message
+    # The error names the offending file so users know WHERE to edit.
+    assert str(path) in message
+
+
+def test_load_config_legacy_global_plus_structured_local_reports_global_file(
+    tmp_path, monkeypatch
+):
+    """A legacy `template` in the GLOBAL config must still hard-error and
+    name the global file, even when the local file already uses the
+    structured form for the same agent type. Without per-file provenance
+    this case would produce a misleading error."""
+
+    global_path = tmp_path / "home" / ".team-harness" / "config.toml"
+    global_path.parent.mkdir(parents=True)
+    global_path.write_text(
+        '[agents.codex]\ntemplate = "codex legacy {prompt}"\n', encoding="utf-8"
+    )
+    local_path = tmp_path / "project" / ".team-harness" / "config.toml"
+    local_path.parent.mkdir(parents=True)
+    local_path.write_text(
+        '[agents.codex]\ncommand = ["codex", "structured"]\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(config_module, "CONFIG_PATH", global_path)
+
+    with pytest.raises(SystemExit) as exc:
+        load_config(cwd=str(tmp_path / "project"))
+
+    message = str(exc.value)
+    assert "agents.codex.template" in message
+    assert str(global_path) in message
+    # Must NOT point at the local file, which is already migrated.
+    assert str(local_path) not in message
+
+
+def test_load_config_legacy_local_plus_structured_global_reports_local_file(
+    tmp_path, monkeypatch
+):
+    global_path = tmp_path / "home" / ".team-harness" / "config.toml"
+    global_path.parent.mkdir(parents=True)
+    global_path.write_text(
+        '[agents.codex]\ncommand = ["codex", "structured"]\n', encoding="utf-8"
+    )
+    local_path = tmp_path / "project" / ".team-harness" / "config.toml"
+    local_path.parent.mkdir(parents=True)
+    local_path.write_text(
+        '[agents.codex]\ntemplate = "codex legacy {prompt}"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(config_module, "CONFIG_PATH", global_path)
+
+    with pytest.raises(SystemExit) as exc:
+        load_config(cwd=str(tmp_path / "project"))
+
+    message = str(exc.value)
+    assert "agents.codex.template" in message
+    assert str(local_path) in message
+    assert str(global_path) not in message
+
+
+def test_default_config_text_contains_verified_flag_tokens():
+    """Explicit raw-text assertion that the shipped sample contains the
+    exact flag tokens from DEFAULT_AGENT_TEMPLATES. Guards against
+    accidental omissions that the round-trip test alone would mask
+    (because `_parse_agent_template` inherits missing fields)."""
+
+    text = _default_config_text()
+    # Codex
+    assert '"--dangerously-bypass-approvals-and-sandbox"' in text
+    assert '"--skip-git-repo-check"' in text
+    assert '"--json"' in text
+    assert 'resume_prefix = ["resume"]' in text
+    assert 'resume_flags = ["{session_id}"]' in text
+    assert "[agents.codex.session_capture]" in text
+    assert 'match = { type = "thread.started" }' in text
+    assert 'field_path = ["thread_id"]' in text
+    # Codex default model — the whole point of this follow-up.
+    assert 'default_model = "gpt-5.4"' in text
+    # Gemini
+    assert 'prompt_flag = "-p"' in text
+    assert "[agents.gemini.session_capture]" in text
+    assert 'match = { type = "init" }' in text
+    # Claude (the --verbose requirement is critical)
+    assert '"--verbose"' in text
+    assert '"--dangerously-skip-permissions"' in text
+    assert "[agents.claude.session_capture]" in text
+    assert 'match = { type = "system", subtype = "init" }' in text
+    # Claude model_env_vars — the 3 'main model' ones, NOT the haiku ones.
+    assert '"ANTHROPIC_MODEL"' in text
+    assert '"ANTHROPIC_DEFAULT_SONNET_MODEL"' in text
+    assert '"ANTHROPIC_DEFAULT_OPUS_MODEL"' in text
+    assert '"ANTHROPIC_DEFAULT_HAIKU_MODEL"' not in text
+    assert '"ANTHROPIC_SMALL_FAST_MODEL"' not in text
+    assert '"CLAUDE_CODE_SUBAGENT_MODEL"' not in text
+    # Harness
+    assert 'command = ["th", "run"]' in text
+    assert 'model_flag = "--model"' in text
 
 
 def test_config_paths_remain_under_team_harness_dir():

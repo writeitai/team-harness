@@ -5,6 +5,7 @@ import json
 import httpx
 from openai import APIStatusError
 
+from team_harness.agents.template import AgentTemplate
 from team_harness.coordinator.client import ChatResponse
 from team_harness.coordinator.client import ChoiceRecord
 from team_harness.coordinator.client import CoordinatorAPIError
@@ -12,6 +13,15 @@ from team_harness.coordinator.client import FunctionRecord
 from team_harness.coordinator.client import MessageRecord
 from team_harness.coordinator.client import ToolCallRecord as ClientToolCallRecord
 from team_harness.coordinator.client import UsageRecord
+
+
+def fake_agent_template(binary: str = "echo") -> AgentTemplate:
+    """Return a minimal structured AgentTemplate for use in tests that only
+    need a worker subprocess that echoes its arguments. Avoids duplicating
+    the `AgentTemplate(command=(binary,), model_flag=None)` boilerplate in
+    every test file."""
+
+    return AgentTemplate(command=(binary,), model_flag=None)
 
 
 class SequenceClient:

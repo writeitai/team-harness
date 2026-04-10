@@ -20,6 +20,19 @@ class AgentTemplate:
     prompt_flag: str | None = None
     prompt_position: Literal["tail", "after_command"] = "tail"
     model_flag: str | None = "--model"
+    # Env vars to set when a model is effective. Some CLIs (notably
+    # Claude Code) do not take a `--model` flag as their only source of
+    # truth — they also read env vars. For each name listed here, the
+    # spawner sets `env[name] = effective_model` on the child process.
+    # For Claude we deliberately list ONLY the 3 "main model" vars and
+    # leave ANTHROPIC_DEFAULT_HAIKU_MODEL / ANTHROPIC_SMALL_FAST_MODEL
+    # alone so cheap auxiliary tasks stay on the haiku path.
+    model_env_vars: tuple[str, ...] = ()
+    # Model used when the caller does not pass an explicit `model`. The
+    # effective model is: explicit spawn argument ∨ this default ∨ None
+    # (in which case nothing is injected and the worker CLI uses its own
+    # internal default).
+    default_model: str | None = None
     session_capture: SessionCapture | None = None
 
 
@@ -34,6 +47,7 @@ DEFAULT_AGENT_TEMPLATES: dict[str, AgentTemplate] = {
         resume_prefix=("resume",),
         resume_flags=("{session_id}",),
         model_flag="--model",
+        default_model="gpt-5.4",
         session_capture=SessionCapture(
             strategy="stream_json_event",
             match={"type": "thread.started"},
@@ -63,6 +77,20 @@ DEFAULT_AGENT_TEMPLATES: dict[str, AgentTemplate] = {
         ),
         resume_flags=("--resume", "{session_id}"),
         model_flag="--model",
+        # Claude Code reads its model from several env vars. Setting just
+        # ANTHROPIC_MODEL is not sufficient: `getBestModel()` and the
+        # Max-subscriber branch in `getDefaultMainLoopModel()` bypass it
+        # and read `ANTHROPIC_DEFAULT_OPUS_MODEL` / `ANTHROPIC_DEFAULT_SONNET_MODEL`
+        # directly. We set all 3 "main model" vars together so the
+        # override is deterministic.
+        # We deliberately do NOT set `ANTHROPIC_DEFAULT_HAIKU_MODEL` or
+        # `ANTHROPIC_SMALL_FAST_MODEL` — those control cheap auxiliary
+        # helpers and must stay cheap.
+        model_env_vars=(
+            "ANTHROPIC_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        ),
         session_capture=SessionCapture(
             strategy="stream_json_event",
             match={"type": "system", "subtype": "init"},
@@ -73,6 +101,19 @@ DEFAULT_AGENT_TEMPLATES: dict[str, AgentTemplate] = {
     "pi": AgentTemplate(command=("pi", "--print", "--no-session"), model_flag=None),
     "harness": AgentTemplate(command=("th", "run"), model_flag="--model"),
 }
+
+
+def build_template_env(
+    template: AgentTemplate, *, effective_model: str | None
+) -> dict[str, str]:
+    """Compute the env-var overrides a template wants applied for the
+    given effective model. Returns an empty dict when no injection is
+    needed (effective_model is None, or the template has no env-var
+    injections configured)."""
+
+    if effective_model is None or not template.model_env_vars:
+        return {}
+    return {name: effective_model for name in template.model_env_vars}
 
 
 def template_uses_generated_uuid(template: AgentTemplate) -> bool:
