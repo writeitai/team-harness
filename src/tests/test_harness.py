@@ -27,6 +27,7 @@ from team_harness.tracking.run_log import RunLogWriter
 from team_harness.ui.console import make_console
 from team_harness.ui.console import PlainConsole
 from team_harness.ui.console import SilentConsole
+from tests.helpers import fake_agent_template
 
 # ---------------------------------------------------------------------------
 # CLI / SDK parity test
@@ -456,7 +457,7 @@ async def test_build_agent_tool_bindings_produces_closures(tmp_path):
         api_key="test-key",
         cwd=str(tmp_path),
         run_dir=run_dir,
-        agent_templates={"codex": "echo {prompt}"},
+        agent_templates={"codex": fake_agent_template()},
     )
     manager = AgentManager()
     run_log = RunLogWriter(
@@ -509,7 +510,7 @@ async def test_build_agent_tool_bindings_spawn_records_resume_metadata(
         api_key="test-key",
         cwd=str(tmp_path),
         run_dir=run_dir,
-        agent_templates={"codex": "echo {prompt}"},
+        agent_templates={"codex": fake_agent_template()},
     )
     manager = AgentManager()
     run_log = RunLogWriter(
@@ -528,7 +529,7 @@ async def test_build_agent_tool_bindings_spawn_records_resume_metadata(
         return SpawnResult(
             proc=proc,
             command=["codex", "exec"],
-            template="echo {prompt}",
+            template=fake_agent_template(),
             generated_uuid=None,
         )
 
@@ -576,7 +577,7 @@ async def test_agent_tool_bindings_isolate_cursor_state(tmp_path):
         api_key="test-key",
         cwd=str(tmp_path),
         run_dir=run_dir_a,
-        agent_templates={"codex": "echo {prompt}"},
+        agent_templates={"codex": fake_agent_template()},
     )
     manager_a = AgentManager()
     log_a = RunLogWriter(
@@ -598,7 +599,7 @@ async def test_agent_tool_bindings_isolate_cursor_state(tmp_path):
         api_key="test-key",
         cwd=str(tmp_path),
         run_dir=run_dir_b,
-        agent_templates={"codex": "echo {prompt}"},
+        agent_templates={"codex": fake_agent_template()},
     )
     manager_b = AgentManager()
     log_b = RunLogWriter(

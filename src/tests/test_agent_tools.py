@@ -8,10 +8,12 @@ import json
 import pytest
 
 from team_harness.agents.manager import AgentState
+from team_harness.agents.template import AgentTemplate
 from team_harness.cli import _graceful_shutdown
 from team_harness.tools import agent_tools
 from team_harness.tracking.models import AgentRecord
 from team_harness.tracking.run_log import RunLogWriter
+from tests.helpers import fake_agent_template
 
 
 @pytest.mark.asyncio
@@ -19,7 +21,7 @@ async def test_spawn_agent_appends_suffix_before_output_instruction(
     tmp_path, config, manager, ui
 ):
     config.run_dir = tmp_path
-    config.agent_templates = {"codex": "echo {prompt}"}
+    config.agent_templates = {"codex": fake_agent_template()}
     config.worker_suffix = "Always include a brief verification note."
     run_log = RunLogWriter(
         run_id="run_1",
@@ -163,7 +165,9 @@ async def test_list_agents_and_graceful_shutdown(tmp_path, config, manager, ui):
 @pytest.mark.asyncio
 async def test_list_agents_shows_killed_status(tmp_path, config, manager, ui):
     config.run_dir = tmp_path
-    config.agent_templates = {"codex": "sh -lc 'sleep 5' {prompt}"}
+    config.agent_templates = {
+        "codex": AgentTemplate(command=("sh", "-lc", "sleep 5"), model_flag=None)
+    }
     run_log = RunLogWriter(
         run_id="run_1",
         run_dir=tmp_path,

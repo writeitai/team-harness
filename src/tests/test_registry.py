@@ -138,29 +138,6 @@ def test_build_command_from_template_substitutes_generated_uuid_and_session_id()
     assert command == ["tool", "--session-id", "gen-456", "--resume", "sid-123", "go"]
 
 
-def test_build_command_legacy_template_still_works():
-    config = Config(agent_templates={"codex": 'echo PROMPT="{prompt}"'})
-
-    command = build_command(
-        agent_type="codex", prompt='Say "hello" && echo $HOME', config=config
-    )
-
-    assert command == ["echo", 'PROMPT=Say "hello" && echo $HOME']
-
-
-def test_build_command_duplicate_model_warning_uses_legacy_template():
-    config = Config(
-        agent_templates={"codex": 'codex exec PROMPT="{prompt}" --model existing-model'}
-    )
-
-    with pytest.warns(UserWarning):
-        command = build_command(
-            agent_type="codex", prompt="prompt", config=config, model="override"
-        )
-
-    assert command == ["codex", "exec", "PROMPT=prompt", "--model", "existing-model"]
-
-
 def test_build_command_missing_resume_session_id_raises():
     with pytest.raises(ValueError, match="session_id"):
         build_command(
@@ -169,7 +146,11 @@ def test_build_command_missing_resume_session_id_raises():
 
 
 def test_allowed_types_and_depth_guard(monkeypatch):
-    config = Config(agent_templates={"myagent": "myagent {prompt}"})
+    config = Config(
+        agent_templates={
+            "myagent": AgentTemplate(command=("myagent",), model_flag=None)
+        }
+    )
 
     assert "myagent" in all_agent_types(config)
     config.allowed_agents = ["codex", "myagent"]

@@ -160,9 +160,15 @@ def test_init_global_force_overwrites(monkeypatch, tmp_path):
     result = runner.invoke(main, ["init", "--global", "--force"])
 
     assert result.exit_code == 0
-    assert 'template = "codex exec --yolo --model gpt-5.4 PROMPT=\\"{prompt}\\""' in (
-        global_path.read_text()
-    )
+    generated = global_path.read_text()
+    # Legacy single-string form is removed.
+    import re
+
+    assert re.search(r"(?m)^template\s*=\s*\"", generated) is None
+    # Structured form is visible.
+    assert "[agents.codex]" in generated
+    assert 'command = ["codex", "exec"]' in generated
+    assert "[agents.codex.session_capture]" in generated
 
 
 @pytest.mark.asyncio

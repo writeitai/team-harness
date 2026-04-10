@@ -433,14 +433,13 @@ async def spawn_agent(**kwargs: object) -> str:
     run_log.record_agent_spawn(record)
     ui.agent_event(event="spawned", state=state)
     asyncio.ensure_future(_watch_agent(agent_id))
-    if isinstance(spawn_result.template, AgentTemplate):
-        asyncio.ensure_future(
-            _capture_session_id_task(
-                agent_id=agent_id,
-                template=spawn_result.template,
-                pre_generated_uuid=spawn_result.generated_uuid,
-            )
+    asyncio.ensure_future(
+        _capture_session_id_task(
+            agent_id=agent_id,
+            template=spawn_result.template,
+            pre_generated_uuid=spawn_result.generated_uuid,
         )
+    )
     return agent_id
 
 
@@ -820,8 +819,6 @@ def build_agent_tool_bindings(
                 ui.agent_event(event="done" if exit_code == 0 else "failed", state=s)
 
         async def _capture_session() -> None:
-            if not isinstance(spawn_result.template, AgentTemplate):
-                return
             session_id = await capture_session_id_from_path(
                 stdout_path=stdout_log,
                 template=spawn_result.template,

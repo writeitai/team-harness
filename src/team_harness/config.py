@@ -21,17 +21,6 @@ RUNS_DIR = Path.home() / ".team-harness" / "runs"
 SKILLS_USER_DIR = Path.home() / ".team-harness" / "skills"
 PROMPT_FILE_MAX_BYTES = 100 * 1024
 
-# Backward-compatible legacy string view. The harness itself uses
-# DEFAULT_AGENT_TEMPLATES for built-in behavior.
-DEFAULT_TEMPLATES: dict[str, str] = {
-    "codex": 'codex exec --yolo --model gpt-5.4 PROMPT="{prompt}"',
-    "gemini": 'gemini --approval-mode=yolo -p "{prompt}"',
-    "claude": "claude -p --dangerously-skip-permissions {prompt}",
-    "opencode": "opencode {prompt}",
-    "pi": "pi --print --no-session {prompt}",
-    "harness": "th run {prompt}",
-}
-
 
 @dataclass
 class Config:
@@ -53,7 +42,7 @@ class Config:
     shutdown_timeout_s: float = 10.0
     min_agent_lifetime_before_kill_s: float = 600.0
     allowed_agents: list[str] | None = None
-    agent_templates: dict[str, str | AgentTemplate] = field(default_factory=dict)
+    agent_templates: dict[str, AgentTemplate] = field(default_factory=dict)
     cwd: str = "."
     run_dir: Path | None = None
     global_config_path: Path | None = None
@@ -70,8 +59,88 @@ class Config:
             self.coordinator_prompt = self.coordinator_system_message
 
 
+# Structured agent-template block used verbatim in both the global and local
+# sample config files. Kept as a module-level string so the two callers and
+# the round-trip test (`test_default_config_text_roundtrip_matches_builtin_defaults`)
+# all see exactly the same content.
+_STRUCTURED_AGENTS_BLOCK = """# Worker agent invocations. Each agent is described as a structured
+# command: a base `command` list, `shared_flags` that are always applied,
+# `resume_flags` that are applied only when resuming a previous session,
+# and a `session_capture` sub-table describing how the harness extracts
+# the provider's session id from the worker's stream-json output.
+#
+# These blocks override the built-in defaults. Any field you omit falls
+# back to the corresponding built-in default for that agent type (so, for
+# example, a custom `[agents.codex]` that only sets `model_flag` keeps all
+# other fields from the default codex template).
+#
+# Custom (non-built-in) agent types must set at least `command`.
+
+# Codex worker. `--json` is required so the harness can parse the initial
+# `thread.started` event and capture the session id for future resume.
+[agents.codex]
+command = ["codex", "exec"]
+shared_flags = [
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--skip-git-repo-check",
+    "--json",
+]
+resume_prefix = ["resume"]
+resume_flags = ["{session_id}"]
+model_flag = "--model"
+
+[agents.codex.session_capture]
+strategy = "stream_json_event"
+match = { type = "thread.started" }
+field_path = ["thread_id"]
+
+# Gemini worker. `stream-json` gives us a parseable session id in the
+# initial `init` event.
+[agents.gemini]
+command = ["gemini"]
+shared_flags = ["--approval-mode", "yolo", "--output-format", "stream-json"]
+resume_flags = ["--resume", "{session_id}"]
+prompt_flag = "-p"
+model_flag = "--model"
+
+[agents.gemini.session_capture]
+strategy = "stream_json_event"
+match = { type = "init" }
+field_path = ["session_id"]
+
+# Claude Code worker. `--verbose` is mandatory when `-p` and
+# `--output-format stream-json` are combined (Claude CLI requirement).
+[agents.claude]
+command = ["claude"]
+shared_flags = [
+    "-p",
+    "--dangerously-skip-permissions",
+    "--output-format", "stream-json",
+    "--verbose",
+]
+resume_flags = ["--resume", "{session_id}"]
+model_flag = "--model"
+
+[agents.claude.session_capture]
+strategy = "stream_json_event"
+match = { type = "system", subtype = "init" }
+field_path = ["session_id"]
+
+[agents.opencode]
+command = ["opencode"]
+
+[agents.pi]
+command = ["pi", "--print", "--no-session"]
+
+[agents.harness]
+command = ["th", "run"]
+model_flag = "--model"
+"""
+
+
 def _default_config_text() -> str:
-    return """# th — global configuration
+    return (
+        """# th — global configuration
 # Applies to all projects. Project-level .team-harness/config.toml overrides these.
 
 [coordinator]
@@ -125,29 +194,14 @@ min_agent_lifetime_before_kill_s = 600.0
 # model = "codex-mini-latest"
 # codex_auth_path = "~/.codex/auth.json"
 
-# Agent templates. {prompt} is replaced with the task text at spawn time.
-[agents.codex]
-template = "codex exec --yolo --model gpt-5.4 PROMPT=\\"{prompt}\\""
-
-[agents.gemini]
-template = "gemini --approval-mode=yolo -p \\"{prompt}\\""
-
-[agents.claude]
-template = "claude -p --dangerously-skip-permissions {prompt}"
-
-[agents.opencode]
-template = "opencode {prompt}"
-
-[agents.pi]
-template = "pi --print --no-session {prompt}"
-
-[agents.harness]
-template = "th run {prompt}"
 """
+        + _STRUCTURED_AGENTS_BLOCK
+    )
 
 
 def _local_config_text() -> str:
-    return """# Project-level team-harness config.
+    return (
+        """# Project-level team-harness config.
 # Values here override ~/.team-harness/config.toml.
 # Lists replace, they do not extend, the global value.
 # Do not store API keys here; prefer environment variables.
@@ -202,25 +256,9 @@ min_agent_lifetime_before_kill_s = 600.0
 # model = "codex-mini-latest"
 # codex_auth_path = ".team-harness/codex-auth.json"
 
-# Agent templates. {prompt} is replaced with the task text at spawn time.
-[agents.codex]
-template = "codex exec --yolo --model gpt-5.4 PROMPT=\\"{prompt}\\""
-
-[agents.gemini]
-template = "gemini --approval-mode=yolo -p \\"{prompt}\\""
-
-[agents.claude]
-template = "claude -p --dangerously-skip-permissions {prompt}"
-
-[agents.opencode]
-template = "opencode {prompt}"
-
-[agents.pi]
-template = "pi --print --no-session {prompt}"
-
-[agents.harness]
-template = "th run {prompt}"
 """
+        + _STRUCTURED_AGENTS_BLOCK
+    )
 
 
 def _parse_allowed_agents(raw: str | list[str] | None) -> list[str] | None:
@@ -350,6 +388,41 @@ def _parse_session_capture(raw: object) -> SessionCapture | None:
             "match and field_path."
         )
     return capture
+
+
+def _reject_legacy_agent_templates(
+    data: dict[str, object], source_path: Path | None
+) -> None:
+    """Raise a clear migration error if any `[agents.<name>]` table in the
+    given raw TOML data still uses the legacy single-string `template` form.
+
+    Called once per source file (global and local) so the error can name
+    the exact file the offending key came from — after `_deep_merge` that
+    information is lost.
+    """
+
+    agents = data.get("agents")
+    if not isinstance(agents, dict):
+        return
+    for agent_name, section in agents.items():
+        if not isinstance(agent_name, str) or not isinstance(section, dict):
+            continue
+        if "template" in section:
+            origin = str(source_path) if source_path is not None else "<inline>"
+            raise SystemExit(
+                f"agents.{agent_name}.template is no longer supported "
+                f"(in {origin}).\n"
+                "The single-string template form was removed in team-harness "
+                "after #16. Migrate to the structured form, e.g.:\n\n"
+                f"    [agents.{agent_name}]\n"
+                '    command = ["codex", "exec"]\n'
+                "    shared_flags = ["
+                '"--dangerously-bypass-approvals-and-sandbox", "--json"]\n\n'
+                "See README.md → 'Adding custom agent types' for the full schema "
+                "(command / shared_flags / resume_prefix / resume_flags / "
+                "session_capture / model_flag), or run `th init --force` to "
+                "regenerate a structured sample config."
+            )
 
 
 def _structured_agent_keys_present(section: dict[str, object]) -> bool:
@@ -671,6 +744,13 @@ def load_config(
 
     global_data = _load_toml_file(global_path) if global_path else {}
     local_data = _load_toml_file(local_path) if local_path else {}
+
+    # Validate each source file separately BEFORE deep-merge so the
+    # migration error can cite the exact file that still contains a
+    # legacy `template = "..."` key.
+    _reject_legacy_agent_templates(global_data, global_path)
+    _reject_legacy_agent_templates(local_data, local_path)
+
     global_coordinator = _get_section(global_data, "coordinator")
     local_coordinator = _get_section(local_data, "coordinator")
     config_data = _deep_merge(base=global_data, override=local_data)
@@ -680,21 +760,11 @@ def load_config(
     if not isinstance(agents_section, dict):
         agents_section = {}
 
-    agent_templates: dict[str, str | AgentTemplate] = {}
+    agent_templates: dict[str, AgentTemplate] = {}
     for agent_name, section in agents_section.items():
         if isinstance(agent_name, str) and isinstance(section, dict):
-            has_legacy = isinstance(section.get("template"), str)
-            has_structured = _structured_agent_keys_present(section)
-            if has_structured:
-                if has_legacy:
-                    warnings.warn(
-                        f"agents.{agent_name}.template is deprecated when structured "
-                        "agent template keys are also set; the structured form wins.",
-                        stacklevel=2,
-                    )
+            if _structured_agent_keys_present(section):
                 agent_templates[agent_name] = _parse_agent_template(agent_name, section)
-            elif has_legacy:
-                agent_templates[agent_name] = str(section["template"])
 
     prompt_parts: list[str] = []
     config_prompt = coordinator.get("system_prompt")

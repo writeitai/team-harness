@@ -6,12 +6,13 @@ import pytest
 
 from team_harness.agents.spawner import spawn
 from team_harness.config import Config
+from tests.helpers import fake_agent_template
 
 
 @pytest.mark.asyncio
 async def test_spawn_creates_logs_and_uses_devnull(tmp_path):
     log_dir = tmp_path / "logs"
-    config = Config(agent_templates={"codex": "echo {prompt}"})
+    config = Config(agent_templates={"codex": fake_agent_template()})
 
     proc = await spawn(
         agent_id="agent_test",

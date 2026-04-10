@@ -147,23 +147,69 @@ worker_footer_file = "worker_footer.md"
 system_prompt = ""
 output_dir = "_outputs"
 
+# Worker agents are described as structured commands: a base `command`
+# list, `shared_flags` that are always applied, and `resume_flags` that
+# are applied only when resuming a previous session. A `session_capture`
+# sub-table describes how the harness extracts the provider's session id
+# from the worker's stream-json output so the run can be resumed later.
+#
+# Any field you omit is inherited from the built-in default for that
+# agent type, so it is fine to override only the piece you care about.
+# Run `th init --force` to regenerate a complete, commented sample.
+
 [agents.codex]
-template = "codex exec --yolo --model gpt-5.4 PROMPT=\"{prompt}\""
+command = ["codex", "exec"]
+shared_flags = [
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--skip-git-repo-check",
+    "--json",
+]
+resume_prefix = ["resume"]
+resume_flags = ["{session_id}"]
+model_flag = "--model"
+
+[agents.codex.session_capture]
+strategy = "stream_json_event"
+match = { type = "thread.started" }
+field_path = ["thread_id"]
 
 [agents.gemini]
-template = "gemini --approval-mode=yolo -p \"{prompt}\""
+command = ["gemini"]
+shared_flags = ["--approval-mode", "yolo", "--output-format", "stream-json"]
+resume_flags = ["--resume", "{session_id}"]
+prompt_flag = "-p"
+model_flag = "--model"
+
+[agents.gemini.session_capture]
+strategy = "stream_json_event"
+match = { type = "init" }
+field_path = ["session_id"]
 
 [agents.claude]
-template = "claude -p --dangerously-skip-permissions {prompt}"
+command = ["claude"]
+shared_flags = [
+    "-p",
+    "--dangerously-skip-permissions",
+    "--output-format", "stream-json",
+    "--verbose",
+]
+resume_flags = ["--resume", "{session_id}"]
+model_flag = "--model"
+
+[agents.claude.session_capture]
+strategy = "stream_json_event"
+match = { type = "system", subtype = "init" }
+field_path = ["session_id"]
 
 [agents.opencode]
-template = "opencode {prompt}"
+command = ["opencode"]
 
 [agents.pi]
-template = "pi --print --no-session {prompt}"
+command = ["pi", "--print", "--no-session"]
 
 [agents.harness]
-template = "th run {prompt}"
+command = ["th", "run"]
+model_flag = "--model"
 ```
 
 ### Prompt configuration
@@ -248,16 +294,61 @@ Relevant environment variables:
 
 ### Adding custom agent types
 
-Add a new `[agents.<name>]` section with a `template` containing `{prompt}`:
+Add a new `[agents.<name>]` section with a structured command. The only
+required field is `command`; everything else has sensible defaults.
 
 ```toml
 [agents.myagent]
-template = "my-custom-cli --mode auto {prompt}"
+command = ["my-custom-cli"]
+shared_flags = ["--mode", "auto"]
+model_flag = "--model"   # set to `false` if the CLI has no model flag
 ```
 
 The new type appears automatically in the coordinator's `spawn_agent` tool.
+The task prompt is appended at the tail of the argv list by default; set
+`prompt_position = "after_command"` if your CLI wants the prompt earlier,
+or `prompt_flag = "-p"` if the prompt is introduced by a flag (like `gemini -p`).
 
-`{prompt}` is substituted after tokenization, not by shell evaluation. Quoted placeholder forms such as `PROMPT="{prompt}"` are supported.
+Placeholders that can appear inside `shared_flags`, `resume_prefix`, or
+`resume_flags`:
+
+- `{session_id}` — substituted with the resume session id (resume mode only).
+- `{generated_uuid}` — substituted with a harness-generated UUID at spawn
+  time. Useful for CLIs like `claude` that accept `--session-id <uuid>` up
+  front so the harness can record the id deterministically.
+
+Session ids can be captured from a worker's stream-json output via a
+`[agents.<name>.session_capture]` sub-table with `strategy`, `match`, and
+`field_path` (see the codex/gemini/claude examples above).
+
+### Migrating from legacy single-string templates
+
+Earlier versions of team-harness accepted a `template = "codex exec ... {prompt}"`
+single-string form. That form was deprecated in #16 and **removed** in the
+follow-up refactor. Attempting to load a config that still contains a
+`template = "..."` line now raises a clear error naming the offending file:
+
+```
+agents.codex.template is no longer supported (in /path/to/config.toml).
+The single-string template form was removed in team-harness after #16.
+Migrate to the structured form, e.g.:
+
+    [agents.codex]
+    command = ["codex", "exec"]
+    shared_flags = ["--dangerously-bypass-approvals-and-sandbox", "--json"]
+
+See README.md → 'Adding custom agent types' for the full schema ...
+```
+
+The fastest migration path is:
+
+```bash
+th init --force    # regenerates a complete structured sample
+```
+
+`th init --force` preserves your existing `coordinator_system_message.md`,
+`worker_suffix.md`, and `worker_footer.md` sidecar files, so you can use it
+to regenerate just `config.toml`.
 
 ### Authentication
 

@@ -1,7 +1,5 @@
 # pyright: reportMissingParameterType=false
 
-import warnings
-
 import pytest
 
 from team_harness.agents.template import AgentTemplate
@@ -42,24 +40,24 @@ def test_parse_structured_template_fields():
     )
 
 
-def test_load_config_legacy_template_only_emits_no_warning(tmp_path):
+def test_load_config_legacy_template_raises_migration_error(tmp_path):
     config_path = tmp_path / ".team-harness" / "config.toml"
     config_path.parent.mkdir()
     config_path.write_text(
         '[agents.codex]\ntemplate = "codex exec --yolo {prompt}"\n', encoding="utf-8"
     )
 
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        config = load_config(cwd=str(tmp_path))
+    with pytest.raises(SystemExit) as exc:
+        load_config(cwd=str(tmp_path))
 
-    assert config.agent_templates["codex"] == "codex exec --yolo {prompt}"
-    assert len(caught) == 0
+    message = str(exc.value)
+    assert "agents.codex.template" in message
+    assert "no longer supported" in message
 
 
-def test_load_config_structured_template_wins_over_legacy_with_warning(
-    tmp_path, monkeypatch
-):
+def test_load_config_legacy_template_mixed_with_structured_also_errors(tmp_path):
+    # Mixing legacy and structured used to warn and prefer structured; now it
+    # errors the same way a pure legacy section does. Consistent behavior.
     config_path = tmp_path / ".team-harness" / "config.toml"
     config_path.parent.mkdir()
     config_path.write_text(
@@ -67,28 +65,12 @@ def test_load_config_structured_template_wins_over_legacy_with_warning(
 [agents.codex]
 template = "codex exec --yolo {prompt}"
 command = ["codex", "exec"]
-shared_flags = ["--json"]
-resume_prefix = ["resume"]
-resume_flags = ["{session_id}"]
 """,
         encoding="utf-8",
     )
 
-    with pytest.warns(UserWarning, match="structured form wins"):
-        config = load_config(cwd=str(tmp_path))
-
-    assert config.agent_templates["codex"] == AgentTemplate(
-        command=("codex", "exec"),
-        shared_flags=("--json",),
-        resume_prefix=("resume",),
-        resume_flags=("{session_id}",),
-        model_flag="--model",
-        session_capture=SessionCapture(
-            strategy="stream_json_event",
-            match={"type": "thread.started"},
-            field_path=("thread_id",),
-        ),
-    )
+    with pytest.raises(SystemExit, match="agents.codex.template"):
+        load_config(cwd=str(tmp_path))
 
 
 def test_parse_custom_structured_template_requires_command():

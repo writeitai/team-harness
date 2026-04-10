@@ -17,7 +17,7 @@ from team_harness.config import Config
 class SpawnResult:
     proc: asyncio.subprocess.Process
     command: list[str]
-    template: str | AgentTemplate
+    template: AgentTemplate
     generated_uuid: str | None
 
 
@@ -38,7 +38,7 @@ async def spawn(
 ) -> SpawnResult:
     template = resolve_template(agent_type=agent_type, config=config)
     generated_uuid: str | None = None
-    if isinstance(template, AgentTemplate) and template_uses_generated_uuid(template):
+    if template_uses_generated_uuid(template):
         generated_uuid = str(uuid.uuid4())
 
     command = build_command(
