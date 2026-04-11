@@ -69,7 +69,9 @@ class ConsoleBase(ABC):
     @abstractmethod
     def end_streaming(self) -> None: ...
 
-    def end_compaction(self, before_tokens: int, after_tokens: int) -> None:
+    def end_compaction(
+        self, before_tokens: int, after_tokens: int, success: bool = True
+    ) -> None:
         return None
 
     @abstractmethod
@@ -199,10 +201,13 @@ class PlainConsole(ConsoleBase):
     def end_streaming(self) -> None:
         return None
 
-    def end_compaction(self, before_tokens: int, after_tokens: int) -> None:
-        print(
-            f"{self._prefix()} Context compacted: ~{before_tokens:,} -> ~{after_tokens:,} tokens"
-        )
+    def end_compaction(
+        self, before_tokens: int, after_tokens: int, success: bool = True
+    ) -> None:
+        if success:
+            print(
+                f"{self._prefix()} Context compacted: ~{before_tokens:,} -> ~{after_tokens:,} tokens"
+            )
 
     def end_turn(self) -> None:
         print()
@@ -340,13 +345,16 @@ class HarnessConsole(ConsoleBase):
             self._live_running = True
         self._streaming = False
 
-    def end_compaction(self, before_tokens: int, after_tokens: int) -> None:
+    def end_compaction(
+        self, before_tokens: int, after_tokens: int, success: bool = True
+    ) -> None:
         self._compacting = False
         if self._live_running:
             self._live.update(self._render_live())
-        self._console.print(
-            f"Context compacted: ~{before_tokens:,} -> ~{after_tokens:,} tokens"
-        )
+        if success:
+            self._console.print(
+                f"Context compacted: ~{before_tokens:,} -> ~{after_tokens:,} tokens"
+            )
 
     def end_turn(self) -> None:
         if self._live_running:

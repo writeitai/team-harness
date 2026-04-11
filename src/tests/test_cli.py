@@ -741,6 +741,552 @@ async def test_reset_alias_dispatches_same_clear_handler(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_compact_command_dispatches_manual_compaction_without_focus(
+    monkeypatch, tmp_path
+):
+    class FakeClient:
+        api_base = "http://localhost:11434/v1"
+        model = "test/model"
+        provider = "openai_compat"
+
+        async def aclose(self):
+            return None
+
+    class FakeConsole:
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+        def print(self, message):
+            return None
+
+        def print_welcome(self, model, cwd, provider):
+            return None
+
+        def pause_for_input(self):
+            return None
+
+        def resume_after_input(self):
+            return None
+
+        def begin_turn(self, n):
+            return None
+
+        def begin_compaction(self):
+            return None
+
+        def end_compaction(self, before_tokens, after_tokens, success=True):
+            return None
+
+        def begin_streaming(self):
+            return None
+
+        def stream_token(self, token):
+            return None
+
+        def end_streaming(self):
+            return None
+
+        def end_turn(self):
+            return None
+
+        def tool_call_start(self, name, args):
+            return None
+
+        def agent_event(self, event, state):
+            return None
+
+        def context_warning(self):
+            return None
+
+        def reset_separator(self):
+            return None
+
+        def print_agent_panel_inline(self):
+            return None
+
+    async def fake_resolve_model_limit(model_id, client, config):
+        return 128_000
+
+    inputs = iter(["first", "/compact", "second", None])
+    fake_console = FakeConsole()
+    compact_calls: list[dict] = []
+    run_last_logged_indices: list[int] = []
+    message_snapshots: list[list[dict]] = []
+
+    async def fake_read_user_input(session):
+        return next(inputs)
+
+    async def fake_run_one_turn(**kwargs):
+        run_last_logged_indices.append(kwargs["last_logged_index"])
+        message_snapshots.append([message.copy() for message in kwargs["messages"]])
+        kwargs["messages"].append({"role": "assistant", "content": "done"})
+        return False, len(kwargs["messages"])
+
+    async def fake_perform_manual_compaction(*, messages, client, ctx, ui, focus_text):
+        compact_calls.append(
+            {
+                "messages": [message.copy() for message in messages],
+                "focus_text": focus_text,
+            }
+        )
+        messages[:] = [
+            messages[0],
+            {"role": "system", "content": "boundary"},
+            {"role": "user", "content": "summary"},
+        ]
+        return True
+
+    monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
+    monkeypatch.setattr("team_harness.cli._make_client", lambda config: FakeClient())
+    monkeypatch.setattr(
+        "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
+    )
+    monkeypatch.setattr("team_harness.cli.make_console", lambda **_: fake_console)
+    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr(
+        "team_harness.cli.validate_templates", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "team_harness.cli.build_system_prompt", lambda *args, **kwargs: "system"
+    )
+    monkeypatch.setattr("team_harness.cli._build_registry", lambda **_: object())
+    monkeypatch.setattr("team_harness.cli.make_prompt_session", lambda: object())
+    monkeypatch.setattr("team_harness.cli.read_user_input", fake_read_user_input)
+    monkeypatch.setattr("team_harness.cli.run_one_turn", fake_run_one_turn)
+    monkeypatch.setattr(
+        "team_harness.cli._perform_manual_compaction", fake_perform_manual_compaction
+    )
+
+    await _repl(cwd=str(tmp_path), api_base="http://localhost:11434/v1")
+
+    assert len(compact_calls) == 1
+    assert compact_calls[0]["focus_text"] is None
+    assert compact_calls[0]["messages"] == [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "done"},
+    ]
+    assert run_last_logged_indices == [0, 0]
+    assert message_snapshots == [
+        [{"role": "system", "content": "system"}, {"role": "user", "content": "first"}],
+        [
+            {"role": "system", "content": "system"},
+            {"role": "system", "content": "boundary"},
+            {"role": "user", "content": "summary"},
+            {"role": "user", "content": "second"},
+        ],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_compact_command_dispatches_manual_compaction_with_focus(
+    monkeypatch, tmp_path
+):
+    class FakeClient:
+        api_base = "http://localhost:11434/v1"
+        model = "test/model"
+        provider = "openai_compat"
+
+        async def aclose(self):
+            return None
+
+    class FakeConsole:
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+        def print(self, message):
+            return None
+
+        def print_welcome(self, model, cwd, provider):
+            return None
+
+        def pause_for_input(self):
+            return None
+
+        def resume_after_input(self):
+            return None
+
+        def begin_turn(self, n):
+            return None
+
+        def begin_compaction(self):
+            return None
+
+        def end_compaction(self, before_tokens, after_tokens, success=True):
+            return None
+
+        def begin_streaming(self):
+            return None
+
+        def stream_token(self, token):
+            return None
+
+        def end_streaming(self):
+            return None
+
+        def end_turn(self):
+            return None
+
+        def tool_call_start(self, name, args):
+            return None
+
+        def agent_event(self, event, state):
+            return None
+
+        def context_warning(self):
+            return None
+
+        def reset_separator(self):
+            return None
+
+        def print_agent_panel_inline(self):
+            return None
+
+    async def fake_resolve_model_limit(model_id, client, config):
+        return 128_000
+
+    inputs = iter(
+        [
+            "seed",
+            "/compact   focus area   ",
+            "after-fail",
+            "/compact done",
+            "after-success",
+            None,
+        ]
+    )
+    fake_console = FakeConsole()
+    compact_calls: list[dict] = []
+    run_last_logged_indices: list[int] = []
+    message_snapshots: list[list[dict]] = []
+    compact_results = iter([False, True])
+
+    async def fake_read_user_input(session):
+        return next(inputs)
+
+    async def fake_run_one_turn(**kwargs):
+        run_last_logged_indices.append(kwargs["last_logged_index"])
+        message_snapshots.append([message.copy() for message in kwargs["messages"]])
+        kwargs["messages"].append({"role": "assistant", "content": "done"})
+        return False, len(kwargs["messages"])
+
+    async def fake_perform_manual_compaction(*, messages, client, ctx, ui, focus_text):
+        compact_calls.append(
+            {
+                "messages": [message.copy() for message in messages],
+                "focus_text": focus_text,
+            }
+        )
+        if next(compact_results):
+            messages[:] = [
+                messages[0],
+                {"role": "system", "content": "boundary"},
+                {"role": "user", "content": "summary"},
+            ]
+            return True
+        return False
+
+    monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
+    monkeypatch.setattr("team_harness.cli._make_client", lambda config: FakeClient())
+    monkeypatch.setattr(
+        "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
+    )
+    monkeypatch.setattr("team_harness.cli.make_console", lambda **_: fake_console)
+    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr(
+        "team_harness.cli.validate_templates", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "team_harness.cli.build_system_prompt", lambda *args, **kwargs: "system"
+    )
+    monkeypatch.setattr("team_harness.cli._build_registry", lambda **_: object())
+    monkeypatch.setattr("team_harness.cli.make_prompt_session", lambda: object())
+    monkeypatch.setattr("team_harness.cli.read_user_input", fake_read_user_input)
+    monkeypatch.setattr("team_harness.cli.run_one_turn", fake_run_one_turn)
+    monkeypatch.setattr(
+        "team_harness.cli._perform_manual_compaction", fake_perform_manual_compaction
+    )
+
+    await _repl(cwd=str(tmp_path), api_base="http://localhost:11434/v1")
+
+    assert [call["focus_text"] for call in compact_calls] == ["focus area", "done"]
+    assert all(
+        all(
+            message.get("content") not in {"/compact   focus area   ", "/compact done"}
+            for message in call["messages"]
+        )
+        for call in compact_calls
+    )
+    assert run_last_logged_indices == [0, 3, 0]
+    assert message_snapshots == [
+        [{"role": "system", "content": "system"}, {"role": "user", "content": "seed"}],
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "seed"},
+            {"role": "assistant", "content": "done"},
+            {"role": "user", "content": "after-fail"},
+        ],
+        [
+            {"role": "system", "content": "system"},
+            {"role": "system", "content": "boundary"},
+            {"role": "user", "content": "summary"},
+            {"role": "user", "content": "after-success"},
+        ],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_compact_command_with_only_trailing_whitespace_passes_none_focus(
+    monkeypatch, tmp_path
+):
+    class FakeClient:
+        api_base = "http://localhost:11434/v1"
+        model = "test/model"
+        provider = "openai_compat"
+
+        async def aclose(self):
+            return None
+
+    class FakeConsole:
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+        def print(self, message):
+            return None
+
+        def print_welcome(self, model, cwd, provider):
+            return None
+
+        def pause_for_input(self):
+            return None
+
+        def resume_after_input(self):
+            return None
+
+        def begin_turn(self, n):
+            return None
+
+        def begin_compaction(self):
+            return None
+
+        def end_compaction(self, before_tokens, after_tokens, success=True):
+            return None
+
+        def begin_streaming(self):
+            return None
+
+        def stream_token(self, token):
+            return None
+
+        def end_streaming(self):
+            return None
+
+        def end_turn(self):
+            return None
+
+        def tool_call_start(self, name, args):
+            return None
+
+        def agent_event(self, event, state):
+            return None
+
+        def context_warning(self):
+            return None
+
+        def reset_separator(self):
+            return None
+
+        def print_agent_panel_inline(self):
+            return None
+
+    async def fake_resolve_model_limit(model_id, client, config):
+        return 128_000
+
+    inputs = iter(["/compact   ", None])
+    fake_console = FakeConsole()
+    compact_calls: list[dict] = []
+
+    async def fake_read_user_input(session):
+        return next(inputs)
+
+    async def fake_run_one_turn(**kwargs):
+        raise AssertionError("run_one_turn should not be called for /compact")
+
+    async def fake_perform_manual_compaction(*, messages, client, ctx, ui, focus_text):
+        compact_calls.append(
+            {
+                "messages": [message.copy() for message in messages],
+                "focus_text": focus_text,
+            }
+        )
+        return False
+
+    monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
+    monkeypatch.setattr("team_harness.cli._make_client", lambda config: FakeClient())
+    monkeypatch.setattr(
+        "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
+    )
+    monkeypatch.setattr("team_harness.cli.make_console", lambda **_: fake_console)
+    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr(
+        "team_harness.cli.validate_templates", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "team_harness.cli.build_system_prompt", lambda *args, **kwargs: "system"
+    )
+    monkeypatch.setattr("team_harness.cli._build_registry", lambda **_: object())
+    monkeypatch.setattr("team_harness.cli.make_prompt_session", lambda: object())
+    monkeypatch.setattr("team_harness.cli.read_user_input", fake_read_user_input)
+    monkeypatch.setattr("team_harness.cli.run_one_turn", fake_run_one_turn)
+    monkeypatch.setattr(
+        "team_harness.cli._perform_manual_compaction", fake_perform_manual_compaction
+    )
+
+    await _repl(cwd=str(tmp_path), api_base="http://localhost:11434/v1")
+
+    assert len(compact_calls) == 1
+    assert compact_calls[0]["focus_text"] is None
+    assert compact_calls[0]["messages"] == [{"role": "system", "content": "system"}]
+
+
+@pytest.mark.asyncio
+async def test_compact_command_tab_separator_is_not_recognized_as_compact(
+    monkeypatch, tmp_path
+):
+    class FakeClient:
+        api_base = "http://localhost:11434/v1"
+        model = "test/model"
+        provider = "openai_compat"
+
+        async def aclose(self):
+            return None
+
+    class FakeConsole:
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+        def print(self, message):
+            return None
+
+        def print_welcome(self, model, cwd, provider):
+            return None
+
+        def pause_for_input(self):
+            return None
+
+        def resume_after_input(self):
+            return None
+
+        def begin_turn(self, n):
+            return None
+
+        def begin_compaction(self):
+            return None
+
+        def end_compaction(self, before_tokens, after_tokens, success=True):
+            return None
+
+        def begin_streaming(self):
+            return None
+
+        def stream_token(self, token):
+            return None
+
+        def end_streaming(self):
+            return None
+
+        def end_turn(self):
+            return None
+
+        def tool_call_start(self, name, args):
+            return None
+
+        def agent_event(self, event, state):
+            return None
+
+        def context_warning(self):
+            return None
+
+        def reset_separator(self):
+            return None
+
+        def print_agent_panel_inline(self):
+            return None
+
+    async def fake_resolve_model_limit(model_id, client, config):
+        return 128_000
+
+    inputs = iter(["/compact\tfoo", None])
+    fake_console = FakeConsole()
+    run_message_snapshots: list[list[dict]] = []
+    compact_calls: list[dict] = []
+
+    async def fake_read_user_input(session):
+        return next(inputs)
+
+    async def fake_run_one_turn(**kwargs):
+        run_message_snapshots.append([message.copy() for message in kwargs["messages"]])
+        kwargs["messages"].append({"role": "assistant", "content": "done"})
+        return False, len(kwargs["messages"])
+
+    async def fake_perform_manual_compaction(*, messages, client, ctx, ui, focus_text):
+        compact_calls.append(
+            {
+                "messages": [message.copy() for message in messages],
+                "focus_text": focus_text,
+            }
+        )
+        return False
+
+    monkeypatch.setattr("team_harness.cli.RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
+    monkeypatch.setattr("team_harness.cli._make_client", lambda config: FakeClient())
+    monkeypatch.setattr(
+        "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
+    )
+    monkeypatch.setattr("team_harness.cli.make_console", lambda **_: fake_console)
+    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr(
+        "team_harness.cli.validate_templates", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "team_harness.cli.build_system_prompt", lambda *args, **kwargs: "system"
+    )
+    monkeypatch.setattr("team_harness.cli._build_registry", lambda **_: object())
+    monkeypatch.setattr("team_harness.cli.make_prompt_session", lambda: object())
+    monkeypatch.setattr("team_harness.cli.read_user_input", fake_read_user_input)
+    monkeypatch.setattr("team_harness.cli.run_one_turn", fake_run_one_turn)
+    monkeypatch.setattr(
+        "team_harness.cli._perform_manual_compaction", fake_perform_manual_compaction
+    )
+
+    await _repl(cwd=str(tmp_path), api_base="http://localhost:11434/v1")
+
+    assert compact_calls == []
+    assert run_message_snapshots == [
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "/compact\tfoo"},
+        ]
+    ]
+
+
+@pytest.mark.asyncio
 async def test_clear_preserves_system_prompt_and_resets_last_logged_index(
     monkeypatch, tmp_path
 ):

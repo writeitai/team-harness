@@ -292,6 +292,111 @@ async def _perform_compaction(
             pass
 
 
+def _record_manual_compaction_failure(ctx: "ContextTracker", ui: "ConsoleBase") -> None:
+    ctx.consecutive_compact_failures += 1
+    if ctx.consecutive_compact_failures == 3:
+        ctx.breaker_tripped = True
+        ui.print(_COMPACTION_BREAKER_WARNING)
+
+
+def _build_manual_summary_messages(
+    original_system: dict, summary_text: str
+) -> list[dict]:
+    return [
+        original_system,
+        {"role": "system", "content": _COMPACT_BOUNDARY_TEXT},
+        {"role": "user", "content": _COMPACT_SUMMARY_PREFIX + summary_text},
+    ]
+
+
+async def _perform_manual_compaction(
+    messages: list[dict],
+    client: "CoordinatorLike",
+    ctx: "ContextTracker",
+    ui: "ConsoleBase",
+    focus_text: str | None = None,
+) -> bool:
+    non_system_messages = sum(
+        1 for message in messages if message.get("role") != "system"
+    )
+    if non_system_messages < 2:
+        ui.print("Nothing to compact yet. Need at least 2 non-system messages.")
+        return False
+
+    before_tokens = ctx.prompt_tokens + ctx.completion_tokens
+    after_tokens = before_tokens
+    success = False
+    ui.begin_compaction()
+    try:
+        rendered_transcript = _render_transcript(messages[1:])
+        request_content = (
+            "Summarize the following conversation so the same model "
+            "can continue the work after the earlier history is removed.\n"
+            "Preserve exact filenames, commands, errors, decisions, "
+            "constraints, and pending tasks whenever they still matter.\n\n"
+            "Conversation transcript:\n\n"
+            f"{rendered_transcript}"
+        )
+        trimmed_focus_text = focus_text.strip() if focus_text is not None else None
+        if trimmed_focus_text:
+            capped_focus_text = trimmed_focus_text
+            if len(capped_focus_text) > 2000:
+                capped_focus_text = (
+                    capped_focus_text[:2000] + "\n[... truncated to 2000 chars ...]"
+                )
+            request_content += (
+                f"\n\nAdditional focus from the user:\n{capped_focus_text}"
+            )
+        try:
+            response = await client.chat(
+                messages=[
+                    {"role": "system", "content": _COMPACTION_SYSTEM_PROMPT},
+                    {"role": "user", "content": request_content},
+                ],
+                tools=[],
+                stream=False,
+                token_callback=None,
+            )
+        except CoordinatorAPIError as exc:
+            if exc.status_code is None:
+                ui.print(f"Manual compaction failed: {exc}")
+            else:
+                ui.print(
+                    f"Manual compaction failed: API error {exc.status_code}: {exc}"
+                )
+            _record_manual_compaction_failure(ctx=ctx, ui=ui)
+            return False
+        except APIStatusError as exc:
+            ui.print(
+                f"Manual compaction failed: API error {exc.status_code}: {exc.message}"
+            )
+            _record_manual_compaction_failure(ctx=ctx, ui=ui)
+            return False
+        except Exception as exc:
+            ui.print(f"Manual compaction failed: {exc}")
+            _record_manual_compaction_failure(ctx=ctx, ui=ui)
+            return False
+
+        content = response.choices[0].message.content
+        if content is None or not content.strip():
+            ui.print("Manual compaction failed: summarizer returned an empty response.")
+            _record_manual_compaction_failure(ctx=ctx, ui=ui)
+            return False
+        replacement = _build_manual_summary_messages(messages[0], content.strip())
+        messages[:] = replacement
+        ctx.consecutive_compact_failures = 0
+        ctx.breaker_tripped = False
+        ctx.set_estimated_total(messages)
+        after_tokens = _approximate_tokens(messages)
+        success = True
+        return True
+    finally:
+        try:
+            ui.end_compaction(before_tokens, after_tokens, success=success)
+        except Exception:
+            pass
+
+
 def _record_compaction_failure(ctx: "ContextTracker", ui: "ConsoleBase") -> None:
     ctx.consecutive_compact_failures += 1
     if ctx.consecutive_compact_failures >= 3:

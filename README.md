@@ -628,6 +628,7 @@ Options:
 |------------|-----------------------------------------------------------------|
 | `/clear`   | Clear conversation history and context tracking; start fresh    |
 | `/reset`   | Alias for `/clear`                                              |
+| `/compact [focus]` | Manually compact earlier conversation into a summary for the next turn |
 | `/quit`    | Graceful shutdown: wait for running agents, then exit           |
 | `/agents`  | Print current agent status table inline                         |
 | `/log`     | Print the path to the current run log                           |
@@ -640,6 +641,8 @@ Options:
 - Auto-compaction only runs when the last message role is `user`, so it never compacts in the middle of a tool exchange.
 - Auto-compaction is always on in v1 and does not have a public config knob.
 - OpenAI-compatible providers may expose provider-prefixed model ids such as `openai/gpt-5.4`; model-limit resolution accepts both bare and prefixed forms.
+- Manual compaction runs between turns and rewrites earlier history into a compact summary for the next turn. `/compact [focus]` never runs in the middle of a tool exchange.
+- `/compact <focus>` lets you bias what the summary emphasizes without changing the command transcript shape that the coordinator sees afterward.
 - `/clear` is the manual escape hatch when you want to keep the same session, run log, and agent state but start with a fresh conversation.
 
 ## REPL editing keys

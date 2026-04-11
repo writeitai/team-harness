@@ -14,6 +14,7 @@ from team_harness.config import CONFIG_PATH
 from team_harness.config import load_config
 from team_harness.config import LOCAL_CONFIG_DIR_NAME
 from team_harness.config import RUNS_DIR
+from team_harness.coordinator.loop import _perform_manual_compaction
 from team_harness.coordinator.loop import run_one_turn
 from team_harness.coordinator.system_prompt import build_system_prompt
 from team_harness.coordinator.system_prompt import COORDINATOR_PROMPT
@@ -339,6 +340,17 @@ async def _repl(**kwargs: Any) -> None:
                         ui.print_agent_panel_inline()
                     case "/log":
                         ui.print(str(run_log.path))
+                    case _ if raw == "/compact" or raw.startswith("/compact "):
+                        focus_text = raw[len("/compact") :].strip() or None
+                        compacted = await _perform_manual_compaction(
+                            messages=messages,
+                            client=client,
+                            ctx=ctx,
+                            ui=ui,
+                            focus_text=focus_text,
+                        )
+                        if compacted:
+                            last_logged_index = 0
                     case _:
                         messages.append({"role": "user", "content": raw})
                         ctx.set_estimated_total(messages)

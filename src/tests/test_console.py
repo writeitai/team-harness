@@ -175,3 +175,38 @@ def test_plain_console_prints_post_compaction_notice(tmp_path, capsys):
     output = capsys.readouterr().out
     assert "Compacting conversation..." in output
     assert "Context compacted: ~12,345 -> ~6,789 tokens" in output
+
+
+def test_plain_console_end_compaction_suppresses_line_on_failure(tmp_path, capsys):
+    console = PlainConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+
+    console.begin_compaction()
+    console.end_compaction(12_345, 12_345, success=False)
+
+    output = capsys.readouterr().out
+    assert "Compacting conversation..." in output
+    assert "Context compacted:" not in output
+
+
+def test_harness_console_end_compaction_clears_compacting_flag_on_failure(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    console = HarnessConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+    console._console = MagicMock()
+    console._live = MagicMock()
+    console._live_running = True
+
+    console.begin_compaction()
+    console.end_compaction(12_345, 12_345, success=False)
+
+    assert console._compacting is False
+    console._live.update.assert_called()
+    printed = " ".join(
+        str(call.args[0]) for call in console._console.print.call_args_list
+    )
+    assert "Context compacted: " not in printed

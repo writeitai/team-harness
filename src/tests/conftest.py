@@ -29,6 +29,7 @@ class DummyUI:
         self.compaction_events: list[tuple[int, int]] = []
         self.compaction_begin_calls: int = 0
         self.compaction_end_calls: list[tuple[int, int]] = []
+        self.compaction_end_results: list[tuple[int, int, bool]] = []
         self.warning_count = 0
         self.reset_count = 0
         self.inline_count = 0
@@ -69,9 +70,12 @@ class DummyUI:
         self.compaction_started += 1
         self.compaction_begin_calls += 1
 
-    def end_compaction(self, before_tokens: int, after_tokens: int) -> None:
+    def end_compaction(
+        self, before_tokens: int, after_tokens: int, success: bool = True
+    ) -> None:
         self.compaction_events.append((before_tokens, after_tokens))
         self.compaction_end_calls.append((before_tokens, after_tokens))
+        self.compaction_end_results.append((before_tokens, after_tokens, success))
 
     def tool_call_start(self, name: str, args: dict) -> DummyToolContext:
         ctx = DummyToolContext()

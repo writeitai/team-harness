@@ -13,7 +13,9 @@ from team_harness.coordinator.client import MessageRecord
 from team_harness.coordinator.client import UsageRecord
 from team_harness.coordinator.loop import _approximate_tokens
 from team_harness.coordinator.loop import _chat_with_retry
+from team_harness.coordinator.loop import _COMPACTION_BREAKER_WARNING
 from team_harness.coordinator.loop import _perform_compaction
+from team_harness.coordinator.loop import _perform_manual_compaction
 from team_harness.coordinator.loop import _should_compact
 from team_harness.coordinator.loop import run
 from team_harness.coordinator.loop import run_one_turn
@@ -842,6 +844,457 @@ async def test_compaction_survives_end_compaction_raise(ctx, ui):
         "Compact summary of earlier conversation:\n\nsummary body"
     )
     assert len(raising_ui.compaction_end_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_rebuilds_messages_with_boundary_and_summary_only(
+    ctx, ui
+):
+    original_system = {
+        "role": "system",
+        "content": "  original system prompt\nwith spacing  ",
+        "extra": {"mode": "strict"},
+    }
+    messages = [
+        original_system,
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    client = SequenceClient([make_response(content="summary body")])
+
+    compacted = await _perform_manual_compaction(
+        messages=messages, client=client, ctx=ctx, ui=ui
+    )
+
+    assert compacted is True
+    assert messages == [
+        original_system,
+        {
+            "role": "system",
+            "content": (
+                "The earlier conversation history was compacted for context management.\n"
+                "Treat the next user message as an authoritative summary of the removed history.\n"
+                "Continue from it without mentioning the compaction unless the user asks."
+            ),
+        },
+        {
+            "role": "user",
+            "content": "Compact summary of earlier conversation:\n\nsummary body",
+        },
+    ]
+    assert messages[0] is original_system
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_threads_focus_text_into_summary_request(ctx, ui):
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    client = RecordingClient([make_response(content="summary body")])
+
+    compacted = await _perform_manual_compaction(
+        messages=messages, client=client, ctx=ctx, ui=ui, focus_text="focus on tests"
+    )
+
+    assert compacted is True
+    request_messages = client.calls[0]["messages"]
+    assert "focus on tests" not in request_messages[0]["content"]
+    assert request_messages[1]["content"].endswith(
+        "\n\nAdditional focus from the user:\nfocus on tests"
+    )
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_truncates_focus_text_at_2000_characters(ctx, ui):
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    client = RecordingClient([make_response(content="summary body")])
+    focus_text = "a" * 2000 + "tail that should be removed"
+
+    compacted = await _perform_manual_compaction(
+        messages=messages, client=client, ctx=ctx, ui=ui, focus_text=focus_text
+    )
+
+    assert compacted is True
+    request_content = client.calls[0]["messages"][1]["content"]
+    assert (
+        "Additional focus from the user:\n"
+        + "a" * 2000
+        + "\n[... truncated to 2000 chars ...]"
+    ) in request_content
+    assert "tail that should be removed" not in request_content
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_refuses_when_not_enough_messages(ctx, ui):
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "assistant", "content": "only one non-system message"},
+    ]
+    original = copy.deepcopy(messages)
+    client = RecordingClient([make_response(content="summary body")])
+
+    compacted = await _perform_manual_compaction(
+        messages=messages, client=client, ctx=ctx, ui=ui
+    )
+
+    assert compacted is False
+    assert messages == original
+    assert client.calls == []
+    assert ui.messages == [
+        "Nothing to compact yet. Need at least 2 non-system messages."
+    ]
+    assert ui.compaction_begin_calls == 0
+    assert ui.compaction_end_calls == []
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_accepts_between_turn_transcript_without_pending_user(
+    ctx, ui
+):
+    messages = compactable_messages()[:4]
+    client = SequenceClient([make_response(content="summary body")])
+
+    compacted = await _perform_manual_compaction(
+        messages=messages, client=client, ctx=ctx, ui=ui
+    )
+
+    assert compacted is True
+    assert messages == [
+        {"role": "system", "content": "system prompt"},
+        {
+            "role": "system",
+            "content": (
+                "The earlier conversation history was compacted for context management.\n"
+                "Treat the next user message as an authoritative summary of the removed history.\n"
+                "Continue from it without mentioning the compaction unless the user asks."
+            ),
+        },
+        {
+            "role": "user",
+            "content": "Compact summary of earlier conversation:\n\nsummary body",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_rolls_back_on_none_content(ctx, ui):
+    ctx.estimated_total_tokens = 321
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    pre_messages = copy.deepcopy(messages)
+    client = SequenceClient([make_response(content=None)])
+
+    compacted = await _perform_manual_compaction(
+        messages=messages, client=client, ctx=ctx, ui=ui
+    )
+
+    assert compacted is False
+    assert messages == pre_messages
+    assert ui.messages == [
+        "Manual compaction failed: summarizer returned an empty response."
+    ]
+    assert ctx.consecutive_compact_failures == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_rolls_back_on_empty_string(ctx, ui):
+    ctx.estimated_total_tokens = 321
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    pre_messages = copy.deepcopy(messages)
+    client = SequenceClient([make_response(content="")])
+
+    compacted = await _perform_manual_compaction(
+        messages=messages, client=client, ctx=ctx, ui=ui
+    )
+
+    assert compacted is False
+    assert messages == pre_messages
+    assert ui.messages == [
+        "Manual compaction failed: summarizer returned an empty response."
+    ]
+    assert ctx.consecutive_compact_failures == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_rolls_back_on_whitespace_only(ctx, ui):
+    ctx.estimated_total_tokens = 321
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    pre_messages = copy.deepcopy(messages)
+    client = SequenceClient([make_response(content="   \n\n  ")])
+
+    compacted = await _perform_manual_compaction(
+        messages=messages, client=client, ctx=ctx, ui=ui
+    )
+
+    assert compacted is False
+    assert messages == pre_messages
+    assert ui.messages == [
+        "Manual compaction failed: summarizer returned an empty response."
+    ]
+    assert ctx.consecutive_compact_failures == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_formats_coordinator_api_error(ctx, ui):
+    messages_without_status = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    pre_messages_without_status = list(messages_without_status)
+    pre_estimated_without_status = ctx.estimated_total_tokens
+
+    compacted = await _perform_manual_compaction(
+        messages=messages_without_status,
+        client=SequenceClient([make_coordinator_api_error("boom")]),
+        ctx=ctx,
+        ui=ui,
+    )
+    assert compacted is False
+    assert messages_without_status == pre_messages_without_status
+    assert ctx.estimated_total_tokens == pre_estimated_without_status
+    assert ctx.consecutive_compact_failures == 1
+    assert ctx.breaker_tripped is False
+    assert ui.messages == ["Manual compaction failed: boom"]
+
+    ctx.consecutive_compact_failures = 0
+    ctx.breaker_tripped = False
+    ui.messages.clear()
+    messages_with_status = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    pre_messages_with_status = list(messages_with_status)
+    pre_estimated_with_status = ctx.estimated_total_tokens
+    compacted = await _perform_manual_compaction(
+        messages=messages_with_status,
+        client=SequenceClient([make_coordinator_api_error("boom", status_code=503)]),
+        ctx=ctx,
+        ui=ui,
+    )
+    assert compacted is False
+    assert messages_with_status == pre_messages_with_status
+    assert ctx.estimated_total_tokens == pre_estimated_with_status
+    assert ctx.consecutive_compact_failures == 1
+    assert ctx.breaker_tripped is False
+    assert ui.messages == ["Manual compaction failed: API error 503: boom"]
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_formats_api_status_error(ctx, ui):
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    pre_messages = list(messages)
+    pre_estimated = ctx.estimated_total_tokens
+
+    compacted = await _perform_manual_compaction(
+        messages=messages, client=SequenceClient([make_api_error(429)]), ctx=ctx, ui=ui
+    )
+
+    assert compacted is False
+    assert messages == pre_messages
+    assert ctx.estimated_total_tokens == pre_estimated
+    assert ctx.consecutive_compact_failures == 1
+    assert ctx.breaker_tripped is False
+    assert ui.messages == ["Manual compaction failed: API error 429: boom"]
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_formats_generic_exception(ctx, ui):
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    pre_messages = list(messages)
+    pre_estimated = ctx.estimated_total_tokens
+
+    compacted = await _perform_manual_compaction(
+        messages=messages,
+        client=SequenceClient([RuntimeError("summary failed")]),
+        ctx=ctx,
+        ui=ui,
+    )
+
+    assert compacted is False
+    assert messages == pre_messages
+    assert ctx.estimated_total_tokens == pre_estimated
+    assert ctx.consecutive_compact_failures == 1
+    assert ctx.breaker_tripped is False
+    assert ui.messages == ["Manual compaction failed: summary failed"]
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_third_failure_trips_breaker_and_prints_warning(
+    ctx, ui
+):
+    ctx.consecutive_compact_failures = 2
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+
+    compacted = await _perform_manual_compaction(
+        messages=messages,
+        client=SequenceClient([RuntimeError("summary failed")]),
+        ctx=ctx,
+        ui=ui,
+    )
+
+    assert compacted is False
+    assert ctx.consecutive_compact_failures == 3
+    assert ctx.breaker_tripped is True
+    assert ui.messages == [
+        "Manual compaction failed: summary failed",
+        _COMPACTION_BREAKER_WARNING,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_does_not_reprint_breaker_warning_when_already_tripped(
+    ctx, ui
+):
+    ctx.consecutive_compact_failures = 3
+    ctx.breaker_tripped = True
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+
+    compacted = await _perform_manual_compaction(
+        messages=messages,
+        client=SequenceClient([make_response(content="")]),
+        ctx=ctx,
+        ui=ui,
+    )
+
+    assert compacted is False
+    assert (
+        "Manual compaction failed: summarizer returned an empty response."
+        in ui.messages
+    )
+    assert _COMPACTION_BREAKER_WARNING not in ui.messages
+    assert ctx.consecutive_compact_failures == 4
+    assert ctx.breaker_tripped is True
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_resets_breaker_and_sets_estimated_total_on_success(
+    ctx, ui
+):
+    ctx.consecutive_compact_failures = 2
+    ctx.breaker_tripped = True
+    ctx.estimated_total_tokens = 999
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+
+    compacted = await _perform_manual_compaction(
+        messages=messages,
+        client=SequenceClient([make_response(content="summary body")]),
+        ctx=ctx,
+        ui=ui,
+    )
+
+    assert compacted is True
+    assert ctx.consecutive_compact_failures == 0
+    assert ctx.breaker_tripped is False
+    assert ctx.estimated_total_tokens == _approximate_tokens(messages)
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_attempts_even_when_breaker_already_tripped(ctx, ui):
+    ctx.consecutive_compact_failures = 3
+    ctx.breaker_tripped = True
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    client = RecordingClient([make_response(content="summary body")])
+
+    compacted = await _perform_manual_compaction(
+        messages=messages, client=client, ctx=ctx, ui=ui
+    )
+
+    assert compacted is True
+    assert len(client.calls) == 1
+    assert ctx.consecutive_compact_failures == 0
+    assert ctx.breaker_tripped is False
+
+
+@pytest.mark.asyncio
+async def test_manual_compaction_calls_begin_and_end_hooks_with_expected_counts_and_success_flag(
+    ctx, ui
+):
+    ctx.prompt_tokens = 120
+    ctx.completion_tokens = 30
+    success_messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+
+    compacted = await _perform_manual_compaction(
+        messages=success_messages,
+        client=SequenceClient([make_response(content="summary body")]),
+        ctx=ctx,
+        ui=ui,
+    )
+
+    assert compacted is True
+    assert ui.compaction_begin_calls == 1
+    assert ui.compaction_end_results == [
+        (150, _approximate_tokens(success_messages), True)
+    ]
+
+    failure_ui = type(ui)()
+    failure_ctx = copy.deepcopy(ctx)
+    failure_ctx.prompt_tokens = 120
+    failure_ctx.completion_tokens = 30
+    failure_messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+
+    compacted = await _perform_manual_compaction(
+        messages=failure_messages,
+        client=SequenceClient(
+            [make_coordinator_api_error("summary failed", status_code=503)]
+        ),
+        ctx=failure_ctx,
+        ui=failure_ui,
+    )
+
+    assert compacted is False
+    assert failure_ui.compaction_begin_calls == 1
+    assert failure_ui.compaction_end_results == [(150, 150, False)]
 
 
 @pytest.mark.asyncio
