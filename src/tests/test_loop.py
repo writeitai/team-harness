@@ -8,6 +8,8 @@ from unittest.mock import Mock
 import pytest
 
 from team_harness.coordinator.client import ChatResponse
+from team_harness.coordinator.client import ChoiceRecord
+from team_harness.coordinator.client import MessageRecord
 from team_harness.coordinator.client import UsageRecord
 from team_harness.coordinator.loop import _approximate_tokens
 from team_harness.coordinator.loop import _chat_with_retry
@@ -318,6 +320,70 @@ async def test_run_one_turn_emits_context_warning_only_once(
 
     assert should_continue is False
     assert warning_spy.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_usage_warning_emitted_once(tmp_path, config, ctx, ui):
+    run_log = make_run_log(tmp_path, config, run_id="run_missing_usage")
+    registry = ToolRegistry()
+    client = SequenceClient(
+        [
+            ChatResponse(
+                choices=[
+                    ChoiceRecord(
+                        message=MessageRecord(content="first", tool_calls=None),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=None,
+            ),
+            ChatResponse(
+                choices=[
+                    ChoiceRecord(
+                        message=MessageRecord(content="second", tool_calls=None),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=None,
+            ),
+        ]
+    )
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+
+    should_continue, last_logged = await run_one_turn(
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=client,
+        ctx=ctx,
+        turn_index=0,
+        last_logged_index=0,
+    )
+    assert should_continue is False
+
+    messages.append({"role": "user", "content": "again"})
+    should_continue, _ = await run_one_turn(
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=client,
+        ctx=ctx,
+        turn_index=1,
+        last_logged_index=last_logged,
+    )
+
+    assert should_continue is False
+    assert ctx.usage_warning_emitted is True
+    assert (
+        ui.messages.count(
+            "WARNING: coordinator response omitted usage; exact context tracking is unavailable for this response."
+        )
+        == 1
+    )
 
 
 @pytest.mark.asyncio
@@ -1013,6 +1079,7 @@ def test_should_compact_uses_exact_user_tail_guard(ctx):
     ctx.breaker_tripped = False
     ctx.prompt_tokens = 99_000
     ctx.completion_tokens = 0
+    ctx.estimated_total_tokens = 500_000
 
     assert (
         _should_compact(

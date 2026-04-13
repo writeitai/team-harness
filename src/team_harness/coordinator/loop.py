@@ -143,6 +143,11 @@ async def run_one_turn(
         if ctx.at_warning and not ctx.at_warning_emitted:
             ui.context_warning()
             ctx.at_warning_emitted = True
+    elif not ctx.usage_warning_emitted:
+        ui.print(
+            "WARNING: coordinator response omitted usage; exact context tracking is unavailable for this response."
+        )
+        ctx.usage_warning_emitted = True
 
     choice = response.choices[0]
     tool_calls = choice.message.tool_calls or []
@@ -222,8 +227,8 @@ def _should_compact(
         return False
     if not messages or messages[-1]["role"] != "user":
         return False
-    exact_total = ctx.prompt_tokens + ctx.completion_tokens
-    return exact_total >= threshold
+    # Falls back to estimate if API usage is unavailable
+    return ctx.total >= threshold
 
 
 async def _perform_compaction(
