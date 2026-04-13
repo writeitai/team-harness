@@ -636,9 +636,10 @@ Options:
 
 - The status bar shows current context occupancy from the latest exact API usage, not cumulative spend.
 - When local changes exist after the last exact usage update, the displayed total may be estimated and prefixed with `~`.
-- Auto-compaction runs proactively before a new coordinator turn once the model-specific threshold is reached.
+- Auto-compaction runs proactively before a new coordinator turn once the model-specific threshold is reached, using the same tracked total and falling back to a local estimate when provider usage is unavailable.
 - Auto-compaction only runs when the last message role is `user`, so it never compacts in the middle of a tool exchange.
 - Auto-compaction is always on in v1 and does not have a public config knob.
+- OpenAI-compatible providers may expose provider-prefixed model ids such as `openai/gpt-5.4`; model-limit resolution accepts both bare and prefixed forms.
 - `/clear` is the manual escape hatch when you want to keep the same session, run log, and agent state but start with a fresh conversation.
 
 ## REPL editing keys

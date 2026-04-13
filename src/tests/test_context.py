@@ -12,8 +12,11 @@ from team_harness.tracking.context import resolve_model_limit
 
 
 class ClientWithModels:
+    def __init__(self, data: list[dict] | None = None) -> None:
+        self.data = data or [{"id": "x", "context_length": 321}]
+
     async def get_models(self) -> dict:
-        return {"data": [{"id": "x", "context_length": 321}]}
+        return {"data": self.data}
 
 
 class ClientFail:
@@ -53,6 +56,55 @@ async def test_resolve_model_limit_fallbacks():
         )
 
 
+@pytest.mark.asyncio
+async def test_resolve_model_limit_fuzzy_matches_openrouter_prefix():
+    assert (
+        await resolve_model_limit(
+            model_id="gpt-5.4",
+            client=ClientWithModels(
+                [{"id": "openai/gpt-5.4", "context_length": 1_050_000}]
+            ),
+            config=Config(),
+        )
+        == 1_050_000
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_model_limit_exact_still_preferred():
+    assert (
+        await resolve_model_limit(
+            model_id="gpt-5.4",
+            client=ClientWithModels(
+                [
+                    {"id": "gpt-5.4", "context_length": 900_000},
+                    {"id": "openai/gpt-5.4", "context_length": 1_050_000},
+                ]
+            ),
+            config=Config(),
+        )
+        == 900_000
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_model_limit_ambiguous_fuzzy_falls_through(monkeypatch):
+    monkeypatch.setitem(KNOWN_LIMITS, "gpt-5.4", 777_777)
+    assert (
+        await resolve_model_limit(
+            model_id="gpt-5.4",
+            client=ClientWithModels(
+                [
+                    {"id": "openai/gpt-5.4", "context_length": 1_050_000},
+                    {"id": "other/gpt-5.4", "context_length": 900_000},
+                ]
+            ),
+            config=Config(),
+        )
+        == 777_777
+    )
+
+
 def test_context_tracker_uses_latest_turn_usage_not_cumulative():
     tracker = ContextTracker(model_id="m", model_limit=200)
 
@@ -70,6 +122,7 @@ def test_context_tracker_reset_clears_warning_and_compaction_state():
     tracker = ContextTracker(model_id="m", model_limit=100)
     tracker.update({"prompt_tokens": 60, "completion_tokens": 30})
     tracker.at_warning_emitted = True
+    tracker.usage_warning_emitted = True
     tracker.set_estimated_total(
         [{"role": "system", "content": "sys"}, {"role": "user", "content": "follow up"}]
     )
@@ -84,6 +137,7 @@ def test_context_tracker_reset_clears_warning_and_compaction_state():
     assert tracker.cumulative_completion_tokens == 0
     assert tracker.estimated_total_tokens is None
     assert tracker.at_warning_emitted is False
+    assert tracker.usage_warning_emitted is False
     assert tracker.consecutive_compact_failures == 0
     assert tracker.breaker_tripped is False
 
@@ -128,9 +182,9 @@ def test_estimate_is_cleared_when_api_usage_arrives():
     assert tracker.has_estimate is False
 
 
-def test_estimate_not_used_for_compaction_trigger_in_v1():
+def test_should_compact_uses_ctx_total_with_estimate():
     tracker = ContextTracker(model_id="m", model_limit=100)
-    tracker.update({"prompt_tokens": 20, "completion_tokens": 10})
+    tracker.update({"prompt_tokens": 0, "completion_tokens": 0})
     tracker.estimated_total_tokens = 500
 
     should_compact = _should_compact(
@@ -142,7 +196,23 @@ def test_estimate_not_used_for_compaction_trigger_in_v1():
         threshold=50,
     )
 
-    assert should_compact is False
+    assert should_compact is True
+
+
+def test_should_compact_uses_exact_when_estimate_is_none():
+    tracker = ContextTracker(model_id="m", model_limit=100)
+    tracker.update({"prompt_tokens": 40, "completion_tokens": 20})
+
+    should_compact = _should_compact(
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "u"},
+        ],
+        ctx=tracker,
+        threshold=50,
+    )
+
+    assert should_compact is True
 
 
 def test_auto_compact_threshold_for_codex_mini_latest():
@@ -157,6 +227,14 @@ def test_auto_compact_threshold_for_gpt_4o_uses_exact_output_cap():
 
 def test_auto_compact_threshold_for_gpt_4_1():
     assert get_auto_compact_threshold("openai/gpt-4.1", 1_047_576) == 1_014_576
+
+
+def test_auto_compact_threshold_for_gpt_5_4():
+    assert KNOWN_LIMITS["gpt-5.4"] == 1_050_000
+    assert KNOWN_LIMITS["openai/gpt-5.4"] == 1_050_000
+    assert KNOWN_MAX_OUTPUT_TOKENS["gpt-5.4"] == 128_000
+    assert KNOWN_MAX_OUTPUT_TOKENS["openai/gpt-5.4"] == 128_000
+    assert get_auto_compact_threshold("gpt-5.4", 1_050_000) == 1_017_000
 
 
 def test_auto_compact_threshold_for_unknown_model_limit_uses_fallback_reserve():

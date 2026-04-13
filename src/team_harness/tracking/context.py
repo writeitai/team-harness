@@ -12,6 +12,8 @@ KNOWN_LIMITS: dict[str, int] = {
     "openai/gpt-5.1-codex-mini": 400_000,
     "gpt-5.1-codex-max": 400_000,
     "openai/gpt-5.1-codex-max": 400_000,
+    "gpt-5.4": 1_050_000,
+    "openai/gpt-5.4": 1_050_000,
     "openai/gpt-4.1": 1_047_576,
     "openai/gpt-4.1-mini": 1_047_576,
     "openai/gpt-4o": 128_000,
@@ -28,6 +30,8 @@ KNOWN_MAX_OUTPUT_TOKENS: dict[str, int] = {
     "openai/gpt-5.1-codex-mini": 128_000,
     "gpt-5.1-codex-max": 128_000,
     "openai/gpt-5.1-codex-max": 128_000,
+    "gpt-5.4": 128_000,
+    "openai/gpt-5.4": 128_000,
     "openai/gpt-4.1": 32_768,
     "openai/gpt-4.1-mini": 32_768,
     "openai/gpt-4o": 16_384,
@@ -48,14 +52,38 @@ KNOWN_CODEX_MODELS = {
 
 
 async def resolve_model_limit(model_id: str, client: Any, config: Config) -> int:
+    def _provider_suffix(value: str) -> str:
+        _, separator, suffix = value.partition("/")
+        return suffix if separator else value
+
+    def _resolve_limit(model: dict[str, Any]) -> int | None:
+        limit = model.get("context_length") or model.get("context_window")
+        if limit:
+            return int(limit)
+        return None
+
     try:
         if config.provider == "openai_compat" and hasattr(client, "get_models"):
             models = await client.get_models()
+            exact_match_found = False
             for model in models.get("data", []):
                 if model.get("id") == model_id:
-                    limit = model.get("context_length") or model.get("context_window")
+                    exact_match_found = True
+                    limit = _resolve_limit(model)
                     if limit:
-                        return int(limit)
+                        return limit
+            if not exact_match_found:
+                model_suffix = _provider_suffix(model_id)
+                fuzzy_matches = [
+                    model
+                    for model in models.get("data", [])
+                    if isinstance(model.get("id"), str)
+                    and _provider_suffix(model["id"]) == model_suffix
+                ]
+                if len(fuzzy_matches) == 1:
+                    limit = _resolve_limit(fuzzy_matches[0])
+                    if limit:
+                        return limit
     except Exception:
         pass
 
@@ -113,6 +141,7 @@ class ContextTracker:
     cumulative_completion_tokens: int = 0
     estimated_total_tokens: int | None = None
     at_warning_emitted: bool = False
+    usage_warning_emitted: bool = False
     consecutive_compact_failures: int = 0
     breaker_tripped: bool = False
 
@@ -142,6 +171,7 @@ class ContextTracker:
         self.cumulative_completion_tokens = 0
         self.estimated_total_tokens = None
         self.at_warning_emitted = False
+        self.usage_warning_emitted = False
         self.consecutive_compact_failures = 0
         self.breaker_tripped = False
 
