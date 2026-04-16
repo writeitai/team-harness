@@ -1,4 +1,14 @@
 # ruff: noqa: A002
+"""prompt_toolkit-backed REPL input for ``th repl``.
+
+Exposes two entry points:
+
+* :func:`make_prompt_session` — build a ``PromptSession`` when running in a
+  real TTY (or explicit input/output for tests); returns ``None`` otherwise so
+  callers can fall back to the plain ``input()`` path.
+* :func:`read_user_input` — read one line (or multi-line block) from the user,
+  expanding collapsed pastes before returning.
+"""
 
 import asyncio
 import sys
@@ -18,6 +28,14 @@ from team_harness.ui.paste import PasteBuffer
 
 
 def _build_key_bindings(*, paste_buffer: PasteBuffer | None = None) -> KeyBindings:
+    """Assemble the REPL key bindings, optionally including paste-collapse.
+
+    When ``paste_buffer`` is provided, a ``Keys.BracketedPaste`` handler
+    intercepts pasted payloads and inserts either the raw text or a placeholder,
+    delegating the decision to the buffer. Without it (e.g. at session
+    construction time, before a prompt begins), only the standard editing
+    shortcuts are installed.
+    """
     kb = KeyBindings()
 
     @kb.add("escape", "enter")
@@ -45,6 +63,13 @@ def make_prompt_session(
     input: Input | None = None,
     output: Output | None = None,
 ) -> "PromptSession[str] | None":
+    """Construct a ``PromptSession`` if interactive, else ``None``.
+
+    When ``input`` or ``output`` is provided (the test-injection path), a
+    session is always returned. Otherwise a session is returned only when
+    stdin and stdout are both TTYs; a non-TTY caller should fall through to
+    the synchronous ``input()`` path in :func:`read_user_input`.
+    """
     if input is not None or output is not None:
         return PromptSession(
             history=history or InMemoryHistory(),
@@ -62,6 +87,22 @@ def make_prompt_session(
 async def read_user_input(
     session: "PromptSession[str] | None", *, prompt: str = "> "
 ) -> str | None:
+    """Read one submission from the user, expanding any collapsed pastes.
+
+    With ``session is None`` the function falls back to a threaded ``input()``
+    call and returns the stripped line (or ``None`` on EOF) — bracketed paste
+    detection is a TTY-only feature and is skipped here.
+
+    With a real session, a per-prompt :class:`PasteBuffer` is installed via the
+    key bindings and a wrapping ``accept_handler`` that expands the buffer's
+    text in place before the default handler fires. This guarantees prompt_toolkit
+    exits the prompt and appends to history with the expanded text, so ``Up``
+    recall and run logs see what was actually submitted. The original key
+    bindings and accept handler are restored in ``finally`` so state does not
+    leak across prompts even on ``KeyboardInterrupt`` or EOF.
+
+    Returns the expanded, stripped text, or ``None`` if the user interrupted.
+    """
     if session is None:
         try:
             text = await asyncio.to_thread(input, prompt)
