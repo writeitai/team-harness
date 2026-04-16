@@ -9,7 +9,7 @@ description = "A lightweight, model-agnostic multi-agent orchestration harness t
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE"]
+license-files = ["LICENSE"]
 authors = [
     { name = "WriteIt.ai s.r.o.", email = "info@writeit.ai" },
 ]
