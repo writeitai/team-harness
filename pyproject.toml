@@ -5,7 +5,40 @@ build-backend = "hatchling.build"
 [project]
 name = "team-harness"
 version = "0.1.0"
+description = "A lightweight, model-agnostic multi-agent orchestration harness that lets a coordinator LLM spawn external worker CLIs (Codex, Gemini, Claude Code, opencode, pi, OpenHands) as tool-use actions."
+readme = "README.md"
 requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [
+    { name = "WriteIt AI", email = "info@writeit.ai" },
+]
+keywords = [
+    "ai",
+    "agents",
+    "multi-agent",
+    "orchestration",
+    "llm",
+    "coordinator",
+    "claude",
+    "codex",
+    "gemini",
+    "openhands",
+    "cli",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Environment :: Console",
+    "Typing :: Typed",
+]
 dependencies = [
     "httpx>=0.28",
     "openai>=1.78",
@@ -14,6 +47,12 @@ dependencies = [
     "rich>=14.0",
     "click>=8.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/writeitai/team-harness"
+Repository = "https://github.com/writeitai/team-harness"
+Issues = "https://github.com/writeitai/team-harness/issues"
+Changelog = "https://github.com/writeitai/team-harness/releases"
 
 [project.scripts]
 th = "team_harness.cli:main"
