@@ -1,6 +1,6 @@
 # Team Harness
 
-Think Claude code agent teams, but provider-agnostic + delegating all the work to other harnesses (Codex, Gemini, Claude Code, OpenCode, pi, OpenHands).
+Think Claude Code agent teams, but provider-agnostic + delegating **all** the work to other harnesses (Codex, Gemini, Claude Code, OpenCode, pi, OpenHands).
 
 <br>
 
