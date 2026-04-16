@@ -1,6 +1,8 @@
-# team-harness
+# Team Harness
 
-A lightweight, model-agnostic multi-agent orchestration harness. It runs a coordinator LLM through either an OpenAI-compatible API or an experimental Codex subscription backend and lets that coordinator spawn external worker CLIs (Codex, Gemini, Claude Code, opencode, pi, OpenHands, or nested th runs) as tool-use actions.
+Think Claude code agent teams, but provider-agnostic + delegating all the work to other harnesses (Codex, Gemini, Claude Code, OpenCode, pi, OpenHands).
+
+<br>
 
 <p align="center">
   <img src=".github/assets/images/logo.png" alt="team-harness logo" width="400">
@@ -12,17 +14,6 @@ A lightweight, model-agnostic multi-agent orchestration harness. It runs a coord
 pip install team-harness
 # or
 uv tool install team-harness
-```
-
-The installed command is `th`. The legacy command `team-harness` also works as a compatibility alias.
-
-Development setup:
-
-```bash
-git clone https://github.com/writeitai/team-harness.git
-cd team-harness
-uv sync --extra dev
-uv run th --help
 ```
 
 ## Prerequisites
