@@ -1,0 +1,131 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "team-harness"
+version = "0.1.0"
+description = "A lightweight, model-agnostic multi-agent orchestration harness that lets a coordinator LLM spawn external worker CLIs (Codex, Gemini, Claude Code, opencode, pi, OpenHands) as tool-use actions."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "WriteIt.ai s.r.o.", email = "info@writeit.ai" },
+]
+keywords = [
+    "ai",
+    "agents",
+    "multi-agent",
+    "orchestration",
+    "llm",
+    "coordinator",
+    "claude",
+    "codex",
+    "gemini",
+    "openhands",
+    "cli",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Environment :: Console",
+    "Typing :: Typed",
+]
+dependencies = [
+    "httpx>=0.28",
+    "openai>=1.78",
+    "pydantic>=2.11",
+    "prompt_toolkit>=3.0.43",
+    "rich>=14.0",
+    "click>=8.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/writeitai/team-harness"
+Repository = "https://github.com/writeitai/team-harness"
+Issues = "https://github.com/writeitai/team-harness/issues"
+Changelog = "https://github.com/writeitai/team-harness/releases"
+
+[project.scripts]
+th = "team_harness.cli:main"
+team-harness = "team_harness.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pyright>=1.1",
+    "ruff>=0.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/team_harness"]
+
+[tool.ruff]
+src = ["src"]
+target-version = "py312"
+line-length = 88
+exclude = ["tmp/"]
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true
+
+[tool.ruff.lint]
+extend-select = ["I", "B", "A", "ERA"]
+
+[tool.ruff.lint.isort]
+case-sensitive = false
+force-single-line = true
+force-sort-within-sections = true
+known-first-party = ["team_harness"]
+order-by-type = false
+relative-imports-order = "closest-to-furthest"
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+extraPaths = ["src"]
+reportArgumentType = true
+reportMissingParameterType = true
+reportCallIssue = true
+reportMissingImports = true
+reportUnusedImport = true
+reportDuplicateImport = true
+reportAttributeAccessIssue = true
+reportUnnecessaryIsInstance = true
+reportUnnecessaryComparison = true
+useLibraryCodeForTypes = true
+reportGeneralTypeIssues = false
+reportOptionalMemberAccess = false
+reportOptionalOperand = false
+reportOptionalSubscript = false
+reportOptionalCall = false
+reportUnknownParameterType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUnknownLambdaType = false
+reportIncompatibleMethodOverride = false
+reportIncompatibleVariableOverride = false
+reportOperatorIssue = false
+reportIndexIssue = false
+reportReturnType = false
+reportAssignmentType = false
+reportPrivateUsage = false
+reportTypeCommentUsage = false
+reportMatchNotExhaustive = false
+include = ["src"]
+exclude = ["**/virtualenvs", "tmp/"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["src/tests"]
