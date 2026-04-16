@@ -30,9 +30,7 @@ async def _flush_prompt() -> None:
         await asyncio.sleep(0)
 
 
-async def _wait_buffer(
-    session, *, expected: str, timeout: float = 1.0
-) -> None:
+async def _wait_buffer(session, *, expected: str, timeout: float = 1.0) -> None:
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         if session.default_buffer.text == expected:
@@ -93,13 +91,7 @@ def test_paste_buffer_expand_round_trips_single_placeholder():
 def test_paste_buffer_expand_multiple_placeholders_preserves_ordering():
     buffer = PasteBuffer()
     first = "\n".join(
-        [
-            "alpha",
-            "[Pasted text #2 +4 lines]",
-            "gamma",
-            "delta",
-            "epsilon",
-        ]
+        ["alpha", "[Pasted text #2 +4 lines]", "gamma", "delta", "epsilon"]
     )
     second = _lines(PASTE_LINE_THRESHOLD + 1, prefix="item")
     first_placeholder = buffer.store_and_placeholder(first)
@@ -319,9 +311,7 @@ async def test_long_bracketed_paste_shows_placeholder_before_submit():
         task = asyncio.create_task(read_user_input(session))
         await _flush_prompt()
         inp.send_text(_bracketed_paste(pasted))
-        await _wait_buffer(
-            session, expected=PLACEHOLDER_FORMAT.format(id=1, lines=9)
-        )
+        await _wait_buffer(session, expected=PLACEHOLDER_FORMAT.format(id=1, lines=9))
 
         inp.send_text("\r")
         assert await task == pasted
