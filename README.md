@@ -2,7 +2,9 @@
 
 A lightweight, model-agnostic multi-agent orchestration harness. It runs a coordinator LLM through either an OpenAI-compatible API or an experimental Codex subscription backend and lets that coordinator spawn external worker CLIs (Codex, Gemini, Claude Code, opencode, pi, OpenHands, or nested th runs) as tool-use actions.
 
-<img src=".github/assets/images/logo.png" alt="team-harness logo" width="200">
+<p align="center">
+  <img src=".github/assets/images/logo.png" alt="team-harness logo" width="400">
+</p>
 
 ## Installation
 
