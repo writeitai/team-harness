@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [
-    { name = "WriteIt AI", email = "info@writeit.ai" },
+    { name = "WriteIt.ai s.r.o.", email = "info@writeit.ai" },
 ]
 keywords = [
     "ai",
