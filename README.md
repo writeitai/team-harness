@@ -16,6 +16,14 @@ pip install team-harness
 uv tool install team-harness
 ```
 
+To upgrade to the latest version:
+
+```bash
+pip install --upgrade team-harness
+# or
+uv tool install --upgrade team-harness
+```
+
 ## Prerequisites
 
 Worker CLIs must be installed and authenticated separately. You do not need all of them; restrict a run with `--agents codex,gemini` to use only the ones you have.
