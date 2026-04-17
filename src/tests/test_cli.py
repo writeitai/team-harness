@@ -683,6 +683,9 @@ async def test_reset_alias_dispatches_same_clear_handler(monkeypatch, tmp_path):
         def reset_separator(self):
             self.reset_count += 1
 
+        def print_user_prompt(self, text):
+            return None
+
         def print_agent_panel_inline(self):
             return None
 
@@ -802,6 +805,9 @@ async def test_compact_command_dispatches_manual_compaction_without_focus(
             return None
 
         def reset_separator(self):
+            return None
+
+        def print_user_prompt(self, text):
             return None
 
         def print_agent_panel_inline(self):
@@ -944,6 +950,9 @@ async def test_compact_command_dispatches_manual_compaction_with_focus(
             return None
 
         def reset_separator(self):
+            return None
+
+        def print_user_prompt(self, text):
             return None
 
         def print_agent_panel_inline(self):
@@ -1225,6 +1234,9 @@ async def test_compact_command_tab_separator_is_not_recognized_as_compact(
         def reset_separator(self):
             return None
 
+        def print_user_prompt(self, text):
+            return None
+
         def print_agent_panel_inline(self):
             return None
 
@@ -1348,6 +1360,9 @@ async def test_clear_preserves_system_prompt_and_resets_last_logged_index(
             return None
 
         def reset_separator(self):
+            return None
+
+        def print_user_prompt(self, text):
             return None
 
         def print_agent_panel_inline(self):

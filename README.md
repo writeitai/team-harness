@@ -664,6 +664,19 @@ Options:
 - `/compact <focus>` lets you bias what the summary emphasizes without changing the command transcript shape that the coordinator sees afterward.
 - `/clear` is the manual escape hatch when you want to keep the same session, run log, and agent state but start with a fresh conversation.
 
+## Terminal features
+
+The rich console mode (default when stdout is a TTY) includes several visual enhancements:
+
+- **Spinner animation** — an animated braille spinner appears in the status bar while the coordinator is thinking (before tokens start streaming).
+- **iTerm2 tab progress** — when running in iTerm2, an indeterminate progress indicator appears in the terminal tab during processing. This is gated on iTerm2 detection and disabled inside tmux.
+- **User prompt styling** — submitted user prompts are displayed with a dark background (`rgb(55,55,55)`) and white text to visually distinguish them from assistant output.
+- **Agent emojis** — each agent type displays a per-type emoji (e.g., 🔷 codex, ♊ gemini, 🟣 claude) in the agent panel and event log.
+- **Path coloring** — file paths in tool call arguments and results are highlighted in cyan.
+- **Bold consistency** — agent types, turn numbers, and running status use bold styling for emphasis.
+
+These features degrade gracefully: `PlainConsole` shows static indicators, and `SilentConsole` (SDK mode) produces no output.
+
 ## REPL editing keys
 
 | Key              | Action                                         |
