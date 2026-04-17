@@ -17,7 +17,6 @@ from team_harness.coordinator.loop import _COMPACTION_BREAKER_WARNING
 from team_harness.coordinator.loop import _perform_compaction
 from team_harness.coordinator.loop import _perform_manual_compaction
 from team_harness.coordinator.loop import _should_compact
-from team_harness.coordinator.loop import run
 from team_harness.coordinator.loop import run_one_turn
 from team_harness.tools.registry import ToolRegistry
 from team_harness.tracking.context import get_auto_compact_threshold
@@ -386,46 +385,6 @@ async def test_missing_usage_warning_emitted_once(tmp_path, config, ctx, ui):
         )
         == 1
     )
-
-
-@pytest.mark.asyncio
-async def test_run_respects_max_turns(tmp_path, config, ctx, ui):
-    config.max_turns = 2
-    run_log = make_run_log(tmp_path, config)
-    registry = ToolRegistry()
-
-    async def noop() -> str:
-        return "ok"
-
-    registry.register(
-        schema={
-            "type": "function",
-            "function": {
-                "name": "noop",
-                "description": "noop",
-                "parameters": {"type": "object", "properties": {}, "required": []},
-            },
-        },
-        fn=noop,
-    )
-    client = SequenceClient(
-        [
-            make_response(tool_calls=[("noop", {}, "1")]),
-            make_response(tool_calls=[("noop", {}, "2")]),
-            make_response(tool_calls=[("noop", {}, "3")]),
-        ]
-    )
-    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
-    await run(
-        messages=messages,
-        config=config,
-        run_log=run_log,
-        ui=ui,
-        tool_registry=registry,
-        client=client,
-        ctx=ctx,
-    )
-    assert any("Max turns (2) reached" in message for message in ui.messages)
 
 
 @pytest.mark.asyncio

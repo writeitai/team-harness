@@ -29,7 +29,6 @@ class Config:
     api_base: str = "https://openrouter.ai/api/v1"
     api_key: str = ""
     codex_auth_path: str = ""
-    max_turns: int = 50
     max_retries: int = 5
     max_depth: int = 3
     coordinator_system_message: str = COORDINATOR_PROMPT
@@ -249,9 +248,6 @@ system_prompt = ""
 # Base directory for per-session coordinator/worker artifacts.
 output_dir = "_outputs"
 
-# Maximum coordinator turns before the run stops.
-max_turns = 50
-
 # Retry budget for transient API errors (429 / 5xx).
 max_retries = 5
 
@@ -310,9 +306,6 @@ system_prompt = ""
 
 # Base directory for per-session coordinator/worker artifacts.
 output_dir = "_outputs"
-
-# Maximum coordinator turns before the run stops.
-max_turns = 50
 
 # Retry budget for transient API errors (429 / 5xx).
 max_retries = 5
@@ -918,7 +911,6 @@ def load_config(
     api_base: str | None = None,
     api_key: str | None = None,
     codex_auth_path: str | None = None,
-    max_turns: int | None = None,
     max_retries: int | None = None,
     max_depth: int | None = None,
     system_prompt: str | None = None,
@@ -1035,9 +1027,6 @@ def load_config(
         codex_auth_path=codex_auth_path
         if codex_auth_path is not None
         else env_codex_auth_path or str(coordinator.get("codex_auth_path", "")),
-        max_turns=max_turns
-        if max_turns is not None
-        else _coordinator_int(coordinator, "max_turns", Config.max_turns),
         max_retries=max_retries
         if max_retries is not None
         else _coordinator_int(coordinator, "max_retries", Config.max_retries),

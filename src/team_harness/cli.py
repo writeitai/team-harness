@@ -96,7 +96,6 @@ def init(use_global: bool, force: bool) -> None:
 @click.option("--api-key", default=None)
 @click.option("--codex-auth-path", default=None)
 @click.option("--agents", "allowed_agents", default=None)
-@click.option("--max-turns", type=int, default=None)
 @click.option("--max-retries", type=int, default=None)
 @click.option("--max-depth", type=int, default=None)
 @click.option("--system-prompt", default=None)
@@ -111,7 +110,6 @@ def run_cli(
     api_key: str | None,
     codex_auth_path: str | None,
     allowed_agents: str | None,
-    max_turns: int | None,
     max_retries: int | None,
     max_depth: int | None,
     system_prompt: str | None,
@@ -128,7 +126,6 @@ def run_cli(
             api_key=api_key,
             codex_auth_path=codex_auth_path,
             allowed_agents=allowed_agents,
-            max_turns=max_turns,
             max_retries=max_retries,
             max_depth=max_depth,
             system_prompt=system_prompt,
@@ -145,7 +142,6 @@ def run_cli(
 @click.option("--api-key", default=None)
 @click.option("--codex-auth-path", default=None)
 @click.option("--agents", "allowed_agents", default=None)
-@click.option("--max-turns", type=int, default=None)
 @click.option("--max-retries", type=int, default=None)
 @click.option("--max-depth", type=int, default=None)
 @click.option("--system-prompt", default=None)
@@ -158,7 +154,6 @@ def repl(
     api_key: str | None,
     codex_auth_path: str | None,
     allowed_agents: str | None,
-    max_turns: int | None,
     max_retries: int | None,
     max_depth: int | None,
     system_prompt: str | None,
@@ -173,7 +168,6 @@ def repl(
             api_key=api_key,
             codex_auth_path=codex_auth_path,
             allowed_agents=allowed_agents,
-            max_turns=max_turns,
             max_retries=max_retries,
             max_depth=max_depth,
             system_prompt=system_prompt,
@@ -234,7 +228,6 @@ async def _run(task: str | None, task_file: str | None, **kwargs: Any) -> None:
         api_key=kwargs.get("api_key"),
         codex_auth_path=kwargs.get("codex_auth_path"),
         agents=allowed_agents,
-        max_turns=kwargs.get("max_turns"),
         max_retries=kwargs.get("max_retries"),
         max_depth=kwargs.get("max_depth"),
         system_prompt=kwargs.get("system_prompt"),
@@ -368,9 +361,6 @@ async def _repl(**kwargs: Any) -> None:
                                 last_logged_index=last_logged_index,
                             )
                             turn_index += 1
-                            if turn_index >= config.max_turns:
-                                ui.print(f"Max turns ({config.max_turns}) reached.")
-                                should_continue = False
         finally:
             await _finalize_run(
                 manager=manager,

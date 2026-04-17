@@ -59,7 +59,6 @@ class Harness:
         api_key: str | None = None,
         codex_auth_path: str | None = None,
         agents: str | list[str] | None = None,
-        max_turns: int | None = None,
         max_retries: int | None = None,
         max_depth: int | None = None,
         system_prompt: str | None = None,
@@ -73,7 +72,6 @@ class Harness:
         self._api_key = api_key
         self._codex_auth_path = codex_auth_path
         self._agents = agents
-        self._max_turns = max_turns
         self._max_retries = max_retries
         self._max_depth = max_depth
         self._system_prompt = system_prompt
@@ -94,7 +92,6 @@ class Harness:
             api_base=self._api_base,
             api_key=self._api_key,
             codex_auth_path=self._codex_auth_path,
-            max_turns=self._max_turns,
             max_retries=self._max_retries,
             max_depth=self._max_depth,
             system_prompt=self._system_prompt,

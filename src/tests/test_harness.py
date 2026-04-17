@@ -55,7 +55,6 @@ def test_cli_sdk_parity():
         "api_key": "api_key",
         "codex_auth_path": "codex_auth_path",
         "allowed_agents": "agents",
-        "max_turns": "max_turns",
         "max_retries": "max_retries",
         "max_depth": "max_depth",
         "system_prompt": "system_prompt",
@@ -771,7 +770,6 @@ def test_harness_constructor():
         api_key="sk-test",
         codex_auth_path="/tmp/auth.json",
         agents=["codex", "gemini"],
-        max_turns=10,
         max_retries=3,
         max_depth=2,
         system_prompt="extra",
@@ -785,7 +783,6 @@ def test_harness_constructor():
     assert h._api_key == "sk-test"
     assert h._codex_auth_path == "/tmp/auth.json"
     assert h._agents == ["codex", "gemini"]
-    assert h._max_turns == 10
     assert h._max_retries == 3
     assert h._max_depth == 2
     assert h._system_prompt == "extra"
