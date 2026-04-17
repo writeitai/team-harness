@@ -41,32 +41,50 @@ Install with `pip install openhands` (the PyPI distribution name is `openhands`,
 ## Quick start
 
 ```bash
-# Set your API key
-export OPENROUTER_API_KEY="sk-or-..."
+# run from your project root
+cd <your project>
 
 # Create a project-local config in ./.team-harness/
 # Creates config.toml, coordinator_system_message.md, worker_suffix.md, and worker_footer.md
 th init
+```
 
+### If you are authenticated to codex
+```bash
+HARNESS_PROVIDER=codex th repl
+```
+
+or
+
+in `<your project>/.team-harness/config.toml` set `provider = "codex"`
+
+### Alternatively with API keys
+```bash
+OPENROUTER_API_KEY="sk-or-..." th repl
+```
+
+or 
+
+```bash
+OPENAI_API_KEY="sk-or-..." HARNESS_API_BASE="https://openrouter.ai/api/v1" th repl
+```
+
+### Headless
+
+```bash
 # Single-shot run
 th run "Write unit tests for src/utils.py using pytest"
 
 # From a file
 th run -f task.txt
+```
 
-# Interactive REPL
-th repl
+### Viewing Logs
 
+```bash
 # View run logs
 th logs
 th logs <run-id>
-```
-
-Experimental Codex subscription coordinator:
-
-```bash
-codex login
-team-harness run --provider codex --model codex-mini-latest "Review this repo and file issues"
 ```
 
 ## Python SDK
