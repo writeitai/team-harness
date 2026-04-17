@@ -56,12 +56,14 @@ _PATH_RE = re.compile(
     r"(?<![/\w])(?:~?/(?!/)|\.\.?/)[^\s,;:)\]\"']+(?<![.])"
     r"|(?:(?:^|(?<=\s))[\w][\w.-]*/(?:[\w][\w.-]*/)*\w+\.\w+)"
 )
+_BACKTICK_RE = re.compile(r"`([^`]+)`")
 
 
 def _style_paths(text: str) -> Text:
-    """Return a Text object with file paths highlighted in cyan."""
+    """Return a Text object with file paths and backtick spans highlighted."""
     styled = Text(text)
     styled.highlight_regex(_PATH_RE, style="cyan")
+    styled.highlight_regex(_BACKTICK_RE, style="bold cyan on rgb(40,40,40)")
     return styled
 
 

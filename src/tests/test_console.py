@@ -373,6 +373,23 @@ def test_style_paths_hyphenated_repo_path():
     assert "team-harness" in matched
 
 
+def test_style_paths_backtick_code_spans():
+    from team_harness.ui.console import _style_paths
+
+    result = _style_paths("Run `uv run pytest` to test")
+    spans = result._spans
+    assert len(spans) > 0
+    matched = result.plain[spans[0].start : spans[0].end]
+    assert "uv run pytest" in matched
+
+
+def test_style_paths_backtick_no_match_without_backticks():
+    from team_harness.ui.console import _style_paths
+
+    result = _style_paths("No backticks here at all")
+    assert len(result._spans) == 0
+
+
 def test_agent_emoji_unknown_type_falls_back():
     from team_harness.ui.console import AGENT_EMOJIS
 
