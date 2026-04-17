@@ -121,7 +121,6 @@ harness = Harness(
     api_key="sk-or-...",
     codex_auth_path="~/.codex/auth.json",
     agents=["codex", "gemini"], # or "codex,gemini"
-    max_turns=50,
     max_retries=5,
     max_depth=3,
     system_prompt="Extra instructions",
@@ -633,7 +632,6 @@ Options:
   --api-key TEXT              Override coordinator API key for openai_compat
   --codex-auth-path TEXT      Override Codex auth.json location
   --agents TEXT               Comma-separated allowlist (e.g. "codex,gemini")
-  --max-turns INT             Maximum coordinator turns (default: 50)
   --max-retries INT           API retry budget for 429/5xx errors (default: 5)
   --max-depth INT             Nested harness depth limit (default: 3)
   --system-prompt TEXT        Extra text appended to the system prompt

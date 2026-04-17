@@ -69,7 +69,7 @@ async def run(
 ) -> None:
     turn_index = 0
     last_logged_index = 0
-    while turn_index < config.max_turns:
+    while True:
         should_continue, last_logged_index = await run_one_turn(
             messages=messages,
             config=config,
@@ -84,7 +84,6 @@ async def run(
         turn_index += 1
         if not should_continue:
             return
-    ui.print(f"Max turns ({config.max_turns}) reached — stopping.")
 
 
 async def run_one_turn(
