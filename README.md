@@ -653,6 +653,8 @@ Options:
 
 Standard cursor movement keys (Left/Right, Home/End, Ctrl+A/E, Ctrl+W, Ctrl+K) work as expected.
 
+In terminals that support bracketed paste, long pasted blocks with at least 4 newline characters collapse to `[Pasted text #N +M lines]` while you edit, and the full pasted text is restored automatically when you submit.
+
 If Alt/Esc key sequences feel delayed in tmux, set `set -sg escape-time 0` in your tmux config.
 
 ## Coordinator tools
