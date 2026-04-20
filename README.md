@@ -1,12 +1,37 @@
 # Team Harness
 
-Think Claude Code agent teams, but provider-agnostic + delegating **all** the work to other harnesses (Codex, Gemini, Claude Code, OpenCode, pi, OpenHands).
+Coordination layer for other harnesses (Codex, Gemini, Claude Code, OpenCode, pi, OpenHands).
 
 <br>
 
 <p align="center">
   <img src=".github/assets/images/logo.png" alt="team-harness logo" width="400">
 </p>
+
+## What does it do?
+
+You can run prompts like this one:
+
+```
+Tell me what are the main pieces that are still missing for achieving the MVP.
+
+You will make an agentic team to achieve it.
+
+Create an agent team to do it. They should be responsible for:
+- coming up with the analysis using CODEX
+    - perform the analysis as best as you can and output your findings into a new file inside the dedicated directory
+- coming up with the analysis using CLAUDE
+    - perform the analysis as best as you can and output your findings into a new file inside the dedicated directory
+- coming up with the analysis using GEMINI
+    - perform the analysis as best as you can and output your findings into a new file inside the dedicated directory
+- creating the final report
+    - read all the analyses from the previous agents, and write down the final version of the findings and opinions into a SUMMARY.md
+```
+
+This will coordinate the work between Codex, Claude Code and Gemini CLI.
+
+You could achieve a similar result if you used Claude Code's agent teams functionality.
+However, Team Harness gives you the ability to plug in any model + you can tweak the underlying system prompts much more easily.
 
 ## Installation
 
@@ -66,7 +91,7 @@ OPENROUTER_API_KEY="sk-or-..." th repl
 or 
 
 ```bash
-OPENAI_API_KEY="sk-or-..." HARNESS_API_BASE="https://openrouter.ai/api/v1" th repl
+OPENAI_API_KEY="sk-or-..." HARNESS_API_BASE="https://openai.com/api/v1" th repl
 ```
 
 ### Headless
