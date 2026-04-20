@@ -345,6 +345,7 @@ async def _repl(**kwargs: Any) -> None:
                         if compacted:
                             last_logged_index = 0
                     case _:
+                        ui.print_user_prompt(raw)
                         messages.append({"role": "user", "content": raw})
                         ctx.set_estimated_total(messages)
                         should_continue = True

@@ -94,6 +94,9 @@ class DummyUI:
     def print(self, msg: str) -> None:
         self.messages.append(msg)
 
+    def print_user_prompt(self, text: str) -> None:
+        return None
+
     def print_agent_panel_inline(self) -> None:
         self.inline_count += 1
 
