@@ -18,17 +18,13 @@ Tell me what are the main pieces that are still missing for achieving the MVP.
 You will make an agentic team to achieve it.
 
 Create an agent team to do it. They should be responsible for:
-- coming up with the analysis using CODEX
-    - perform the analysis as best as you can and output your findings into a new file inside the dedicated directory
-- coming up with the analysis using CLAUDE
-    - perform the analysis as best as you can and output your findings into a new file inside the dedicated directory
-- coming up with the analysis using GEMINI
+- coming up with the analysis using CODEX, CLAUDE and GEMINI
     - perform the analysis as best as you can and output your findings into a new file inside the dedicated directory
 - creating the final report
     - read all the analyses from the previous agents, and write down the final version of the findings and opinions into a SUMMARY.md
 ```
 
-This will coordinate the work between Codex, Claude Code and Gemini CLI.
+Team Harness will coordinate the work between Codex, Claude Code and Gemini CLI.
 
 You could achieve a similar result if you used Claude Code's agent teams functionality.
 However, Team Harness gives you the ability to plug in any model + you can tweak the underlying system prompts much more easily.
