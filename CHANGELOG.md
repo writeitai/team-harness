@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-04-20
+
+### Added
+
+- Animated braille spinner in the status bar during coordinator thinking phase.
+- iTerm2 tab progress indicator via OSC 9;4 sequences (gated on iTerm2 detection, disabled inside tmux).
+- User prompt styling with dark background and white text to distinguish user input from assistant output.
+- Per-agent-type emojis in the agent panel and event log (codex, gemini, claude, openhands, opencode, harness, pi).
+- File path coloring (cyan) in tool call arguments and results, with URL exclusion.
+- Backtick code span highlighting (bold cyan on dark background) in tool call output.
+- Bold consistency for agent types, turn numbers, and running status indicators.
+- New `src/team_harness/ui/terminal.py` module for iTerm2 OSC escape sequence helpers.
+- "Terminal features" section in README.
+
 ## [0.1.1] - 2026-04-17
 
 ### Fixed
