@@ -339,12 +339,15 @@ def test_style_paths_repo_relative():
     assert len(result._spans) > 0
 
 
-def test_style_paths_no_false_positive_url():
+def test_style_paths_url_highlighted_as_url():
     from team_harness.ui.console import _style_paths
 
     result = _style_paths("Visit https://example.com/foo/bar")
-    # No part of the URL should be highlighted
-    assert len(result._spans) == 0
+    # URL should be highlighted with underline (not as a plain path)
+    assert len(result._spans) == 1
+    assert "underline" in str(result._spans[0].style)
+    matched = result.plain[result._spans[0].start : result._spans[0].end]
+    assert matched == "https://example.com/foo/bar"
 
 
 def test_style_paths_no_match_plain_text():
@@ -388,6 +391,55 @@ def test_style_paths_backtick_no_match_without_backticks():
 
     result = _style_paths("No backticks here at all")
     assert len(result._spans) == 0
+
+
+def test_stream_token_left_padding(monkeypatch, tmp_path):
+    from io import StringIO
+
+    from rich.console import Console as RichConsole
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    console = HarnessConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+    buf = StringIO()
+    console._console = RichConsole(file=buf, force_terminal=True, width=80)
+    console._streaming = True
+    console._stream_line_start = True
+    console.stream_token("Hello")
+    output = buf.getvalue()
+    assert output.lstrip("\x1b[0m").startswith("  ") or "  Hello" in output
+
+
+def test_stream_token_backtick_highlighting(monkeypatch, tmp_path):
+    from io import StringIO
+
+    from rich.console import Console as RichConsole
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    console = HarnessConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+    buf = StringIO()
+    console._console = RichConsole(file=buf, force_terminal=True, width=80)
+    console._streaming = True
+    console._stream_line_start = True
+    console.stream_token("Run `pytest` now")
+    output = buf.getvalue()
+    # The backtick content should be styled (contains ANSI codes)
+    assert "pytest" in output
+    # Backtick characters themselves should not appear in styled output
+    # (they are consumed as delimiters)
+
+
+def test_spinner_shows_during_tools_phase(monkeypatch, tmp_path):
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    console = HarnessConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+    console._phase = "tools"
+    text = console._render_status_bar().plain
+    assert "Working" in text
 
 
 def test_agent_emoji_unknown_type_falls_back():
