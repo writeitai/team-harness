@@ -57,11 +57,15 @@ _PATH_RE = re.compile(
     r"|(?:(?:^|(?<=\s))[\w][\w.-]*/(?:[\w][\w.-]*/)*\w+\.\w+)"
 )
 _BACKTICK_RE = re.compile(r"`([^`]+)`")
+_URL_RE = re.compile(r"https?://[^\s,;)\]\"'<>]+(?<![.,;:!?)])")
+
+_STREAM_LEFT_PAD = "  "
 
 
 def _style_paths(text: str) -> Text:
-    """Return a Text object with file paths and backtick spans highlighted."""
+    """Return a Text object with file paths, backtick spans, and URLs highlighted."""
     styled = Text(text)
+    styled.highlight_regex(_URL_RE, style="cyan underline")
     styled.highlight_regex(_PATH_RE, style="cyan")
     styled.highlight_regex(_BACKTICK_RE, style="bold cyan on rgb(40,40,40)")
     return styled
@@ -299,7 +303,7 @@ class HarnessConsole(ConsoleBase):
         self._live = Live(
             self._render_live(),
             console=self._console,
-            refresh_per_second=2,
+            refresh_per_second=4,
             transient=False,
         )
         # _live_enabled: intent -- should Live be used at all?
@@ -307,6 +311,8 @@ class HarnessConsole(ConsoleBase):
         self._live_enabled = False
         self._live_running = False
         self._streaming = False
+        self._in_backtick = False
+        self._stream_line_start = True
 
     def start(self) -> None:
         self._live_enabled = True
@@ -375,16 +381,64 @@ class HarnessConsole(ConsoleBase):
             self._live.stop()
             self._live_running = False
         self._streaming = True
+        self._in_backtick = False
+        self._stream_line_start = True
 
     def begin_compaction(self) -> None:
         self._compacting = True
         if self._live_running:
             self._live.update(self._render_live())
 
+    def _stream_chunk(self, text: str, style: str = "") -> None:
+        """Print a chunk of streamed text with left padding on new lines."""
+        if not text:
+            return
+        # Insert left padding after each newline and at the start of a line
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            if i > 0:
+                # Newline from the split
+                self._console.print("", highlight=False)
+                self._stream_line_start = True
+            if line:
+                if self._stream_line_start:
+                    self._console.print(
+                        _STREAM_LEFT_PAD, end="", highlight=False, soft_wrap=True
+                    )
+                    self._stream_line_start = False
+                if style:
+                    self._console.print(Text(line, style=style), end="", soft_wrap=True)
+                else:
+                    self._console.print(
+                        line, end="", markup=False, highlight=False, soft_wrap=True
+                    )
+
     def stream_token(self, token: str) -> None:
-        self._console.print(
-            token, end="", markup=False, highlight=False, soft_wrap=True
-        )
+        # Inline backtick highlighting: track open/close across tokens
+        parts = token.split("`")
+        for i, part in enumerate(parts):
+            if i > 0:
+                self._in_backtick = not self._in_backtick
+            if part:
+                if self._in_backtick:
+                    self._stream_chunk(part, style="bold cyan on rgb(40,40,40)")
+                else:
+                    # Detect URLs inline for non-backtick text
+                    self._stream_chunk_with_urls(part)
+
+    def _stream_chunk_with_urls(self, text: str) -> None:
+        """Print a text chunk, highlighting URLs inline."""
+        last_end = 0
+        for match in _URL_RE.finditer(text):
+            # Print text before the URL
+            if match.start() > last_end:
+                self._stream_chunk(text[last_end : match.start()])
+            # Print the URL styled
+            self._stream_chunk(match.group(), style="cyan underline")
+            last_end = match.end()
+        # Print remaining text after last URL
+        if last_end < len(text):
+            self._stream_chunk(text[last_end:])
 
     def end_streaming(self) -> None:
         if not self._streaming:
@@ -563,10 +617,11 @@ class HarnessConsole(ConsoleBase):
         total = len(self._manager.list_all())
         total_prefix = "~" if self._ctx.has_estimate else ""
         parts: list[tuple[str, str]] = []
-        if self._phase == "thinking":
+        if self._phase in ("thinking", "tools"):
             frames = "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"
             frame = frames[int(elapsed * 8) % len(frames)]
-            parts.append((f"{frame} Thinking ", "cyan"))
+            label = "Thinking" if self._phase == "thinking" else "Working"
+            parts.append((f"{frame} {label} ", "cyan"))
             parts.append((" \u2502 ", "dim"))
         parts.extend(
             [
