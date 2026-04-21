@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-04-21
+
+### Fixed
+
+- Spinner now visible during tool execution ("Working") in addition to the brief pre-streaming thinking phase.
+- Live display refresh rate increased from 2Hz to 4Hz for smoother spinner animation.
+
+### Added
+
+- URL highlighting (cyan underline) in both tool call output and streamed coordinator text.
+- 2-space left padding on streamed coordinator output for visual separation from terminal edge.
+- Inline backtick code span rendering in streamed output — backtick-wrapped text rendered as bold cyan on dark background using a state machine that tracks open/close across token boundaries.
+
 ## [0.1.3] - 2026-04-20
 
 ### Added
