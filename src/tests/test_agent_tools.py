@@ -338,9 +338,7 @@ async def test_wait_for_any_no_classification_on_normal_failure(
 
 
 @pytest.mark.asyncio
-async def test_wait_for_any_no_classification_on_success(
-    tmp_path, config, manager, ui
-):
+async def test_wait_for_any_no_classification_on_success(tmp_path, config, manager, ui):
     """Successful agents should never have a failure_classification."""
     stdout = tmp_path / "agent_stdout.log"
     stderr = tmp_path / "agent_stderr.log"
