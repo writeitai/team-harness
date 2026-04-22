@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 from team_harness.agents.manager import AgentManager
 from team_harness.agents.manager import AgentState
 from team_harness.tracking.context import ContextTracker
-from team_harness.ui.console import HarnessConsole
 from team_harness.ui.console import make_console
 from team_harness.ui.console import PlainConsole
+from team_harness.ui.console import TeamHarnessConsole
 
 
 def test_make_console_plain(monkeypatch, tmp_path):
@@ -27,7 +27,7 @@ def test_make_console_harness_when_stdout_is_tty(monkeypatch, tmp_path):
     console = make_console(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
-    assert isinstance(console, HarnessConsole)
+    assert isinstance(console, TeamHarnessConsole)
 
 
 def test_plain_console_pause_resume_noop(tmp_path):
@@ -41,7 +41,7 @@ def test_plain_console_pause_resume_noop(tmp_path):
 
 def test_harness_console_pause_stops_live_when_started(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     console._live = MagicMock()
@@ -55,7 +55,7 @@ def test_harness_console_pause_stops_live_when_started(monkeypatch, tmp_path):
 
 def test_harness_console_resume_is_noop(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     console._live = MagicMock()
@@ -70,7 +70,7 @@ def test_harness_console_resume_is_noop(monkeypatch, tmp_path):
 
 def test_harness_console_pause_is_noop_when_not_started(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     console._live = MagicMock()
@@ -84,7 +84,7 @@ def test_harness_console_pause_is_noop_when_not_started(monkeypatch, tmp_path):
 
 def test_harness_console_resume_is_noop_when_not_started(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     console._live = MagicMock()
@@ -104,7 +104,7 @@ def test_harness_console_status_bar_prefixes_estimated_total(monkeypatch, tmp_pa
     ctx.set_estimated_total(
         [{"role": "system", "content": "sys"}, {"role": "user", "content": "a" * 400}]
     )
-    console = HarnessConsole(ctx, AgentManager(), tmp_path)
+    console = TeamHarnessConsole(ctx, AgentManager(), tmp_path)
 
     text = console._render_status_bar().plain
 
@@ -123,7 +123,7 @@ def test_ui_context_warning_mentions_clear(monkeypatch, tmp_path, capsys):
     assert "/reset" not in output
 
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    rich = HarnessConsole(
+    rich = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     rich._console = MagicMock()
@@ -137,7 +137,7 @@ def test_ui_context_warning_mentions_clear(monkeypatch, tmp_path, capsys):
 
 def test_harness_console_shows_compacting_indicator(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
 
@@ -151,7 +151,7 @@ def test_harness_console_shows_compacting_indicator(monkeypatch, tmp_path):
 
 def test_harness_console_prints_post_compaction_notice(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     console._console = MagicMock()
@@ -197,7 +197,7 @@ def test_harness_console_end_compaction_clears_compacting_flag_on_failure(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     console._console = MagicMock()
@@ -218,7 +218,7 @@ def test_harness_console_end_compaction_clears_compacting_flag_on_failure(
 def test_harness_console_phase_transitions(monkeypatch, tmp_path):
     """Spinner phase transitions through the turn lifecycle."""
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     console._live = MagicMock()
@@ -239,7 +239,7 @@ def test_harness_console_phase_transitions(monkeypatch, tmp_path):
 
 def test_harness_console_status_bar_shows_thinking(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     console._phase = "thinking"
@@ -249,7 +249,7 @@ def test_harness_console_status_bar_shows_thinking(monkeypatch, tmp_path):
 
 def test_harness_console_status_bar_no_thinking_when_idle(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     console._phase = "idle"
@@ -264,7 +264,7 @@ def test_harness_console_print_user_prompt(monkeypatch, tmp_path):
     from rich.console import Console as RichConsole
 
     buf = StringIO()
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     console._console = RichConsole(file=buf, force_terminal=True, width=80)
@@ -289,7 +289,7 @@ def test_agent_emojis_in_panel(monkeypatch, tmp_path):
 
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
     manager = AgentManager()
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), manager, tmp_path
     )
     buf = StringIO()
@@ -399,7 +399,7 @@ def test_stream_token_left_padding(monkeypatch, tmp_path):
     from rich.console import Console as RichConsole
 
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     buf = StringIO()
@@ -417,7 +417,7 @@ def test_stream_token_backtick_highlighting(monkeypatch, tmp_path):
     from rich.console import Console as RichConsole
 
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     buf = StringIO()
@@ -435,7 +435,7 @@ def test_stream_token_bold_rendering(monkeypatch, tmp_path):
     from rich.console import Console as RichConsole
 
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     buf = StringIO()
@@ -455,7 +455,7 @@ def test_stream_token_heading_rendering(monkeypatch, tmp_path):
     from rich.console import Console as RichConsole
 
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     buf = StringIO()
@@ -475,7 +475,7 @@ def test_stream_token_blockquote_rendering(monkeypatch, tmp_path):
     from rich.console import Console as RichConsole
 
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     buf = StringIO()
@@ -491,7 +491,7 @@ def test_stream_token_blockquote_rendering(monkeypatch, tmp_path):
 
 def test_spinner_shows_during_tools_phase(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
     )
     console._phase = "tools"

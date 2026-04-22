@@ -27,7 +27,7 @@ from team_harness.harness import _make_run_id
 from team_harness.harness import _prepare_session_output_dir
 from team_harness.harness import _show_no_config_hint
 from team_harness.harness import _warn_provider_startup
-from team_harness.harness import Harness
+from team_harness.harness import TeamHarness
 from team_harness.skills.loader import load_skills
 from team_harness.skills.loader import SkillContext
 from team_harness.tools import agent_tools
@@ -221,7 +221,7 @@ def _prepare_task(task: str | None, task_file: str | None) -> str:
 async def _run(task: str | None, task_file: str | None, **kwargs: Any) -> None:
     resolved_task = _prepare_task(task=task, task_file=task_file)
     allowed_agents = kwargs.pop("allowed_agents", None)
-    harness = Harness(
+    harness = TeamHarness(
         provider=kwargs.get("provider"),
         model=kwargs.get("model"),
         api_base=kwargs.get("api_base"),

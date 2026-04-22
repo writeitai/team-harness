@@ -12,8 +12,8 @@ reads the full output and makes the final call.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
+import re
 
 
 @dataclass(frozen=True)

@@ -23,7 +23,7 @@ def resolve_codex_auth_path(configured_path: str | None, *, cwd: str) -> Path:
     if configured_path and configured_path.strip():
         return _resolve_auth_path(configured_path, cwd=cwd)
 
-    env_path = os.environ.get("HARNESS_CODEX_AUTH_PATH", "").strip()
+    env_path = os.environ.get("TEAM_HARNESS_CODEX_AUTH_PATH", "").strip()
     if env_path:
         return _resolve_auth_path(env_path, cwd=cwd)
 

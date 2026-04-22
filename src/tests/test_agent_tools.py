@@ -206,7 +206,7 @@ async def test_spawn_agent_harness_depth_guard_blocks_spawn(
         api_base=config.api_base,
     )
     agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
-    monkeypatch.setenv("HARNESS_DEPTH", "2")
+    monkeypatch.setenv("TEAM_HARNESS_DEPTH", "2")
 
     result = await agent_tools.spawn_agent(
         type="harness", prompt="hello", cwd=str(tmp_path)

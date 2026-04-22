@@ -294,7 +294,7 @@ class PlainConsole(ConsoleBase):
             )
 
 
-class HarnessConsole(ConsoleBase):
+class TeamHarnessConsole(ConsoleBase):
     def __init__(
         self, ctx: "ContextTracker", manager: "AgentManager", run_dir: Path
     ) -> None:
@@ -795,8 +795,8 @@ def make_console(
     if mode == "plain":
         return PlainConsole(ctx=ctx, manager=manager, run_dir=run_dir)
     if mode == "rich":
-        return HarnessConsole(ctx=ctx, manager=manager, run_dir=run_dir)
+        return TeamHarnessConsole(ctx=ctx, manager=manager, run_dir=run_dir)
     # auto
     if sys.stdout.isatty():
-        return HarnessConsole(ctx=ctx, manager=manager, run_dir=run_dir)
+        return TeamHarnessConsole(ctx=ctx, manager=manager, run_dir=run_dir)
     return PlainConsole(ctx=ctx, manager=manager, run_dir=run_dir)

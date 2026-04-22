@@ -989,10 +989,10 @@ def load_config(
         fallback=DEFAULT_WORKER_FOOTER,
     )
 
-    env_model = os.environ.get("HARNESS_MODEL")
-    env_api_base = os.environ.get("HARNESS_API_BASE")
-    env_provider = os.environ.get("HARNESS_PROVIDER")
-    env_codex_auth_path = os.environ.get("HARNESS_CODEX_AUTH_PATH")
+    env_model = os.environ.get("TEAM_HARNESS_MODEL")
+    env_api_base = os.environ.get("TEAM_HARNESS_API_BASE")
+    env_provider = os.environ.get("TEAM_HARNESS_PROVIDER")
+    env_codex_auth_path = os.environ.get("TEAM_HARNESS_CODEX_AUTH_PATH")
     env_api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get(
         "OPENAI_API_KEY"
     )

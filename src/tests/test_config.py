@@ -118,8 +118,8 @@ model_flag = false
 """
     )
     monkeypatch.setattr(config_module, "CONFIG_PATH", global_path)
-    monkeypatch.setenv("HARNESS_MODEL", "env-model")
-    monkeypatch.setenv("HARNESS_API_BASE", "https://env.example/v1")
+    monkeypatch.setenv("TEAM_HARNESS_MODEL", "env-model")
+    monkeypatch.setenv("TEAM_HARNESS_API_BASE", "https://env.example/v1")
     monkeypatch.setenv("OPENROUTER_API_KEY", "env-key")
     prompt_file = tmp_path / "prompt.txt"
     prompt_file.write_text("from file", encoding="utf-8")
@@ -721,7 +721,7 @@ def test_default_config_text_contains_verified_flag_tokens():
     assert '#     "-c", "model_provider=openrouter",' in text
     assert 'openrouter.base_url="https://openrouter.ai/api/v1"' in text
     assert '# default_model = "openai/gpt-5.3-codex"' in text
-    # Harness
+    # TeamHarness
     assert 'command = ["th", "run"]' in text
     assert 'model_flag = "--model"' in text
 
@@ -746,8 +746,8 @@ def test_provider_aware_codex_defaults(tmp_path, monkeypatch):
 def test_load_config_reads_provider_and_codex_auth_env(tmp_path, monkeypatch):
     global_path = tmp_path / "home" / ".team-harness" / "config.toml"
     monkeypatch.setattr(config_module, "CONFIG_PATH", global_path)
-    monkeypatch.setenv("HARNESS_PROVIDER", "codex")
-    monkeypatch.setenv("HARNESS_CODEX_AUTH_PATH", "relative/auth.json")
+    monkeypatch.setenv("TEAM_HARNESS_PROVIDER", "codex")
+    monkeypatch.setenv("TEAM_HARNESS_CODEX_AUTH_PATH", "relative/auth.json")
 
     config = load_config(cwd=str(tmp_path))
 

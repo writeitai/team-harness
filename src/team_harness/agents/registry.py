@@ -149,7 +149,7 @@ def validate_templates(config: Config, allowed_types: list[str]) -> None:
 
 
 def check_harness_depth(config: Config) -> None:
-    current_depth = int(os.environ.get("HARNESS_DEPTH", "0"))
+    current_depth = int(os.environ.get("TEAM_HARNESS_DEPTH", "0"))
     if current_depth >= config.max_depth:
         raise ValueError(
             f"Max harness nesting depth ({config.max_depth}) reached — refusing to spawn a nested harness instance."

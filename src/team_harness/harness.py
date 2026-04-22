@@ -40,7 +40,7 @@ from team_harness.ui.console import ConsoleBase
 from team_harness.ui.console import make_console
 
 
-class Harness:
+class TeamHarness:
     """Python SDK entry point for team-harness orchestration runs.
 
     Wraps the full run lifecycle: config resolution, client creation, tool
@@ -79,10 +79,10 @@ class Harness:
         self._cwd = cwd
         self._console_mode = console_mode
 
-    async def run(self, task: str) -> HarnessResult:
+    async def run(self, task: str) -> TeamHarnessResult:
         """Execute a single orchestration run and return structured results.
 
-        Raises HarnessError on terminal failures (API errors, retries
+        Raises TeamHarnessError on terminal failures (API errors, retries
         exhausted, etc.). The run log is always finalized in a finally block.
         """
         allowed_agents_str = _normalize_agents(self._agents)
@@ -164,7 +164,7 @@ class Harness:
                 ctx=ctx,
             )
         except Exception as exc:
-            raise HarnessError(str(exc)) from exc
+            raise TeamHarnessError(str(exc)) from exc
         finally:
             if run_log is not None:
                 await _finalize_run(
@@ -178,15 +178,15 @@ class Harness:
                 ui.stop()
             await client.aclose()
         if run_log.error:
-            raise HarnessError(run_log.error)
+            raise TeamHarnessError(run_log.error)
         text = _extract_final_text(messages)
         agent_summaries = _build_agent_summaries(manager)
-        return HarnessResult(text=text, agents=agent_summaries, run_id=run_id)
+        return TeamHarnessResult(text=text, agents=agent_summaries, run_id=run_id)
 
 
 @dataclass
-class HarnessResult:
-    """Structured output from a completed Harness.run() call."""
+class TeamHarnessResult:
+    """Structured output from a completed TeamHarness.run() call."""
 
     text: str
     agents: list[AgentSummary]
@@ -204,7 +204,7 @@ class AgentSummary:
     cwd: str
 
 
-class HarnessError(Exception):
+class TeamHarnessError(Exception):
     """Raised when a harness run terminates due to an unrecoverable error."""
 
 
