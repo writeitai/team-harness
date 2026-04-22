@@ -19,12 +19,21 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.history import History
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.input import Input
+from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.output import Output
 
 from team_harness.ui.paste import PasteBuffer
+
+# Register CSI u Shift+Enter sequence so prompt_toolkit recognizes it.
+# Terminals with CSI u support (iTerm2, Kitty, WezTerm, Ghostty) send
+# \x1b[13;2u for Shift+Enter. We map it to a PUA character so a key
+# binding can handle it. Alt+Enter remains the universal fallback for
+# terminals without CSI u support.
+_SHIFT_ENTER = "\ue000"
+ANSI_SEQUENCES["\x1b[13;2u"] = _SHIFT_ENTER  # type: ignore[assignment]
 
 
 def _build_key_bindings(*, paste_buffer: PasteBuffer | None = None) -> KeyBindings:
@@ -39,6 +48,7 @@ def _build_key_bindings(*, paste_buffer: PasteBuffer | None = None) -> KeyBindin
     kb = KeyBindings()
 
     @kb.add("escape", "enter")
+    @kb.add(_SHIFT_ENTER)
     def _newline(event: KeyPressEvent) -> None:
         event.current_buffer.insert_text("\n")
 

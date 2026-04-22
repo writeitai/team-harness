@@ -12,8 +12,8 @@ reads the full output and makes the final call.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
+import re
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,9 @@ class FailureClassification:
     """Structured result of scanning agent output for API error signals."""
 
     is_api_error: bool
-    category: str  # rate_limit | overloaded | auth | quota | server_error | model_unavailable
+    category: (
+        str  # rate_limit | overloaded | auth | quota | server_error | model_unavailable
+    )
     detail: str  # human-readable one-liner
 
 
