@@ -30,7 +30,7 @@ def _write_auth(path: Path, token: str) -> None:
 def test_resolve_codex_auth_path_prefers_configured_relative_path(
     monkeypatch, tmp_path
 ):
-    monkeypatch.setenv("HARNESS_CODEX_AUTH_PATH", "env-auth.json")
+    monkeypatch.setenv("TEAM_HARNESS_CODEX_AUTH_PATH", "env-auth.json")
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
 
     path = resolve_codex_auth_path("nested/auth.json", cwd=str(tmp_path / "project"))
@@ -39,12 +39,12 @@ def test_resolve_codex_auth_path_prefers_configured_relative_path(
 
 
 def test_resolve_codex_auth_path_uses_env_then_codex_home(monkeypatch, tmp_path):
-    monkeypatch.setenv("HARNESS_CODEX_AUTH_PATH", "env-auth.json")
+    monkeypatch.setenv("TEAM_HARNESS_CODEX_AUTH_PATH", "env-auth.json")
 
     env_path = resolve_codex_auth_path(None, cwd=str(tmp_path))
     assert env_path == (tmp_path / "env-auth.json").resolve()
 
-    monkeypatch.delenv("HARNESS_CODEX_AUTH_PATH")
+    monkeypatch.delenv("TEAM_HARNESS_CODEX_AUTH_PATH")
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
 
     home_path = resolve_codex_auth_path(None, cwd=str(tmp_path))

@@ -7,7 +7,7 @@ import pytest
 from team_harness.agents.manager import AgentManager
 from team_harness.tools import todo_tools
 from team_harness.tracking.context import ContextTracker
-from team_harness.ui.console import HarnessConsole
+from team_harness.ui.console import TeamHarnessConsole
 
 
 @pytest.mark.asyncio
@@ -17,7 +17,7 @@ async def test_todo_round_trip_and_console_panel(tmp_path):
     assert await todo_tools.todo_write(tasks) == "Todo list updated (1 tasks)."
     assert json.loads(await todo_tools.todo_read()) == tasks
 
-    console = HarnessConsole(
+    console = TeamHarnessConsole(
         ctx=ContextTracker(model_id="m", model_limit=100),
         manager=AgentManager(),
         run_dir=tmp_path,

@@ -72,7 +72,7 @@ th init
 
 ### If you are authenticated to codex
 ```bash
-HARNESS_PROVIDER=codex th repl
+TEAM_HARNESS_PROVIDER=codex th repl
 ```
 
 or
@@ -87,7 +87,7 @@ OPENROUTER_API_KEY="sk-or-..." th repl
 or 
 
 ```bash
-OPENAI_API_KEY="sk-or-..." HARNESS_API_BASE="https://openai.com/api/v1" th repl
+OPENAI_API_KEY="sk-or-..." TEAM_HARNESS_API_BASE="https://openai.com/api/v1" th repl
 ```
 
 ### Headless
@@ -114,15 +114,15 @@ Use team-harness programmatically from Python:
 
 ```python
 import asyncio
-from team_harness import Harness, HarnessResult
+from team_harness import TeamHarness, TeamHarnessResult
 
 async def main():
-    harness = Harness(
+    harness = TeamHarness(
         api_key="sk-or-...",
         model="anthropic/claude-sonnet-4",
         agents=["codex", "gemini"],
     )
-    result: HarnessResult = await harness.run(
+    result: TeamHarnessResult = await harness.run(
         "Write unit tests for src/utils.py using pytest"
     )
     print(result.text)
@@ -135,7 +135,7 @@ asyncio.run(main())
 All CLI options are available as constructor parameters:
 
 ```python
-harness = Harness(
+harness = TeamHarness(
     provider="codex",           # or "openai_compat" (default)
     model="codex-mini-latest",
     api_base="https://openrouter.ai/api/v1",
@@ -151,13 +151,13 @@ harness = Harness(
 )
 ```
 
-The `run()` method returns a `HarnessResult` with:
+The `run()` method returns a `TeamHarnessResult` with:
 
 - `text` -- final assistant response
 - `agents` -- list of `AgentSummary` (id, agent_type, status, exit_code, cwd)
 - `run_id` -- unique run identifier
 
-Errors raise `HarnessError`. Run logs are always finalized, even on failure.
+Errors raise `TeamHarnessError`. Run logs are always finalized, even on failure.
 
 ## Configuration
 
@@ -359,10 +359,10 @@ Project-level `.team-harness/config.toml`, `.team-harness/coordinator_system_mes
 
 Relevant environment variables:
 
-- `HARNESS_PROVIDER`
-- `HARNESS_MODEL`
-- `HARNESS_API_BASE`
-- `HARNESS_CODEX_AUTH_PATH`
+- `TEAM_HARNESS_PROVIDER`
+- `TEAM_HARNESS_MODEL`
+- `TEAM_HARNESS_API_BASE`
+- `TEAM_HARNESS_CODEX_AUTH_PATH`
 - `OPENROUTER_API_KEY` or `OPENAI_API_KEY`
 
 ### Adding custom agent types
@@ -618,7 +618,7 @@ to regenerate just `config.toml`.
 - `provider = "codex"` uses the auth file written by `codex login`.
 - Codex auth resolution order is:
   1. `codex_auth_path` from CLI or config
-  2. `HARNESS_CODEX_AUTH_PATH`
+  2. `TEAM_HARNESS_CODEX_AUTH_PATH`
   3. `$CODEX_HOME/auth.json`
   4. `~/.codex/auth.json`
 - Codex auth path values that are relative resolve against the effective harness `--cwd`.

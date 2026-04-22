@@ -310,7 +310,7 @@ def test_allowed_types_and_depth_guard(monkeypatch):
     assert "myagent" in all_agent_types(config)
     config.allowed_agents = ["codex", "myagent"]
     assert get_allowed_types(config) == ["codex", "myagent"]
-    monkeypatch.setenv("HARNESS_DEPTH", "3")
+    monkeypatch.setenv("TEAM_HARNESS_DEPTH", "3")
     with pytest.raises(ValueError):
         check_harness_depth(Config(max_depth=3))
 

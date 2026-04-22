@@ -16,9 +16,9 @@ from team_harness.harness import _normalize_agents
 from team_harness.harness import _show_no_config_hint
 from team_harness.harness import _warn_provider_startup
 from team_harness.harness import AgentSummary
-from team_harness.harness import Harness
-from team_harness.harness import HarnessError
-from team_harness.harness import HarnessResult
+from team_harness.harness import TeamHarness
+from team_harness.harness import TeamHarnessError
+from team_harness.harness import TeamHarnessResult
 from team_harness.tools.agent_tools import build_agent_tool_bindings
 from team_harness.tools.fs_tools import build_fs_tool_bindings
 from team_harness.tools.todo_tools import build_todo_tool_bindings
@@ -35,7 +35,7 @@ from tests.helpers import fake_agent_template
 
 
 def test_cli_sdk_parity():
-    """Every CLI option and env var must have an SDK equivalent on Harness.__init__."""
+    """Every CLI option and env var must have an SDK equivalent on TeamHarness.__init__."""
     # Extract Click options from run_cli command
     run_cmd = main.commands["run"]
     cli_param_names = set()
@@ -62,8 +62,8 @@ def test_cli_sdk_parity():
         "cwd": "cwd",
     }
 
-    # Get Harness.__init__ signature params
-    sig = inspect.signature(Harness.__init__)
+    # Get TeamHarness.__init__ signature params
+    sig = inspect.signature(TeamHarness.__init__)
     sdk_params = {name for name, p in sig.parameters.items() if name != "self"}
 
     # Verify every CLI param has an SDK mapping
@@ -71,26 +71,26 @@ def test_cli_sdk_parity():
         sdk_name = cli_to_sdk.get(cli_name)
         assert sdk_name is not None, (
             f"CLI option --{cli_name.replace('_', '-')} has no SDK mapping. "
-            f"Add it to Harness.__init__."
+            f"Add it to TeamHarness.__init__."
         )
         assert sdk_name in sdk_params, (
             f"CLI option --{cli_name.replace('_', '-')} maps to '{sdk_name}' "
-            f"but Harness.__init__ does not have that parameter."
+            f"but TeamHarness.__init__ does not have that parameter."
         )
 
     # Verify env vars have SDK coverage
     env_vars_to_sdk = {
-        "HARNESS_MODEL": "model",
-        "HARNESS_API_BASE": "api_base",
-        "HARNESS_PROVIDER": "provider",
-        "HARNESS_CODEX_AUTH_PATH": "codex_auth_path",
+        "TEAM_HARNESS_MODEL": "model",
+        "TEAM_HARNESS_API_BASE": "api_base",
+        "TEAM_HARNESS_PROVIDER": "provider",
+        "TEAM_HARNESS_CODEX_AUTH_PATH": "codex_auth_path",
         "OPENROUTER_API_KEY": "api_key",
         "OPENAI_API_KEY": "api_key",
     }
     for env_var, sdk_name in env_vars_to_sdk.items():
         assert sdk_name in sdk_params, (
             f"Environment variable {env_var} maps to '{sdk_name}' "
-            f"but Harness.__init__ does not have that parameter."
+            f"but TeamHarness.__init__ does not have that parameter."
         )
 
 
@@ -192,7 +192,7 @@ def test_make_console_silent_no_ops():
 
 
 # ---------------------------------------------------------------------------
-# Harness.run() returns HarnessResult with correct shape
+# TeamHarness.run() returns TeamHarnessResult with correct shape
 # ---------------------------------------------------------------------------
 
 
@@ -229,10 +229,10 @@ async def test_harness_run_returns_result(monkeypatch, tmp_path):
         "team_harness.harness.validate_templates", lambda *args, **kwargs: None
     )
 
-    harness = Harness(api_base="http://localhost:11434/v1", cwd=str(tmp_path))
+    harness = TeamHarness(api_base="http://localhost:11434/v1", cwd=str(tmp_path))
     result = await harness.run("hello")
 
-    assert isinstance(result, HarnessResult)
+    assert isinstance(result, TeamHarnessResult)
     assert result.text == "final answer"
     assert isinstance(result.agents, list)
     assert isinstance(result.run_id, str)
@@ -290,7 +290,7 @@ async def test_harness_run_creates_session_output_dir_and_passes_it_to_prompt(
     local_config.parent.mkdir()
     local_config.write_text('[coordinator]\noutput_dir = "artifacts"\n')
 
-    harness = Harness(api_base="http://localhost:11434/v1", cwd=str(project_dir))
+    harness = TeamHarness(api_base="http://localhost:11434/v1", cwd=str(project_dir))
     result = await harness.run("hello")
 
     session_output_dir = config_module.Path(captured["session_output_dir"])
@@ -320,7 +320,7 @@ def test_agent_summary_has_no_proc_field():
 
 
 # ---------------------------------------------------------------------------
-# Error path: HarnessError raised on loop failure
+# Error path: TeamHarnessError raised on loop failure
 # ---------------------------------------------------------------------------
 
 
@@ -349,8 +349,8 @@ async def test_harness_error_on_loop_failure(monkeypatch, tmp_path):
         "team_harness.harness.validate_templates", lambda *args, **kwargs: None
     )
 
-    harness = Harness(api_base="http://localhost:11434/v1", cwd=str(tmp_path))
-    with pytest.raises(HarnessError, match="boom"):
+    harness = TeamHarness(api_base="http://localhost:11434/v1", cwd=str(tmp_path))
+    with pytest.raises(TeamHarnessError, match="boom"):
         await harness.run("hello")
 
     # Verify run log was finalized despite the error
@@ -726,23 +726,23 @@ async def test_todo_tool_bindings_isolate_path(tmp_path):
 
 def test_public_api_exports():
     from team_harness import AgentSummary as AS
-    from team_harness import Harness as H
-    from team_harness import HarnessError as HE
-    from team_harness import HarnessResult as HR
+    from team_harness import TeamHarness as H
+    from team_harness import TeamHarnessError as HE
+    from team_harness import TeamHarnessResult as HR
 
-    assert H is Harness
-    assert HE is HarnessError
-    assert HR is HarnessResult
+    assert H is TeamHarness
+    assert HE is TeamHarnessError
+    assert HR is TeamHarnessResult
     assert AS is AgentSummary
 
 
 # ---------------------------------------------------------------------------
-# HarnessResult dataclass shape
+# TeamHarnessResult dataclass shape
 # ---------------------------------------------------------------------------
 
 
 def test_harness_result_shape():
-    result = HarnessResult(
+    result = TeamHarnessResult(
         text="answer",
         agents=[
             AgentSummary(
@@ -758,12 +758,12 @@ def test_harness_result_shape():
 
 
 # ---------------------------------------------------------------------------
-# Harness constructor stores params correctly
+# TeamHarness constructor stores params correctly
 # ---------------------------------------------------------------------------
 
 
 def test_harness_constructor():
-    h = Harness(
+    h = TeamHarness(
         provider="codex",
         model="codex-mini-latest",
         api_base="https://example.com",
@@ -792,11 +792,11 @@ def test_harness_constructor():
 
 
 # ---------------------------------------------------------------------------
-# HarnessError is a proper exception
+# TeamHarnessError is a proper exception
 # ---------------------------------------------------------------------------
 
 
 def test_harness_error_is_exception():
-    err = HarnessError("something went wrong")
+    err = TeamHarnessError("something went wrong")
     assert isinstance(err, Exception)
     assert str(err) == "something went wrong"

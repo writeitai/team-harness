@@ -409,8 +409,8 @@ async def spawn_agent(**kwargs: object) -> str:
         parts.append(config.worker_suffix)
     parts.append(_build_worker_output_footer(_session_output_dir, config))
     full_prompt = "\n\n".join(part for part in parts if part)
-    current_depth = int(os.environ.get("HARNESS_DEPTH", "0"))
-    extra_env = {**(env or {}), "HARNESS_DEPTH": str(current_depth + 1)}
+    current_depth = int(os.environ.get("TEAM_HARNESS_DEPTH", "0"))
+    extra_env = {**(env or {}), "TEAM_HARNESS_DEPTH": str(current_depth + 1)}
     agent_id = "agent_" + uuid.uuid4().hex[:12]
     run_dir = config.run_dir
     if run_dir is None:
@@ -783,8 +783,8 @@ def build_agent_tool_bindings(
             _parts.append(config.worker_suffix)
         _parts.append(_build_worker_output_footer(session_output_dir, config))
         full_prompt = "\n\n".join(p for p in _parts if p)
-        current_depth = int(os.environ.get("HARNESS_DEPTH", "0"))
-        extra_env = {**(env or {}), "HARNESS_DEPTH": str(current_depth + 1)}
+        current_depth = int(os.environ.get("TEAM_HARNESS_DEPTH", "0"))
+        extra_env = {**(env or {}), "TEAM_HARNESS_DEPTH": str(current_depth + 1)}
         agent_id = "agent_" + uuid.uuid4().hex[:12]
         run_dir = config.run_dir
         if run_dir is None:

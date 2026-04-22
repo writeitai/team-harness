@@ -1,6 +1,6 @@
 from team_harness.harness import AgentSummary
-from team_harness.harness import Harness
-from team_harness.harness import HarnessError
-from team_harness.harness import HarnessResult
+from team_harness.harness import TeamHarness
+from team_harness.harness import TeamHarnessError
+from team_harness.harness import TeamHarnessResult
 
-__all__ = ["AgentSummary", "Harness", "HarnessError", "HarnessResult"]
+__all__ = ["AgentSummary", "TeamHarness", "TeamHarnessError", "TeamHarnessResult"]
