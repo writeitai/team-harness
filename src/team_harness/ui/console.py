@@ -61,7 +61,7 @@ _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _URL_RE = re.compile(r"https?://[^\s,;)\]\"'<>]+(?<![.,;:!?)])")
 
 _STREAM_LEFT_PAD = "  "
-_BACKTICK_STYLE = "bold blue"
+_BACKTICK_STYLE = "blue"
 _HEADING_STYLE = "bold"
 _BLOCKQUOTE_STYLE = "dim italic"
 _BLOCKQUOTE_PREFIX = "\u2502 "  # "│ "
