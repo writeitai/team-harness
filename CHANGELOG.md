@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-04-22
+
+### Added
+
+- Auto-failover to alternative harness on API errors: when a worker agent (e.g. Codex) fails due to an API error (rate limit, overloaded, auth failure, quota, server error, model unavailable), the coordinator automatically re-delegates the task to a different agent type using a different API provider.
+- New `api_error_classifier` module that detects API error patterns in agent stderr/stdout and returns structured classifications.
+- `wait_for_any` responses now include a `failure_classification` field for failed agents, surfacing the error category and suggested action to the coordinator.
+- "API Error Failover Protocol" section in the coordinator system prompt with step-by-step failover instructions and an escalation rule (stop retrying after 2+ different agent types fail).
+
 ## [0.1.5] - 2026-04-22
 
 ### Added
