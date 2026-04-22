@@ -264,3 +264,106 @@ async def test_kill_agent_updates_manager_and_run_log(tmp_path, config, manager,
     assert data["agents"][0]["status"] == "killed"
     assert data["agents"][0]["exit_code"] == state.exit_code
     assert ("killed", "agent_1") in ui.agent_events
+
+
+@pytest.mark.asyncio
+async def test_wait_for_any_includes_failure_classification_on_api_error(
+    tmp_path, config, manager, ui
+):
+    """When an agent fails with API error patterns in stderr, wait_for_any
+    should include a failure_classification in the response."""
+    stdout = tmp_path / "agent_stdout.log"
+    stderr = tmp_path / "agent_stderr.log"
+    stdout.write_text("")
+    stderr.write_text("Error: API request failed with status: 429 rate limit exceeded")
+    proc = await asyncio.create_subprocess_exec("sh", "-lc", "exit 1")
+    state = AgentState(
+        id="agent_1",
+        agent_type="codex",
+        prompt="do the thing",
+        cwd=str(tmp_path),
+        proc=proc,
+        spawn_time=datetime.now(timezone.utc),
+        stdout_log=stdout,
+        stderr_log=stderr,
+    )
+    manager.register(state)
+    run_log = RunLogWriter(
+        "run_1", tmp_path, config.provider, config.model, config.api_base
+    )
+    agent_tools.setup(manager, run_log, config, ui)
+
+    result = json.loads(await agent_tools.wait_for_any(["agent_1"], timeout=5))
+
+    assert result["timed_out"] is False
+    assert result["finished_agent_id"] == "agent_1"
+    assert "failure_classification" in result
+    fc = result["failure_classification"]
+    assert fc["is_api_error"] is True
+    assert fc["category"] == "rate_limit"
+    assert "suggested_action" in fc
+
+
+@pytest.mark.asyncio
+async def test_wait_for_any_no_classification_on_normal_failure(
+    tmp_path, config, manager, ui
+):
+    """When an agent fails without API error patterns, no failure_classification
+    should be present."""
+    stdout = tmp_path / "agent_stdout.log"
+    stderr = tmp_path / "agent_stderr.log"
+    stdout.write_text("")
+    stderr.write_text("Traceback: IndexError: list index out of range")
+    proc = await asyncio.create_subprocess_exec("sh", "-lc", "exit 1")
+    state = AgentState(
+        id="agent_1",
+        agent_type="codex",
+        prompt="do the thing",
+        cwd=str(tmp_path),
+        proc=proc,
+        spawn_time=datetime.now(timezone.utc),
+        stdout_log=stdout,
+        stderr_log=stderr,
+    )
+    manager.register(state)
+    run_log = RunLogWriter(
+        "run_1", tmp_path, config.provider, config.model, config.api_base
+    )
+    agent_tools.setup(manager, run_log, config, ui)
+
+    result = json.loads(await agent_tools.wait_for_any(["agent_1"], timeout=5))
+
+    assert result["timed_out"] is False
+    assert "failure_classification" not in result
+
+
+@pytest.mark.asyncio
+async def test_wait_for_any_no_classification_on_success(
+    tmp_path, config, manager, ui
+):
+    """Successful agents should never have a failure_classification."""
+    stdout = tmp_path / "agent_stdout.log"
+    stderr = tmp_path / "agent_stderr.log"
+    stdout.write_text("done")
+    stderr.write_text("")
+    proc = await asyncio.create_subprocess_exec("sh", "-lc", "exit 0")
+    state = AgentState(
+        id="agent_1",
+        agent_type="codex",
+        prompt="do the thing",
+        cwd=str(tmp_path),
+        proc=proc,
+        spawn_time=datetime.now(timezone.utc),
+        stdout_log=stdout,
+        stderr_log=stderr,
+    )
+    manager.register(state)
+    run_log = RunLogWriter(
+        "run_1", tmp_path, config.provider, config.model, config.api_base
+    )
+    agent_tools.setup(manager, run_log, config, ui)
+
+    result = json.loads(await agent_tools.wait_for_any(["agent_1"], timeout=5))
+
+    assert result["timed_out"] is False
+    assert "failure_classification" not in result
