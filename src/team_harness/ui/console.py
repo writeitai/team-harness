@@ -532,7 +532,16 @@ class HarnessConsole(ConsoleBase):
             self._live.update(self._render_live())
 
     def tool_call_start(self, name: str, args: dict) -> ToolCallContext:
-        args_text = _style_paths(_fmt_args(args))
+        # Separate short inline args from long multiline args
+        inline_args: dict = {}
+        block_args: dict[str, str] = {}
+        for key, value in args.items():
+            if isinstance(value, str) and ("\n" in value or len(value) > 120):
+                block_args[key] = value
+            else:
+                inline_args[key] = value
+
+        inline_text = _style_paths(_fmt_args(inline_args)) if inline_args else Text("")
         header = Text.assemble(
             ("\n  ", ""),
             ("\u25b6", "bold"),
@@ -540,9 +549,18 @@ class HarnessConsole(ConsoleBase):
             (f"{name}", "bold cyan"),
             ("(", ""),
         )
-        header.append_text(args_text)
+        header.append_text(inline_text)
         header.append(")")
         self._console.print(header)
+
+        # Render long args as readable indented blocks
+        for key, value in block_args.items():
+            self._console.print(f"    [dim]{key}:[/dim]")
+            for bline in value.splitlines():
+                styled = _style_paths(bline)
+                styled.stylize("dim")
+                prefix = Text("    \u2502 ", style="dim")
+                self._console.print(Text.assemble(prefix, styled))
 
         def _render(text: str, is_error: bool) -> None:
             style = "red" if is_error else "dim"
