@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-04-22
+
+### Added
+
+- Inline markdown rendering in streamed output: `**bold**` text, `## headings`, and `> blockquotes` are now rendered with appropriate styling during streaming.
+- `**bold**` markers are consumed and content rendered bold, with cross-token boundary handling.
+- `## heading` prefixes consumed at line start, rest of line rendered bold.
+- `> blockquote` prefixes consumed at line start, rendered dim italic with `│` left border.
+- Bold and backtick highlighting in tool call output via `_style_paths()`.
+
+### Changed
+
+- Backtick code span style changed from bold cyan on dark background to plain blue (no background).
+- Multiline tool call args (e.g. `prompt`) now render as readable indented blocks with actual newlines instead of escaped `\n` literals.
+
 ## [0.1.4] - 2026-04-21
 
 ### Fixed
