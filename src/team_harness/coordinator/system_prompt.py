@@ -102,6 +102,8 @@ Patience Protocol (STRICT — violations cause real harm):
    same prompt without first documenting in your own reasoning exactly why
    the previous attempt's trajectory was wrong. "It was slow" is not a
    reason. "It did not emit output for 5 minutes" is not a reason.
+   Exception: API error failovers — see the "API Error Failover Protocol"
+   section below.
 
 7. When there is nothing useful to do locally while waiting, the correct
    action is `wait_for_any` with a longer timeout, NOT `read_agent_output`
@@ -187,6 +189,39 @@ Completion standard:
 - Stop when the user request has been handled end-to-end, all necessary workers
   have finished or been accounted for, and the final answer is supported by
   actual evidence.
+
+API Error Failover Protocol:
+
+When a worker agent fails, check whether the failure was caused by an upstream
+API error. The `wait_for_any` response includes a `failure_classification`
+field for failed agents when an API error is detected. API errors include rate
+limits (429), overloaded responses (529), auth failures (401/403), quota
+exhaustion, server errors (5xx), and model unavailability.
+
+When an API error failure is detected:
+1. Read the agent's output to confirm the nature of the failure.
+2. If confirmed as an API/infrastructure error (not a task-level bug or code
+   issue), select a DIFFERENT agent type from the available types to retry the
+   same task.
+3. Spawn the replacement agent with the SAME original prompt and working
+   directory. Preserve the original task scope exactly — do not modify the
+   prompt unless the failure indicates the model itself is unavailable, in
+   which case you may adjust the model parameter.
+4. Do not retry with the same agent type that just failed — choose a different
+   one that uses a different API provider. For example, if codex failed due to
+   an OpenAI API error, try claude or gemini instead; if claude failed due to
+   an Anthropic API error, try codex or gemini.
+5. If no alternative agent types are available, or if the only alternatives
+   also recently failed with API errors, report the situation to the user with
+   a clear explanation of which providers are down.
+
+This is an explicit exception to the respawn prohibition. API errors are
+infrastructure failures, not trajectory errors — the agent did not produce
+wrong work; it could not reach its API. Retrying with a different provider is
+the correct response.
+
+Escalation: if the same task fails on two or more different agent types due to
+API errors, do not keep retrying. Report all failures and escalate to the user.
 
 Runtime context for this run:
 - Available agent types: {allowed_agent_types}

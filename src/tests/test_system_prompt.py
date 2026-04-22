@@ -142,3 +142,28 @@ def test_build_system_prompt_with_default_config_uses_coordinator_prompt():
 
     assert "You are the coordinator for team-harness." in prompt
     assert "Available agent types: codex" in prompt
+
+
+def test_system_prompt_contains_api_error_failover_protocol():
+    prompt = build_system_prompt(
+        config=Config(cwd="/repo"),
+        allowed_types=["codex", "claude"],
+        skills=[],
+        session_output_dir="/repo/_outputs/run_123",
+    )
+
+    assert "API Error Failover Protocol" in prompt
+    assert "failure_classification" in prompt
+    assert "DIFFERENT agent type" in prompt
+    assert "infrastructure failures, not trajectory errors" in prompt
+
+
+def test_system_prompt_respawn_prohibition_references_failover():
+    prompt = build_system_prompt(
+        config=Config(cwd="/repo"),
+        allowed_types=["codex"],
+        skills=[],
+        session_output_dir="/repo/_outputs/run_123",
+    )
+
+    assert "Exception: API error failovers" in prompt

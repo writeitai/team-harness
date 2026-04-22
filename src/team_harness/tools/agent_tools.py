@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import uuid
 
 from team_harness.agents import spawner
+from team_harness.agents.api_error_classifier import classify_agent_failure
 from team_harness.agents.manager import AgentState
 from team_harness.agents.registry import check_harness_depth
 from team_harness.agents.session_capture import capture_session_id_from_path
@@ -64,6 +65,33 @@ def _tail_text(path: Path, n_chars: int) -> str:
         return handle.read().decode(errors="replace")[-n_chars:]
 
 
+def _classify_if_failed(state: AgentState) -> dict | None:
+    """Compute and cache failure classification for a failed agent.
+
+    Reads the tail of stderr and stdout and runs the API error classifier.
+    Returns the cached dict if already classified, or None if the failure
+    does not look like an API error.
+    """
+    if state.exit_code is None or state.exit_code == 0:
+        return None
+    if state.failure_classification is not None:
+        return state.failure_classification
+    stderr_text = _tail_text(state.stderr_log, 4000)
+    stdout_text = _tail_text(state.stdout_log, 4000)
+    result = classify_agent_failure(stderr_text, stdout_text)
+    if result is not None:
+        state.failure_classification = {
+            "is_api_error": result.is_api_error,
+            "category": result.category,
+            "detail": result.detail,
+            "suggested_action": (
+                "Respawn this task with a different agent type. "
+                "See the API Error Failover Protocol."
+            ),
+        }
+    return state.failure_classification
+
+
 def _seconds_since_last_output(stdout_log: Path, stderr_log: Path) -> float | None:
     mtimes: list[float] = []
     for path in (stdout_log, stderr_log):
@@ -113,7 +141,7 @@ def _build_running_snapshot(
             "Investigate with read_agent_output before considering kill_agent."
         )
 
-    return {
+    snapshot: dict[str, object] = {
         "agent_id": state.id,
         "agent_type": state.agent_type,
         "status": _status_from_state(state),
@@ -129,6 +157,11 @@ def _build_running_snapshot(
         "recent_stderr_tail": stderr_tail,
         "advisory": advisory,
     }
+    if not is_alive:
+        classification = _classify_if_failed(state)
+        if classification is not None:
+            snapshot["failure_classification"] = classification
+    return snapshot
 
 
 def _patience_policy(config: "Config | None") -> dict[str, object]:
@@ -449,6 +482,8 @@ async def _watch_agent(agent_id: str) -> None:
     state = manager.get(agent_id)
     if state.status != "killed":
         state.status = "done" if exit_code == 0 else "failed"
+        if state.status == "failed":
+            _classify_if_failed(state)
         run_log.update_agent(
             agent_id,
             exit_code=exit_code,
@@ -602,20 +637,22 @@ async def wait_for_any(agent_ids: list[str], timeout: float | None = None) -> st
         elapsed = int(
             (datetime.now(timezone.utc) - finished_state.spawn_time).total_seconds()
         )
-        return json.dumps(
-            {
-                "agent_id": finished_id,
-                "finished_agent_id": finished_id,
-                "timed_out": False,
-                "status": await agent_status(finished_id),
-                "elapsed_seconds": elapsed,
-                "running": [
-                    _build_running_snapshot(manager.get(aid), advance_cursors=True)
-                    for aid in running_ids
-                ],
-                "patience_policy": _patience_policy(config),
-            }
-        )
+        result: dict[str, object] = {
+            "agent_id": finished_id,
+            "finished_agent_id": finished_id,
+            "timed_out": False,
+            "status": await agent_status(finished_id),
+            "elapsed_seconds": elapsed,
+            "running": [
+                _build_running_snapshot(manager.get(aid), advance_cursors=True)
+                for aid in running_ids
+            ],
+            "patience_policy": _patience_policy(config),
+        }
+        classification = _classify_if_failed(finished_state)
+        if classification is not None:
+            result["failure_classification"] = classification
+        return json.dumps(result)
     except asyncio.TimeoutError:
         for task in tasks:
             task.cancel()
@@ -810,6 +847,8 @@ def build_agent_tool_bindings(
             s = manager.get(agent_id)
             if s.status != "killed":
                 s.status = "done" if exit_code == 0 else "failed"
+                if s.status == "failed":
+                    _classify_if_failed(s)
                 run_log.update_agent(
                     agent_id,
                     exit_code=exit_code,
@@ -935,21 +974,23 @@ def build_agent_tool_bindings(
             elapsed = int(
                 (datetime.now(timezone.utc) - finished_state.spawn_time).total_seconds()
             )
-            return json.dumps(
-                {
-                    "agent_id": finished_id,
-                    "finished_agent_id": finished_id,
-                    "timed_out": False,
-                    "status": _status_from_state(finished_state),
-                    "elapsed_seconds": elapsed,
-                    "running": [
-                        _build_running_snapshot(manager.get(aid), advance_cursors=True)
-                        for aid in agent_ids
-                        if aid != finished_id
-                    ],
-                    "patience_policy": _patience_policy(config),
-                }
-            )
+            wait_result: dict[str, object] = {
+                "agent_id": finished_id,
+                "finished_agent_id": finished_id,
+                "timed_out": False,
+                "status": _status_from_state(finished_state),
+                "elapsed_seconds": elapsed,
+                "running": [
+                    _build_running_snapshot(manager.get(aid), advance_cursors=True)
+                    for aid in agent_ids
+                    if aid != finished_id
+                ],
+                "patience_policy": _patience_policy(config),
+            }
+            classification = _classify_if_failed(finished_state)
+            if classification is not None:
+                wait_result["failure_classification"] = classification
+            return json.dumps(wait_result)
         except asyncio.TimeoutError:
             for task in tasks:
                 task.cancel()

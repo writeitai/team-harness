@@ -19,6 +19,7 @@ class AgentState:
     status: str = "running"
     exit_code: int | None = None
     finished_at: datetime | None = None
+    failure_classification: dict | None = None
 
 
 class AgentManager:
