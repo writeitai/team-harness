@@ -703,7 +703,8 @@ These features degrade gracefully: `PlainConsole` shows static indicators, and `
 | Key              | Action                                         |
 |------------------|------------------------------------------------|
 | `Enter`          | Submit the current input                       |
-| `Alt+Enter`      | Insert a newline (multi-line editing)          |
+| `Shift+Enter`    | Insert a newline (multi-line editing)          |
+| `Alt+Enter`      | Insert a newline (alternative)                 |
 | `Esc Esc`        | Clear the entire input buffer                  |
 | `Ctrl+C`         | Clear current input without exiting the REPL   |
 | `Ctrl+D`         | Exit the REPL (when the input buffer is empty) |

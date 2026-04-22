@@ -91,12 +91,16 @@ def test_stdout_also_scanned():
 
 
 def test_resource_exhausted_detected():
-    result = classify_agent_failure("google.api_core.exceptions.ResourceExhausted: RESOURCE_EXHAUSTED")
+    result = classify_agent_failure(
+        "google.api_core.exceptions.ResourceExhausted: RESOURCE_EXHAUSTED"
+    )
     assert result is not None
     assert result.category == "rate_limit"
 
 
 def test_permission_denied_detected():
-    result = classify_agent_failure("PERMISSION_DENIED: caller does not have permission")
+    result = classify_agent_failure(
+        "PERMISSION_DENIED: caller does not have permission"
+    )
     assert result is not None
     assert result.category == "auth"
