@@ -426,10 +426,67 @@ def test_stream_token_backtick_highlighting(monkeypatch, tmp_path):
     console._stream_line_start = True
     console.stream_token("Run `pytest` now")
     output = buf.getvalue()
-    # The backtick content should be styled (contains ANSI codes)
     assert "pytest" in output
-    # Backtick characters themselves should not appear in styled output
-    # (they are consumed as delimiters)
+
+
+def test_stream_token_bold_rendering(monkeypatch, tmp_path):
+    from io import StringIO
+
+    from rich.console import Console as RichConsole
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    console = HarnessConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+    buf = StringIO()
+    console._console = RichConsole(file=buf, force_terminal=True, width=80)
+    console._streaming = True
+    console._stream_line_start = True
+    console.stream_token("**Task fix** done")
+    output = buf.getvalue()
+    assert "Task fix" in output
+    # Bold ANSI code should be present
+    assert "\x1b[1m" in output or "\x1b[1" in output
+
+
+def test_stream_token_heading_rendering(monkeypatch, tmp_path):
+    from io import StringIO
+
+    from rich.console import Console as RichConsole
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    console = HarnessConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+    buf = StringIO()
+    console._console = RichConsole(file=buf, force_terminal=True, width=80)
+    console._streaming = True
+    console._stream_line_start = True
+    console.stream_token("## What tasks produce")
+    output = buf.getvalue()
+    assert "What tasks produce" in output
+    # Should be bold (heading style)
+    assert "\x1b[1m" in output or "\x1b[1" in output
+
+
+def test_stream_token_blockquote_rendering(monkeypatch, tmp_path):
+    from io import StringIO
+
+    from rich.console import Console as RichConsole
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    console = HarnessConsole(
+        ContextTracker(model_id="m", model_limit=100), AgentManager(), tmp_path
+    )
+    buf = StringIO()
+    console._console = RichConsole(file=buf, force_terminal=True, width=80)
+    console._streaming = True
+    console._stream_line_start = True
+    console.stream_token("> some quoted text")
+    output = buf.getvalue()
+    assert "some quoted text" in output
+    # Should contain the blockquote prefix character
+    assert "\u2502" in output
 
 
 def test_spinner_shows_during_tools_phase(monkeypatch, tmp_path):

@@ -57,9 +57,14 @@ _PATH_RE = re.compile(
     r"|(?:(?:^|(?<=\s))[\w][\w.-]*/(?:[\w][\w.-]*/)*\w+\.\w+)"
 )
 _BACKTICK_RE = re.compile(r"`([^`]+)`")
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _URL_RE = re.compile(r"https?://[^\s,;)\]\"'<>]+(?<![.,;:!?)])")
 
 _STREAM_LEFT_PAD = "  "
+_BACKTICK_STYLE = "bold blue"
+_HEADING_STYLE = "bold"
+_BLOCKQUOTE_STYLE = "dim italic"
+_BLOCKQUOTE_PREFIX = "\u2502 "  # "│ "
 
 
 def _style_paths(text: str) -> Text:
@@ -67,7 +72,8 @@ def _style_paths(text: str) -> Text:
     styled = Text(text)
     styled.highlight_regex(_URL_RE, style="cyan underline")
     styled.highlight_regex(_PATH_RE, style="cyan")
-    styled.highlight_regex(_BACKTICK_RE, style="bold cyan on rgb(40,40,40)")
+    styled.highlight_regex(_BACKTICK_RE, style=_BACKTICK_STYLE)
+    styled.highlight_regex(_BOLD_RE, style="bold")
     return styled
 
 
@@ -312,6 +318,9 @@ class HarnessConsole(ConsoleBase):
         self._live_running = False
         self._streaming = False
         self._in_backtick = False
+        self._in_bold = False
+        self._pending_star = False
+        self._line_style = ""
         self._stream_line_start = True
 
     def start(self) -> None:
@@ -382,6 +391,9 @@ class HarnessConsole(ConsoleBase):
             self._live_running = False
         self._streaming = True
         self._in_backtick = False
+        self._in_bold = False
+        self._pending_star = False
+        self._line_style = ""
         self._stream_line_start = True
 
     def begin_compaction(self) -> None:
@@ -389,56 +401,107 @@ class HarnessConsole(ConsoleBase):
         if self._live_running:
             self._live.update(self._render_live())
 
-    def _stream_chunk(self, text: str, style: str = "") -> None:
-        """Print a chunk of streamed text with left padding on new lines."""
+    def _stream_emit(self, text: str, style: str = "") -> None:
+        """Write text to the console, inserting left padding at line starts."""
         if not text:
             return
-        # Insert left padding after each newline and at the start of a line
         lines = text.split("\n")
         for i, line in enumerate(lines):
             if i > 0:
-                # Newline from the split
                 self._console.print("", highlight=False)
                 self._stream_line_start = True
+                self._line_style = ""
             if line:
                 if self._stream_line_start:
+                    pad = _STREAM_LEFT_PAD
+                    if self._line_style == _BLOCKQUOTE_STYLE:
+                        pad += _BLOCKQUOTE_PREFIX
                     self._console.print(
-                        _STREAM_LEFT_PAD, end="", highlight=False, soft_wrap=True
+                        Text(
+                            pad,
+                            style="dim"
+                            if self._line_style == _BLOCKQUOTE_STYLE
+                            else "",
+                        ),
+                        end="",
+                        soft_wrap=True,
                     )
                     self._stream_line_start = False
-                if style:
-                    self._console.print(Text(line, style=style), end="", soft_wrap=True)
+                effective = style or self._line_style
+                if effective:
+                    self._console.print(
+                        Text(line, style=effective), end="", soft_wrap=True
+                    )
                 else:
                     self._console.print(
                         line, end="", markup=False, highlight=False, soft_wrap=True
                     )
 
     def stream_token(self, token: str) -> None:
-        # Inline backtick highlighting: track open/close across tokens
-        parts = token.split("`")
+        text = token
+
+        # Resolve a pending lone * from previous token
+        if self._pending_star:
+            self._pending_star = False
+            if text.startswith("*"):
+                self._in_bold = not self._in_bold
+                text = text[1:]
+            else:
+                self._stream_emit("*", style=self._line_style)
+
+        # Detect heading at line start: ## ... or # ...
+        if self._stream_line_start and text.lstrip().startswith("#"):
+            stripped = text.lstrip()
+            rest = stripped.lstrip("#")
+            if rest and rest[0] == " ":
+                self._line_style = _HEADING_STYLE
+                text = rest[1:]  # consume "## " prefix
+
+        # Detect blockquote at line start: > ...
+        if self._stream_line_start and text.lstrip().startswith("> "):
+            self._line_style = _BLOCKQUOTE_STYLE
+            text = text.lstrip()[2:]  # consume "> " prefix
+
+        # Process backtick spans
+        backtick_parts = text.split("`")
+        for bi, bpart in enumerate(backtick_parts):
+            if bi > 0:
+                self._in_backtick = not self._in_backtick
+            if bpart:
+                if self._in_backtick:
+                    self._stream_emit(bpart, style=_BACKTICK_STYLE)
+                else:
+                    self._stream_with_bold(bpart)
+
+    def _stream_with_bold(self, text: str) -> None:
+        """Process **bold** markers and emit text with URL highlighting."""
+        # Handle ** delimiters; also handle a trailing lone * that may pair
+        # with the start of the next token.
+        if text.endswith("*") and not text.endswith("**"):
+            text = text[:-1]
+            self._pending_star = True
+
+        parts = text.split("**")
         for i, part in enumerate(parts):
             if i > 0:
-                self._in_backtick = not self._in_backtick
+                self._in_bold = not self._in_bold
             if part:
-                if self._in_backtick:
-                    self._stream_chunk(part, style="bold cyan on rgb(40,40,40)")
-                else:
-                    # Detect URLs inline for non-backtick text
-                    self._stream_chunk_with_urls(part)
+                self._stream_with_urls(part)
 
-    def _stream_chunk_with_urls(self, text: str) -> None:
-        """Print a text chunk, highlighting URLs inline."""
+    def _stream_with_urls(self, text: str) -> None:
+        """Emit text, highlighting URLs inline."""
+        bold_style = "bold" if self._in_bold else ""
         last_end = 0
         for match in _URL_RE.finditer(text):
-            # Print text before the URL
             if match.start() > last_end:
-                self._stream_chunk(text[last_end : match.start()])
-            # Print the URL styled
-            self._stream_chunk(match.group(), style="cyan underline")
+                self._stream_emit(text[last_end : match.start()], style=bold_style)
+            url_style = "cyan underline"
+            if bold_style:
+                url_style = f"{bold_style} {url_style}"
+            self._stream_emit(match.group(), style=url_style)
             last_end = match.end()
-        # Print remaining text after last URL
         if last_end < len(text):
-            self._stream_chunk(text[last_end:])
+            self._stream_emit(text[last_end:], style=bold_style)
 
     def end_streaming(self) -> None:
         if not self._streaming:
