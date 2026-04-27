@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-04-27
+
+### Added
+
+- `CLAUDE.md` with development commands, architecture overview, release procedure, and code conventions.
+- `.claude/skills/team-harness/SKILL.md` Agent Skill so Claude Code (and other Agent-Skills-compatible tools) can answer install, setup, and usage questions about team-harness.
+
 ## [0.2.1] - 2026-04-27
 
 ### Added
