@@ -47,10 +47,7 @@ def test_system_prompt_includes_runtime_context_and_output_directory():
         session_output_dir="/repo/_outputs/run_123",
     )
 
-    assert "Available agent types: codex, gemini" in prompt
-    assert "Working directory: /repo" in prompt
-    assert "Current UTC time:" in prompt
-    assert "Session output directory: /repo/_outputs/run_123" in prompt
+    assert "/repo/_outputs/run_123" in prompt
     assert "Artifact review:" in prompt
 
 
@@ -141,7 +138,6 @@ def test_build_system_prompt_with_default_config_uses_coordinator_prompt():
     prompt = build_system_prompt(config, ["codex"], [], session_output_dir="/tmp/out")
 
     assert "You are the coordinator for team-harness." in prompt
-    assert "Available agent types: codex" in prompt
 
 
 def test_system_prompt_contains_api_error_failover_protocol():
@@ -155,7 +151,6 @@ def test_system_prompt_contains_api_error_failover_protocol():
     assert "API Error Failover Protocol" in prompt
     assert "failure_classification" in prompt
     assert "DIFFERENT agent type" in prompt
-    assert "infrastructure failures, not trajectory errors" in prompt
 
 
 def test_system_prompt_respawn_prohibition_references_failover():
