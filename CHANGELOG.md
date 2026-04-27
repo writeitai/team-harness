@@ -7,12 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-04-22
+## [0.2.0] - 2026-04-27
 
 ### Changed
 
 - **BREAKING**: Renamed public SDK classes to match the package name — `Harness` → `TeamHarness`, `HarnessResult` → `TeamHarnessResult`, `HarnessError` → `TeamHarnessError`. The internal `HarnessConsole` UI class is now `TeamHarnessConsole`.
 - **BREAKING**: Renamed environment variables from `HARNESS_*` to `TEAM_HARNESS_*`: `HARNESS_PROVIDER`, `HARNESS_MODEL`, `HARNESS_API_BASE`, `HARNESS_CODEX_AUTH_PATH`, `HARNESS_DEPTH`. No backwards-compatible aliases — existing deployments and scripts must be updated.
+- Streamlined coordinator system prompt: removed redundant examples, added "Autonomy" section favoring autonomous operation, condensed API Error Failover Protocol, reordered safety rules.
+
+### Fixed
+
+- Shift+Enter now inserts a newline in the REPL instead of submitting.
 
 ## [0.1.6] - 2026-04-22
 
