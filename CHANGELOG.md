@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-27
+
+### Added
+
+- [Agent Skills](https://agentskills.io) standard support — `SKILL.md` files in `.agents/skills/` directories are discovered at startup and presented to the coordinator. Skills written for Codex CLI work in team-harness without changes.
+- YAML frontmatter parsing (`pyyaml>=6.0` added as dependency) for skill name and description.
+- BFS skill discovery from `.agents/skills/` (project-local, with parent directory walking) and `~/.agents/skills/` (user-global). Max depth 6.
+- `_render_skills_section()` in the coordinator system prompt listing available skills.
+
+### Removed
+
+- **BREAKING**: Python-based skills system (`~/.team-harness/skills/`, `<cwd>/skills/`). Skills are no longer Python modules with `execute()` — they are markdown instruction files following the Agent Skills standard.
+- `SkillContext`, `Skill` dataclass, `_make_skill_wrapper()`, and skills-as-tools registration in `ToolRegistry`.
+
 ## [0.2.0] - 2026-04-27
 
 ### Changed
