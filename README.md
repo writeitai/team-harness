@@ -728,26 +728,61 @@ The coordinator model has access to these tools:
 
 **Task tracking:** `todo_write`, `todo_read`
 
-## Skills
+## Agent Skills
 
-Skills are Python modules loaded from `~/.team-harness/skills/` and `<effective cwd>/skills/`. Each skill exports `name`, `description`, `parameters_schema`, and an async `execute(**args, ctx)` function.
+team-harness supports the [Agent Skills](https://agentskills.io) standard — a cross-tool format for giving AI agents specialized knowledge and workflows.
 
-Example (`skills/summarise.py`):
+A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name + description) and markdown instructions. The coordinator sees skill metadata at startup and can read the full instructions via its `read_file` tool when a task calls for it.
 
-```python
-name = "summarise_file"
-description = "Summarise a file using the coordinator model."
-parameters_schema = {
-    "type": "object",
-    "properties": {"path": {"type": "string"}},
-    "required": ["path"],
-}
+### Skill directories
 
-async def execute(path: str, ctx):
-    content = await ctx.read_file(path)
-    # ctx.client gives access to the coordinator model
-    return f"Summary of {path}: {len(content)} chars"
+| Location | Scope |
+|----------|-------|
+| `<cwd>/.agents/skills/` | Project-local (also searched in parent directories up to root) |
+| `~/.agents/skills/` | User-global |
+
+Project skills override user-global skills of the same name. The `.agents/skills/` path matches the Codex CLI convention, so skills written for Codex work in team-harness without changes.
+
+### Creating a skill
+
+```bash
+mkdir -p .agents/skills/my-skill
+cat > .agents/skills/my-skill/SKILL.md << 'EOF'
+---
+name: my-skill
+description: Summarize files and produce a brief report. Use when the user asks for a summary or overview.
+---
+
+# My Skill
+
+## Steps
+
+1. Read the target files using `read_file`
+2. Summarize the key points
+3. Write a brief report
+
+## Notes
+
+- Keep summaries under 500 words
+- Focus on actionable insights
+EOF
 ```
+
+### Skill naming rules
+
+- 1-64 characters, lowercase letters, digits, and hyphens only
+- Must not start or end with a hyphen, no consecutive hyphens
+- Directory name is the canonical skill name
+
+### Optional subdirectories
+
+| Directory | Purpose |
+|-----------|---------|
+| `scripts/` | Executable code the agent can run |
+| `references/` | Additional documentation loaded on demand |
+| `assets/` | Templates, data files, schemas |
+
+The agent reads these files on demand via its file tools — they are not loaded at startup.
 
 ## Run logs
 

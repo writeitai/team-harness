@@ -28,8 +28,7 @@ from team_harness.harness import _prepare_session_output_dir
 from team_harness.harness import _show_no_config_hint
 from team_harness.harness import _warn_provider_startup
 from team_harness.harness import TeamHarness
-from team_harness.skills.loader import load_skills
-from team_harness.skills.loader import SkillContext
+from team_harness.skills.loader import load_skill_metadata
 from team_harness.tools import agent_tools
 from team_harness.tools import fs_tools
 from team_harness.tools import todo_tools
@@ -267,7 +266,7 @@ async def _repl(**kwargs: Any) -> None:
         ctx = ContextTracker(model_id=config.model, model_limit=model_limit)
         ui = make_console(ctx=ctx, manager=manager, run_dir=run_dir, mode="auto")
         _warn_provider_startup(config, ui=ui)
-        skills = load_skills(cwd=config.cwd)
+        skills = load_skill_metadata(cwd=config.cwd)
         allowed_types = get_allowed_types(config)
         validate_templates(config=config, allowed_types=allowed_types)
         agent_tools.setup(
@@ -279,11 +278,8 @@ async def _repl(**kwargs: Any) -> None:
         )
         todo_tools.setup(run_dir=run_dir)
         fs_tools.setup_fs()
-        skill_ctx = SkillContext(client=client, config=config)
         registry = _build_registry(
             allowed_types=allowed_types,
-            skills=skills,
-            skill_ctx=skill_ctx,
             manager=manager,
             run_log=run_log,
             config=config,

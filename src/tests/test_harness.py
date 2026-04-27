@@ -280,7 +280,7 @@ async def test_harness_run_creates_session_output_dir_and_passes_it_to_prompt(
     monkeypatch.setattr(
         "team_harness.harness.resolve_model_limit", fake_resolve_model_limit
     )
-    monkeypatch.setattr("team_harness.harness.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.harness.load_skill_metadata", lambda cwd=None: [])
     monkeypatch.setattr(
         "team_harness.harness.build_system_prompt", fake_build_system_prompt
     )

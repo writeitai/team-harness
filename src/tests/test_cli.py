@@ -243,7 +243,7 @@ async def test_run_without_config_prints_no_config_hint(monkeypatch, tmp_path):
         "team_harness.harness.resolve_model_limit", fake_resolve_model_limit
     )
     monkeypatch.setattr("team_harness.harness.make_console", lambda **_: FakeConsole())
-    monkeypatch.setattr("team_harness.harness.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.harness.load_skill_metadata", lambda cwd=None: [])
     monkeypatch.setattr(
         "team_harness.harness.validate_templates", lambda *args, **kwargs: None
     )
@@ -346,7 +346,7 @@ async def test_repl_creates_session_output_dir_and_passes_it_to_prompt(
         "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
     )
     monkeypatch.setattr("team_harness.cli.make_console", lambda **_: FakeConsole())
-    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.cli.load_skill_metadata", lambda cwd=None: [])
     monkeypatch.setattr(
         "team_harness.cli.validate_templates", lambda *args, **kwargs: None
     )
@@ -452,7 +452,7 @@ async def test_repl_exception_path_still_writes_worker_manifest(monkeypatch, tmp
         "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
     )
     monkeypatch.setattr("team_harness.cli.make_console", lambda **_: FakeConsole())
-    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.cli.load_skill_metadata", lambda cwd=None: [])
     monkeypatch.setattr(
         "team_harness.cli.validate_templates", lambda *args, **kwargs: None
     )
@@ -598,7 +598,7 @@ async def test_clear_command_dispatches_locally(monkeypatch, tmp_path):
         "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
     )
     monkeypatch.setattr("team_harness.cli.make_console", lambda **_: fake_console)
-    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.cli.load_skill_metadata", lambda cwd=None: [])
     monkeypatch.setattr(
         "team_harness.cli.validate_templates", lambda *args, **kwargs: None
     )
@@ -719,7 +719,7 @@ async def test_reset_alias_dispatches_same_clear_handler(monkeypatch, tmp_path):
         "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
     )
     monkeypatch.setattr("team_harness.cli.make_console", lambda **_: fake_console)
-    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.cli.load_skill_metadata", lambda cwd=None: [])
     monkeypatch.setattr(
         "team_harness.cli.validate_templates", lambda *args, **kwargs: None
     )
@@ -852,7 +852,7 @@ async def test_compact_command_dispatches_manual_compaction_without_focus(
         "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
     )
     monkeypatch.setattr("team_harness.cli.make_console", lambda **_: fake_console)
-    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.cli.load_skill_metadata", lambda cwd=None: [])
     monkeypatch.setattr(
         "team_harness.cli.validate_templates", lambda *args, **kwargs: None
     )
@@ -1009,7 +1009,7 @@ async def test_compact_command_dispatches_manual_compaction_with_focus(
         "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
     )
     monkeypatch.setattr("team_harness.cli.make_console", lambda **_: fake_console)
-    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.cli.load_skill_metadata", lambda cwd=None: [])
     monkeypatch.setattr(
         "team_harness.cli.validate_templates", lambda *args, **kwargs: None
     )
@@ -1148,7 +1148,7 @@ async def test_compact_command_with_only_trailing_whitespace_passes_none_focus(
         "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
     )
     monkeypatch.setattr("team_harness.cli.make_console", lambda **_: fake_console)
-    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.cli.load_skill_metadata", lambda cwd=None: [])
     monkeypatch.setattr(
         "team_harness.cli.validate_templates", lambda *args, **kwargs: None
     )
@@ -1272,7 +1272,7 @@ async def test_compact_command_tab_separator_is_not_recognized_as_compact(
         "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
     )
     monkeypatch.setattr("team_harness.cli.make_console", lambda **_: fake_console)
-    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.cli.load_skill_metadata", lambda cwd=None: [])
     monkeypatch.setattr(
         "team_harness.cli.validate_templates", lambda *args, **kwargs: None
     )
@@ -1391,7 +1391,7 @@ async def test_clear_preserves_system_prompt_and_resets_last_logged_index(
         "team_harness.cli.resolve_model_limit", fake_resolve_model_limit
     )
     monkeypatch.setattr("team_harness.cli.make_console", lambda **_: FakeConsole())
-    monkeypatch.setattr("team_harness.cli.load_skills", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.cli.load_skill_metadata", lambda cwd=None: [])
     monkeypatch.setattr(
         "team_harness.cli.validate_templates", lambda *args, **kwargs: None
     )
