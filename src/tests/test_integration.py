@@ -70,14 +70,16 @@ async def test_full_run_mock_api(tmp_path, monkeypatch):
     )
     captured: dict[str, str | None] = {"cwd": None}
 
-    def fake_load_skills(*, cwd=None):
+    def fake_load_skill_metadata(*, cwd=None):
         captured["cwd"] = str(cwd) if cwd is not None else None
         return []
 
     other_cwd = tmp_path / "elsewhere"
     other_cwd.mkdir()
     monkeypatch.chdir(other_cwd)
-    monkeypatch.setattr("team_harness.harness.load_skills", fake_load_skills)
+    monkeypatch.setattr(
+        "team_harness.harness.load_skill_metadata", fake_load_skill_metadata
+    )
     await _run(
         task="hello",
         task_file=None,

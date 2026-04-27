@@ -729,7 +729,7 @@ def test_default_config_text_contains_verified_flag_tokens():
 def test_config_paths_remain_under_team_harness_dir():
     assert CONFIG_PATH == config_module.Path.home() / ".team-harness" / "config.toml"
     assert RUNS_DIR == config_module.Path.home() / ".team-harness" / "runs"
-    assert SKILLS_USER_DIR == config_module.Path.home() / ".team-harness" / "skills"
+    assert SKILLS_USER_DIR == config_module.Path.home() / ".agents" / "skills"
 
 
 def test_provider_aware_codex_defaults(tmp_path, monkeypatch):

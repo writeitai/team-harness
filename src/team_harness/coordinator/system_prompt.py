@@ -225,6 +225,29 @@ IMPORTANT — output requirements:
 ---""".strip()
 
 
+def _render_skills_section(skills: list) -> str:
+    """Render the skills section for the system prompt."""
+    if not skills:
+        return ""
+    lines = [
+        "## Skills",
+        "",
+        "Skills are local instruction sets that provide specialized knowledge.",
+        "Available skills:",
+        "",
+    ]
+    for skill in skills:
+        lines.append(f"- **{skill.name}**: {skill.description} (file: {skill.path})")
+    lines.extend(
+        [
+            "",
+            "To use a skill: read its SKILL.md file to get full instructions,",
+            "then follow those instructions. Load referenced files only as needed.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def build_system_prompt(
     config: object, allowed_types: list[str], skills: list, session_output_dir: str
 ) -> str:
@@ -248,11 +271,9 @@ def build_system_prompt(
     if extension:
         parts.append(extension)
 
-    if skills:
-        parts.append(
-            "Additional tools (skills) available:\n"
-            + "\n".join(f"- {skill.name}: {skill.description}" for skill in skills)
-        )
+    skills_section = _render_skills_section(skills)
+    if skills_section:
+        parts.append(skills_section)
 
     worker_suffix = getattr(config, "worker_suffix", "")
     if worker_suffix:

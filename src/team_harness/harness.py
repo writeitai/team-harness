@@ -23,9 +23,7 @@ from team_harness.coordinator.codex_client import CodexCoordinatorClient
 from team_harness.coordinator.loop import run
 from team_harness.coordinator.protocols import CoordinatorLike
 from team_harness.coordinator.system_prompt import build_system_prompt
-from team_harness.skills.loader import load_skills
-from team_harness.skills.loader import Skill
-from team_harness.skills.loader import SkillContext
+from team_harness.skills.loader import load_skill_metadata
 from team_harness.tools import shell_tools
 from team_harness.tools.agent_tools import build_agent_tool_bindings
 from team_harness.tools.fs_tools import build_fs_tool_bindings
@@ -128,14 +126,11 @@ class TeamHarness:
             )
             _show_no_config_hint(config, ui=ui)
             _warn_provider_startup(config, ui=ui)
-            skills = load_skills(cwd=config.cwd)
+            skills = load_skill_metadata(cwd=config.cwd)
             allowed_types = get_allowed_types(config)
             validate_templates(config=config, allowed_types=allowed_types)
-            skill_ctx = SkillContext(client=client, config=config)
             registry = _build_registry(
                 allowed_types=allowed_types,
-                skills=skills,
-                skill_ctx=skill_ctx,
                 manager=manager,
                 run_log=run_log,
                 config=config,
@@ -415,20 +410,9 @@ def _make_run_id() -> str:
     )
 
 
-def _make_skill_wrapper(skill: Skill, ctx: SkillContext) -> Any:
-    """Create an async wrapper that invokes a skill with its context."""
-
-    async def _wrapper(**args: object) -> str:
-        return await skill.execute(ctx=ctx, **args)
-
-    return _wrapper
-
-
 def _build_registry(
     *,
     allowed_types: list[str],
-    skills: list[Skill],
-    skill_ctx: SkillContext,
     manager: AgentManager,
     run_log: RunLogWriter,
     config: Config,
@@ -464,17 +448,4 @@ def _build_registry(
     for schema, fn in todo_bindings:
         registry.register(schema=schema, fn=fn)
 
-    # Skills
-    for skill in skills:
-        registry.register(
-            schema={
-                "type": "function",
-                "function": {
-                    "name": skill.name,
-                    "description": skill.description,
-                    "parameters": skill.parameters_schema,
-                },
-            },
-            fn=_make_skill_wrapper(skill=skill, ctx=skill_ctx),
-        )
     return registry

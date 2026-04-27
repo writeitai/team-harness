@@ -1,11 +1,12 @@
 # pyright: reportMissingParameterType=false
 
-from types import SimpleNamespace
+from pathlib import Path
 
 from team_harness.config import Config
 from team_harness.coordinator.system_prompt import build_system_prompt
 from team_harness.coordinator.system_prompt import COORDINATOR_PROMPT
 from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
+from team_harness.skills.loader import SkillMetadata
 
 
 def test_system_prompt_contains_coordinator_identity():
@@ -68,16 +69,27 @@ def test_system_prompt_appends_extensions_and_skills():
         config=Config(cwd="/repo", system_prompt_extension="Extra config rules"),
         allowed_types=["codex"],
         skills=[
-            SimpleNamespace(name="skill-a", description="First skill"),
-            SimpleNamespace(name="skill-b", description="Second skill"),
+            SkillMetadata(
+                name="skill-a",
+                description="First skill",
+                path=Path("/repo/.agents/skills/skill-a/SKILL.md"),
+                skill_dir=Path("/repo/.agents/skills/skill-a"),
+            ),
+            SkillMetadata(
+                name="skill-b",
+                description="Second skill",
+                path=Path("/repo/.agents/skills/skill-b/SKILL.md"),
+                skill_dir=Path("/repo/.agents/skills/skill-b"),
+            ),
         ],
         session_output_dir="/repo/_outputs/run_123",
     )
 
     assert "Extra config rules" in prompt
-    assert "Additional tools (skills) available:" in prompt
-    assert "- skill-a: First skill" in prompt
-    assert "- skill-b: Second skill" in prompt
+    assert "## Skills" in prompt
+    assert "**skill-a**: First skill" in prompt
+    assert "**skill-b**: Second skill" in prompt
+    assert "To use a skill: read its SKILL.md file" in prompt
 
 
 def test_build_system_prompt_uses_config_coordinator_prompt():

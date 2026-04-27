@@ -18,7 +18,7 @@ from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
 LOCAL_CONFIG_DIR_NAME = ".team-harness"
 CONFIG_PATH = Path.home() / ".team-harness" / "config.toml"
 RUNS_DIR = Path.home() / ".team-harness" / "runs"
-SKILLS_USER_DIR = Path.home() / ".team-harness" / "skills"
+SKILLS_USER_DIR = Path.home() / ".agents" / "skills"
 PROMPT_FILE_MAX_BYTES = 100 * 1024
 
 
