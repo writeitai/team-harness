@@ -11,6 +11,7 @@ from team_harness import config as config_module
 from team_harness.agents.manager import AgentManager
 from team_harness.cli import main
 from team_harness.config import Config
+from team_harness.harness import _apply_agent_template_overrides
 from team_harness.harness import _extract_final_text
 from team_harness.harness import _normalize_agents
 from team_harness.harness import _show_no_config_hint
@@ -147,6 +148,42 @@ def test_normalize_agents_string():
 
 def test_normalize_agents_list():
     assert _normalize_agents(["codex", "gemini"]) == "codex,gemini"
+
+
+def test_apply_agent_template_overrides_updates_builtin_defaults():
+    config = Config()
+
+    _apply_agent_template_overrides(
+        config=config,
+        agent_models={"codex": "gpt-5.5"},
+        agent_reasoning_efforts={"codex": "high"},
+    )
+
+    assert config.agent_templates["codex"].default_model == "gpt-5.5"
+    assert config.agent_templates["codex"].reasoning_effort == "high"
+
+
+def test_apply_agent_template_overrides_updates_existing_custom_template():
+    config = Config(agent_templates={"custom": fake_agent_template()})
+
+    _apply_agent_template_overrides(
+        config=config,
+        agent_models={"custom": "custom-model"},
+        agent_reasoning_efforts=None,
+    )
+
+    assert config.agent_templates["custom"].default_model == "custom-model"
+
+
+def test_apply_agent_template_overrides_rejects_unknown_agent_type():
+    config = Config()
+
+    with pytest.raises(TeamHarnessError, match="unknown agent type 'custom'"):
+        _apply_agent_template_overrides(
+            config=config,
+            agent_models={"custom": "custom-model"},
+            agent_reasoning_efforts=None,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -774,6 +811,8 @@ def test_harness_constructor():
         max_depth=2,
         system_prompt="extra",
         system_prompt_file="/tmp/prompt.txt",
+        agent_models={"codex": "gpt-5.5"},
+        agent_reasoning_efforts={"codex": "high"},
         cwd="/tmp/project",
         console_mode="plain",
     )
@@ -787,6 +826,8 @@ def test_harness_constructor():
     assert h._max_depth == 2
     assert h._system_prompt == "extra"
     assert h._system_prompt_file == "/tmp/prompt.txt"
+    assert h._agent_models == {"codex": "gpt-5.5"}
+    assert h._agent_reasoning_efforts == {"codex": "high"}
     assert h._cwd == "/tmp/project"
     assert h._console_mode == "plain"
 
