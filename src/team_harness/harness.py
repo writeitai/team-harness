@@ -65,6 +65,7 @@ class TeamHarness:
         system_prompt_file: str | None = None,
         agent_models: dict[str, str] | None = None,
         agent_reasoning_efforts: dict[str, str] | None = None,
+        output_dir: str | None = None,
         cwd: str | None = None,
         console_mode: Literal["silent", "auto", "plain", "rich"] = "silent",
     ) -> None:
@@ -80,6 +81,7 @@ class TeamHarness:
         self._system_prompt_file = system_prompt_file
         self._agent_models = agent_models
         self._agent_reasoning_efforts = agent_reasoning_efforts
+        self._output_dir = output_dir
         self._cwd = cwd
         self._console_mode = console_mode
 
@@ -101,6 +103,7 @@ class TeamHarness:
             system_prompt=self._system_prompt,
             cli_system_prompt_file=self._system_prompt_file,
             allowed_agents=allowed_agents_str,
+            output_dir=self._output_dir,
             cwd=self._cwd,
         )
         _apply_agent_template_overrides(

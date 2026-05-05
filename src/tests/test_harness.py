@@ -327,12 +327,18 @@ async def test_harness_run_creates_session_output_dir_and_passes_it_to_prompt(
     local_config.parent.mkdir()
     local_config.write_text('[coordinator]\noutput_dir = "artifacts"\n')
 
-    harness = TeamHarness(api_base="http://localhost:11434/v1", cwd=str(project_dir))
+    sdk_output_root = project_dir / "sdk-artifacts"
+    harness = TeamHarness(
+        api_base="http://localhost:11434/v1",
+        output_dir=str(sdk_output_root),
+        cwd=str(project_dir),
+    )
     result = await harness.run("hello")
 
     session_output_dir = config_module.Path(captured["session_output_dir"])
     assert result.text == "final answer"
-    assert session_output_dir.parent == output_root
+    assert session_output_dir.parent == sdk_output_root
+    assert session_output_dir.parent != output_root
     assert session_output_dir.is_dir()
     manifest = session_output_dir / "worker_sessions.json"
     assert manifest.exists()
@@ -813,6 +819,7 @@ def test_harness_constructor():
         system_prompt_file="/tmp/prompt.txt",
         agent_models={"codex": "gpt-5.5"},
         agent_reasoning_efforts={"codex": "high"},
+        output_dir="/tmp/outputs",
         cwd="/tmp/project",
         console_mode="plain",
     )
@@ -828,6 +835,7 @@ def test_harness_constructor():
     assert h._system_prompt_file == "/tmp/prompt.txt"
     assert h._agent_models == {"codex": "gpt-5.5"}
     assert h._agent_reasoning_efforts == {"codex": "high"}
+    assert h._output_dir == "/tmp/outputs"
     assert h._cwd == "/tmp/project"
     assert h._console_mode == "plain"
 

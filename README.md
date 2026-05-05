@@ -148,6 +148,7 @@ harness = TeamHarness(
     system_prompt_file="prompt.txt",
     agent_models={"codex": "gpt-5.5"},
     agent_reasoning_efforts={"codex": "high"},
+    output_dir="./_outputs",
     cwd="./project",
     console_mode="silent",      # "silent" | "auto" | "plain" | "rich"
 )
@@ -157,6 +158,9 @@ harness = TeamHarness(
 template defaults for the named agent types. They do not change the
 coordinator model used by `model=...`, and a per-spawn `model` argument still
 wins for that one worker.
+
+`output_dir` overrides `[coordinator].output_dir` for SDK runs. Each run still
+creates a child directory named by the team-harness run id.
 
 The `run()` method returns a `TeamHarnessResult` with:
 

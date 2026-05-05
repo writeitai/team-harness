@@ -151,6 +151,17 @@ model_flag = false
     assert config.local_config_path is None
 
 
+def test_load_config_cli_output_dir_overrides_file(tmp_path, monkeypatch):
+    global_path = tmp_path / "global" / "config.toml"
+    global_path.parent.mkdir()
+    global_path.write_text('[coordinator]\noutput_dir = "from-file"\n')
+    monkeypatch.setattr(config_module, "CONFIG_PATH", global_path)
+
+    config = load_config(output_dir="/tmp/from-sdk", cwd=str(tmp_path))
+
+    assert config.output_dir == "/tmp/from-sdk"
+
+
 def test_coordinator_prompt_file_supplies_coordinator_prompt(tmp_path, monkeypatch):
     global_path = _write_global_config(
         tmp_path, monkeypatch, ['coordinator_prompt_file = "coordinator_prompt.md"']
