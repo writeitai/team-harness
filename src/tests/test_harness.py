@@ -362,6 +362,27 @@ def test_agent_summary_has_no_proc_field():
     assert summary.cwd == "/tmp"
 
 
+def test_team_harness_error_renders_worker_failure_detail():
+    error = TeamHarnessError(
+        "Codex request failed.",
+        detail={
+            "outcome": "failed_before_session",
+            "exit_code": 7,
+            "elapsed_seconds": 3.4,
+            "stderr_tail": "TEST: synthetic auth failure",
+            "stdout_tail": "",
+            "worker_sessions_path": "/tmp/run/worker_sessions.json",
+        },
+    )
+
+    rendered = str(error)
+    assert "Codex request failed." in rendered
+    assert "outcome=failed_before_session" in rendered
+    assert "exit_code=7" in rendered
+    assert "TEST: synthetic auth failure" in rendered
+    assert "/tmp/run/worker_sessions.json" in rendered
+
+
 # ---------------------------------------------------------------------------
 # Error path: TeamHarnessError raised on loop failure
 # ---------------------------------------------------------------------------

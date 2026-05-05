@@ -78,6 +78,15 @@ class WorkerSessionRecord(BaseModel):
     finished_at: datetime | None = None
     stdout_path: str
     stderr_path: str
+    outcome: str
+    elapsed_seconds: float | None = None
+    summary: str | None = None
+    stdout_tail: str = ""
+    stderr_tail: str = ""
+    invocation_path: str | None = None
+    exit_code_path: str | None = None
+    stdout_tail_path: str | None = None
+    stderr_tail_path: str | None = None
     session: WorkerSessionInfo
     resume: WorkerResumeInfo
 
@@ -85,7 +94,7 @@ class WorkerSessionRecord(BaseModel):
 class WorkerSessionsManifest(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=False)
 
-    schema_version: int = 1
+    schema_version: int = 2
     run_id: str
     generated_at: datetime
     session_output_dir: str

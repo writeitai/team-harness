@@ -35,6 +35,7 @@ from team_harness.tracking.context import ContextTracker
 from team_harness.tracking.context import KNOWN_CODEX_MODELS
 from team_harness.tracking.context import resolve_model_limit
 from team_harness.tracking.run_log import RunLogWriter
+from team_harness.tracking.worker_sessions import build_worker_failure_detail
 from team_harness.tracking.worker_sessions import write_worker_sessions_manifest
 from team_harness.ui.console import ConsoleBase
 from team_harness.ui.console import make_console
@@ -123,6 +124,8 @@ class TeamHarness:
         run_log: RunLogWriter | None = None
         ui: ConsoleBase | None = None
         messages: list[dict[str, Any]] = []
+        terminal_error: str | None = None
+        terminal_cause: Exception | None = None
         try:
             run_log = RunLogWriter(
                 run_id=run_id,
@@ -173,7 +176,8 @@ class TeamHarness:
                 ctx=ctx,
             )
         except Exception as exc:
-            raise TeamHarnessError(str(exc)) from exc
+            terminal_error = str(exc)
+            terminal_cause = exc
         finally:
             if run_log is not None:
                 await _finalize_run(
@@ -182,12 +186,25 @@ class TeamHarness:
                     session_output_dir=session_output_dir,
                     shutdown_timeout_s=config.shutdown_timeout_s,
                     ui=ui,
+                    error=terminal_error,
                 )
             if ui is not None:
                 ui.stop()
             await client.aclose()
+        if terminal_error:
+            detail = _build_error_detail(
+                summary=terminal_error,
+                run_log=run_log,
+                session_output_dir=session_output_dir,
+            )
+            raise TeamHarnessError(terminal_error, detail=detail) from terminal_cause
         if run_log.error:
-            raise TeamHarnessError(run_log.error)
+            detail = _build_error_detail(
+                summary=run_log.error,
+                run_log=run_log,
+                session_output_dir=session_output_dir,
+            )
+            raise TeamHarnessError(run_log.error, detail=detail)
         text = _extract_final_text(messages)
         agent_summaries = _build_agent_summaries(manager)
         return TeamHarnessResult(text=text, agents=agent_summaries, run_id=run_id)
@@ -215,6 +232,38 @@ class AgentSummary:
 
 class TeamHarnessError(Exception):
     """Raised when a harness run terminates due to an unrecoverable error."""
+
+    def __init__(self, message: str, *, detail: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.detail = detail
+
+    def __str__(self) -> str:
+        if not self.detail:
+            return self.message
+        parts = [self.message]
+        exit_code = self.detail.get("exit_code")
+        elapsed = self.detail.get("elapsed_seconds")
+        outcome = self.detail.get("outcome")
+        meta = []
+        if outcome:
+            meta.append(f"outcome={outcome}")
+        if exit_code is not None:
+            meta.append(f"exit_code={exit_code}")
+        if elapsed is not None:
+            meta.append(f"elapsed={elapsed:.1f}s")
+        if meta:
+            parts[0] = f"{parts[0]} ({', '.join(meta)})"
+        stderr_tail = str(self.detail.get("stderr_tail") or "").strip()
+        stdout_tail = str(self.detail.get("stdout_tail") or "").strip()
+        if stderr_tail:
+            parts.append(f"Last stderr:\n{stderr_tail}")
+        if stdout_tail:
+            parts.append(f"Last stdout:\n{stdout_tail}")
+        worker_sessions_path = self.detail.get("worker_sessions_path")
+        if worker_sessions_path:
+            parts.append(f"Worker sessions: {worker_sessions_path}")
+        return "\n\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +313,18 @@ def _extract_final_text(messages: list[dict[str, Any]]) -> str:
             if isinstance(content, str):
                 return content
     return ""
+
+
+def _build_error_detail(
+    *, summary: str, run_log: RunLogWriter | None, session_output_dir: str | Path
+) -> dict[str, Any] | None:
+    if run_log is None:
+        return None
+    return build_worker_failure_detail(
+        summary=summary,
+        agents=run_log.snapshot_agents(),
+        session_output_dir=session_output_dir,
+    )
 
 
 def _build_agent_summaries(manager: AgentManager) -> list[AgentSummary]:
