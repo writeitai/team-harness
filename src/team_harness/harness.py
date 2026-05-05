@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime
 from datetime import timezone
 from pathlib import Path
@@ -11,6 +12,7 @@ import uuid
 
 from team_harness.agents.manager import AgentManager
 from team_harness.agents.registry import get_allowed_types
+from team_harness.agents.registry import resolve_template
 from team_harness.agents.registry import validate_templates
 from team_harness.config import Config
 from team_harness.config import load_config
@@ -61,6 +63,8 @@ class TeamHarness:
         max_depth: int | None = None,
         system_prompt: str | None = None,
         system_prompt_file: str | None = None,
+        agent_models: dict[str, str] | None = None,
+        agent_reasoning_efforts: dict[str, str] | None = None,
         cwd: str | None = None,
         console_mode: Literal["silent", "auto", "plain", "rich"] = "silent",
     ) -> None:
@@ -74,6 +78,8 @@ class TeamHarness:
         self._max_depth = max_depth
         self._system_prompt = system_prompt
         self._system_prompt_file = system_prompt_file
+        self._agent_models = agent_models
+        self._agent_reasoning_efforts = agent_reasoning_efforts
         self._cwd = cwd
         self._console_mode = console_mode
 
@@ -96,6 +102,11 @@ class TeamHarness:
             cli_system_prompt_file=self._system_prompt_file,
             allowed_agents=allowed_agents_str,
             cwd=self._cwd,
+        )
+        _apply_agent_template_overrides(
+            config=config,
+            agent_models=self._agent_models,
+            agent_reasoning_efforts=self._agent_reasoning_efforts,
         )
         run_id = _make_run_id()
         run_dir = RUNS_DIR / run_id
@@ -215,6 +226,31 @@ def _normalize_agents(agents: str | list[str] | None) -> str | None:
     if isinstance(agents, list):
         return ",".join(agents)
     return agents
+
+
+def _apply_agent_template_overrides(
+    *,
+    config: Config,
+    agent_models: dict[str, str] | None,
+    agent_reasoning_efforts: dict[str, str] | None,
+) -> None:
+    """Apply SDK-level model overrides by updating resolved agent templates."""
+    model_overrides = agent_models or {}
+    reasoning_overrides = agent_reasoning_efforts or {}
+    for agent_type in sorted(model_overrides.keys() | reasoning_overrides.keys()):
+        try:
+            template = resolve_template(agent_type=agent_type, config=config)
+        except ValueError as exc:
+            raise TeamHarnessError(
+                f"Cannot override unknown agent type {agent_type!r}"
+            ) from exc
+        config.agent_templates[agent_type] = replace(
+            template,
+            default_model=model_overrides.get(agent_type, template.default_model),
+            reasoning_effort=reasoning_overrides.get(
+                agent_type, template.reasoning_effort
+            ),
+        )
 
 
 def _extract_final_text(messages: list[dict[str, Any]]) -> str:

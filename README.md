@@ -146,10 +146,17 @@ harness = TeamHarness(
     max_depth=3,
     system_prompt="Extra instructions",
     system_prompt_file="prompt.txt",
+    agent_models={"codex": "gpt-5.5"},
+    agent_reasoning_efforts={"codex": "high"},
     cwd="./project",
     console_mode="silent",      # "silent" | "auto" | "plain" | "rich"
 )
 ```
+
+`agent_models` and `agent_reasoning_efforts` override the resolved worker
+template defaults for the named agent types. They do not change the
+coordinator model used by `model=...`, and a per-spawn `model` argument still
+wins for that one worker.
 
 The `run()` method returns a `TeamHarnessResult` with:
 
