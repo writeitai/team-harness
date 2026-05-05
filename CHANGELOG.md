@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-05-05
+
+### Added
+
+- Worker failure diagnostics in `worker_sessions.json` schema v2, including
+  worker outcome, exit code, elapsed time, stdout/stderr tails, and per-worker
+  diagnostic artifact paths.
+- `TeamHarnessError.detail` with structured diagnostics for the latest failed
+  worker, plus rendered stderr/stdout tails in the exception string.
+
 ## [0.2.4] - 2026-05-05
 
 ### Added
