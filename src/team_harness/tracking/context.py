@@ -59,9 +59,7 @@ KNOWN_CODEX_MODELS = {
     "gpt-5.5",
 }
 
-KNOWN_CODEX_LIMITS: dict[str, int] = {
-    "gpt-5.5": 400_000,
-}
+KNOWN_CODEX_LIMITS: dict[str, int] = {"gpt-5.5": 400_000}
 
 
 async def resolve_model_limit(model_id: str, client: Any, config: Config) -> int:

@@ -916,6 +916,7 @@ def load_config(
     system_prompt: str | None = None,
     cli_system_prompt_file: str | None = None,
     allowed_agents: str | None = None,
+    output_dir: str | None = None,
     cwd: str | None = None,
 ) -> Config:
     start_dir = Path(cwd).resolve() if cwd else Path.cwd().resolve()
@@ -1038,7 +1039,9 @@ def load_config(
         worker_suffix=worker_suffix,
         worker_footer=worker_footer,
         system_prompt_extension="\n\n".join(part for part in prompt_parts if part),
-        output_dir=str(coordinator.get("output_dir", Config.output_dir)),
+        output_dir=output_dir
+        if output_dir is not None
+        else str(coordinator.get("output_dir", Config.output_dir)),
         context_limit=(
             int(cast(int | str, coordinator["context_limit"]))
             if coordinator.get("context_limit") is not None
