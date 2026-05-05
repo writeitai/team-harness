@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-05-05
+
+### Added
+
+- Python SDK `TeamHarness` constructor options `agent_models` and
+  `agent_reasoning_efforts` for overriding resolved worker template defaults by
+  agent type.
+
 ## [0.2.2] - 2026-04-27
 
 ### Added
