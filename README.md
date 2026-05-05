@@ -644,6 +644,7 @@ Known built-in Codex model names:
 - `openai/gpt-5.1-codex-mini`
 - `gpt-5.1-codex-max`
 - `openai/gpt-5.1-codex-max`
+- `gpt-5.5`
 
 Unknown Codex models still work, but startup prints a warning because context tracking may be inaccurate.
 

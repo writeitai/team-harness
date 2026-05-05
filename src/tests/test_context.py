@@ -105,6 +105,16 @@ async def test_resolve_model_limit_ambiguous_fuzzy_falls_through(monkeypatch):
     )
 
 
+@pytest.mark.asyncio
+async def test_resolve_model_limit_uses_codex_specific_gpt_5_5_limit():
+    assert (
+        await resolve_model_limit(
+            model_id="gpt-5.5", client=ClientFail(), config=Config(provider="codex")
+        )
+        == 400_000
+    )
+
+
 def test_context_tracker_uses_latest_turn_usage_not_cumulative():
     tracker = ContextTracker(model_id="m", model_limit=200)
 
@@ -235,6 +245,18 @@ def test_auto_compact_threshold_for_gpt_5_4():
     assert KNOWN_MAX_OUTPUT_TOKENS["gpt-5.4"] == 128_000
     assert KNOWN_MAX_OUTPUT_TOKENS["openai/gpt-5.4"] == 128_000
     assert get_auto_compact_threshold("gpt-5.4", 1_050_000) == 1_017_000
+
+
+def test_auto_compact_threshold_for_gpt_5_5():
+    assert KNOWN_LIMITS["gpt-5.5"] == 1_000_000
+    assert KNOWN_LIMITS["openai/gpt-5.5"] == 1_000_000
+    assert KNOWN_LIMITS["gpt-5.5-pro"] == 1_000_000
+    assert KNOWN_LIMITS["openai/gpt-5.5-pro"] == 1_000_000
+    assert KNOWN_MAX_OUTPUT_TOKENS["gpt-5.5"] == 128_000
+    assert KNOWN_MAX_OUTPUT_TOKENS["openai/gpt-5.5"] == 128_000
+    assert KNOWN_MAX_OUTPUT_TOKENS["gpt-5.5-pro"] == 128_000
+    assert KNOWN_MAX_OUTPUT_TOKENS["openai/gpt-5.5-pro"] == 128_000
+    assert get_auto_compact_threshold("gpt-5.5", 1_000_000) == 967_000
 
 
 def test_auto_compact_threshold_for_unknown_model_limit_uses_fallback_reserve():

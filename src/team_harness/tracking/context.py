@@ -14,6 +14,10 @@ KNOWN_LIMITS: dict[str, int] = {
     "openai/gpt-5.1-codex-max": 400_000,
     "gpt-5.4": 1_050_000,
     "openai/gpt-5.4": 1_050_000,
+    "gpt-5.5": 1_000_000,
+    "openai/gpt-5.5": 1_000_000,
+    "gpt-5.5-pro": 1_000_000,
+    "openai/gpt-5.5-pro": 1_000_000,
     "openai/gpt-4.1": 1_047_576,
     "openai/gpt-4.1-mini": 1_047_576,
     "openai/gpt-4o": 128_000,
@@ -32,6 +36,10 @@ KNOWN_MAX_OUTPUT_TOKENS: dict[str, int] = {
     "openai/gpt-5.1-codex-max": 128_000,
     "gpt-5.4": 128_000,
     "openai/gpt-5.4": 128_000,
+    "gpt-5.5": 128_000,
+    "openai/gpt-5.5": 128_000,
+    "gpt-5.5-pro": 128_000,
+    "openai/gpt-5.5-pro": 128_000,
     "openai/gpt-4.1": 32_768,
     "openai/gpt-4.1-mini": 32_768,
     "openai/gpt-4o": 16_384,
@@ -48,6 +56,11 @@ KNOWN_CODEX_MODELS = {
     "openai/gpt-5.1-codex-mini",
     "gpt-5.1-codex-max",
     "openai/gpt-5.1-codex-max",
+    "gpt-5.5",
+}
+
+KNOWN_CODEX_LIMITS: dict[str, int] = {
+    "gpt-5.5": 400_000,
 }
 
 
@@ -87,6 +100,8 @@ async def resolve_model_limit(model_id: str, client: Any, config: Config) -> int
     except Exception:
         pass
 
+    if config.provider == "codex" and model_id in KNOWN_CODEX_LIMITS:
+        return KNOWN_CODEX_LIMITS[model_id]
     if model_id in KNOWN_LIMITS:
         return KNOWN_LIMITS[model_id]
     if config.context_limit:
