@@ -16,6 +16,64 @@ from team_harness.tracking.run_log import RunLogWriter
 from tests.helpers import fake_agent_template
 
 
+def test_spawn_agent_schema_exposes_resume_fields():
+    schema = agent_tools.spawn_agent_schema(["codex", "claude"])
+    properties = schema["function"]["parameters"]["properties"]
+
+    assert properties["mode"] == {
+        "type": "string",
+        "enum": ["fresh", "resume"],
+        "description": (
+            "Use 'resume' to continue an existing provider session instead of "
+            "starting a fresh one."
+        ),
+    }
+    assert properties["resume_from_session_id"]["type"] == "string"
+    assert "worker_sessions.json" in properties["resume_from_session_id"]["description"]
+
+
+@pytest.mark.asyncio
+async def test_spawn_agent_can_resume_provider_session(tmp_path, config, manager, ui):
+    capture_file = tmp_path / "args.txt"
+    fake_codex = tmp_path / "fake-codex"
+    fake_codex.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$@" > "$CAPTURE_FILE"\n', encoding="utf-8"
+    )
+    fake_codex.chmod(0o755)
+    config.run_dir = tmp_path
+    config.worker_suffix = ""
+    config.agent_templates = {
+        "codex": AgentTemplate(
+            command=(str(fake_codex), "exec"),
+            shared_flags=("--json",),
+            resume_prefix=("resume",),
+            resume_flags=("{session_id}",),
+            model_flag=None,
+        )
+    }
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+
+    agent_id = await agent_tools.spawn_agent(
+        type="codex",
+        prompt="continue",
+        cwd=str(tmp_path),
+        mode="resume",
+        resume_from_session_id="sid-123",
+        env={"CAPTURE_FILE": str(capture_file)},
+    )
+    await asyncio.wait_for(manager.wait_one(agent_id), 2)
+
+    args = capture_file.read_text(encoding="utf-8").splitlines()
+    assert args[:4] == ["exec", "resume", "--json", "sid-123"]
+
+
 @pytest.mark.asyncio
 async def test_spawn_agent_appends_suffix_before_output_instruction(
     tmp_path, config, manager, ui

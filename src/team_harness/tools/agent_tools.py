@@ -360,6 +360,21 @@ def spawn_agent_schema(allowed_types: list[str]) -> dict:
                     "prompt": {"type": "string"},
                     "cwd": {"type": "string"},
                     "model": {"type": "string"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fresh", "resume"],
+                        "description": (
+                            "Use 'resume' to continue an existing provider "
+                            "session instead of starting a fresh one."
+                        ),
+                    },
+                    "resume_from_session_id": {
+                        "type": "string",
+                        "description": (
+                            "Provider session ID to resume when mode == 'resume'. "
+                            "Use IDs captured in worker_sessions.json."
+                        ),
+                    },
                     "flags": {"type": "array", "items": {"type": "string"}},
                     "env": {"type": "object"},
                     "agents": {
@@ -465,36 +480,45 @@ async def spawn_agent(**kwargs: object) -> str:
     )
     run_log.record_agent_spawn(record)
     ui.agent_event(event="spawned", state=state)
-    asyncio.ensure_future(_watch_agent(agent_id))
+    done_event = asyncio.Event()
+    asyncio.ensure_future(_watch_agent(agent_id, done_event))
     asyncio.ensure_future(
         _capture_session_id_task(
             agent_id=agent_id,
             template=spawn_result.template,
             pre_generated_uuid=spawn_result.generated_uuid,
+            stop_event=done_event,
         )
     )
     return agent_id
 
 
-async def _watch_agent(agent_id: str) -> None:
+async def _watch_agent(agent_id: str, done_event: asyncio.Event) -> None:
     manager, run_log, _, ui = _require_setup()
-    exit_code = await manager.wait_one(agent_id)
-    state = manager.get(agent_id)
-    if state.status != "killed":
-        state.status = "done" if exit_code == 0 else "failed"
-        if state.status == "failed":
-            _classify_if_failed(state)
-        run_log.update_agent(
-            agent_id,
-            exit_code=exit_code,
-            finished_at=state.finished_at or datetime.now(timezone.utc),
-            status=state.status,
-        )
-        ui.agent_event(event="done" if exit_code == 0 else "failed", state=state)
+    try:
+        exit_code = await manager.wait_one(agent_id)
+        state = manager.get(agent_id)
+        if state.status != "killed":
+            state.status = "done" if exit_code == 0 else "failed"
+            if state.status == "failed":
+                _classify_if_failed(state)
+            run_log.update_agent(
+                agent_id,
+                exit_code=exit_code,
+                finished_at=state.finished_at or datetime.now(timezone.utc),
+                status=state.status,
+            )
+            ui.agent_event(event="done" if exit_code == 0 else "failed", state=state)
+    finally:
+        done_event.set()
 
 
 async def _capture_session_id_task(
-    *, agent_id: str, template: AgentTemplate, pre_generated_uuid: str | None
+    *,
+    agent_id: str,
+    template: AgentTemplate,
+    pre_generated_uuid: str | None,
+    stop_event: asyncio.Event,
 ) -> None:
     manager, run_log, _, _ = _require_setup()
     state = manager.get(agent_id)
@@ -502,7 +526,8 @@ async def _capture_session_id_task(
         stdout_path=state.stdout_log,
         template=template,
         pre_generated_uuid=pre_generated_uuid,
-        stop_event=asyncio.Event(),
+        stop_event=stop_event,
+        max_wait_s=24 * 60 * 60,
     )
     if session_id is not None:
         state.session_id = session_id
@@ -842,27 +867,35 @@ def build_agent_tool_bindings(
         run_log.record_agent_spawn(record)
         ui.agent_event(event="spawned", state=state)
 
+        done_event = asyncio.Event()
+
         async def _watch() -> None:
-            exit_code = await manager.wait_one(agent_id)
-            s = manager.get(agent_id)
-            if s.status != "killed":
-                s.status = "done" if exit_code == 0 else "failed"
-                if s.status == "failed":
-                    _classify_if_failed(s)
-                run_log.update_agent(
-                    agent_id,
-                    exit_code=exit_code,
-                    finished_at=s.finished_at or datetime.now(timezone.utc),
-                    status=s.status,
-                )
-                ui.agent_event(event="done" if exit_code == 0 else "failed", state=s)
+            try:
+                exit_code = await manager.wait_one(agent_id)
+                s = manager.get(agent_id)
+                if s.status != "killed":
+                    s.status = "done" if exit_code == 0 else "failed"
+                    if s.status == "failed":
+                        _classify_if_failed(s)
+                    run_log.update_agent(
+                        agent_id,
+                        exit_code=exit_code,
+                        finished_at=s.finished_at or datetime.now(timezone.utc),
+                        status=s.status,
+                    )
+                    ui.agent_event(
+                        event="done" if exit_code == 0 else "failed", state=s
+                    )
+            finally:
+                done_event.set()
 
         async def _capture_session() -> None:
             session_id = await capture_session_id_from_path(
                 stdout_path=stdout_log,
                 template=spawn_result.template,
                 pre_generated_uuid=spawn_result.generated_uuid,
-                stop_event=asyncio.Event(),
+                stop_event=done_event,
+                max_wait_s=24 * 60 * 60,
             )
             if session_id is not None:
                 s = manager.get(agent_id)
