@@ -360,6 +360,21 @@ def spawn_agent_schema(allowed_types: list[str]) -> dict:
                     "prompt": {"type": "string"},
                     "cwd": {"type": "string"},
                     "model": {"type": "string"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fresh", "resume"],
+                        "description": (
+                            "Use 'resume' to continue an existing provider "
+                            "session instead of starting a fresh one."
+                        ),
+                    },
+                    "resume_from_session_id": {
+                        "type": "string",
+                        "description": (
+                            "Provider session ID to resume when mode == 'resume'. "
+                            "Use IDs captured in worker_sessions.json."
+                        ),
+                    },
                     "flags": {"type": "array", "items": {"type": "string"}},
                     "env": {"type": "object"},
                     "agents": {
