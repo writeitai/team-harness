@@ -37,8 +37,7 @@ async def test_spawn_agent_can_resume_provider_session(tmp_path, config, manager
     capture_file = tmp_path / "args.txt"
     fake_codex = tmp_path / "fake-codex"
     fake_codex.write_text(
-        '#!/bin/sh\nprintf "%s\\n" "$@" > "$CAPTURE_FILE"\n',
-        encoding="utf-8",
+        '#!/bin/sh\nprintf "%s\\n" "$@" > "$CAPTURE_FILE"\n', encoding="utf-8"
     )
     fake_codex.chmod(0o755)
     config.run_dir = tmp_path

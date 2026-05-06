@@ -14,7 +14,8 @@ from team_harness.agents.template import SessionCapture
 
 def test_extract_session_id_matches_codex_thread_started():
     payload = (
-        json.dumps({"type": "item.completed", "session_id": "wrong"}) + "\n"
+        json.dumps({"type": "item.completed", "session_id": "wrong"})
+        + "\n"
         + json.dumps({"type": "thread.started", "thread_id": "codex-thread-1"})
         + "\n"
     ).encode()
@@ -27,13 +28,10 @@ def test_extract_session_id_matches_codex_thread_started():
 
 def test_extract_session_id_uses_claude_result_fallback():
     payload = (
-        json.dumps({"type": "assistant", "message": {"content": []}}) + "\n"
+        json.dumps({"type": "assistant", "message": {"content": []}})
+        + "\n"
         + json.dumps(
-            {
-                "type": "result",
-                "subtype": "success",
-                "session_id": "claude-session-1",
-            }
+            {"type": "result", "subtype": "success", "session_id": "claude-session-1"}
         )
         + "\n"
     ).encode()
