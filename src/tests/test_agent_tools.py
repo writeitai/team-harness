@@ -32,6 +32,40 @@ def test_spawn_agent_schema_exposes_resume_fields():
     assert "worker_sessions.json" in properties["resume_from_session_id"]["description"]
 
 
+def test_spawn_agent_schema_describes_template_default_flags(config):
+    schema = agent_tools.spawn_agent_schema(["codex", "claude"], config=config)
+    description = schema["function"]["description"]
+    flags_description = schema["function"]["parameters"]["properties"]["flags"][
+        "description"
+    ]
+    agent_lines = {
+        line.split(":", 1)[0].removeprefix("- "): line
+        for line in description.splitlines()
+        if line.startswith("- ")
+    }
+
+    assert "Default CLI behavior by agent type" in description
+    assert set(agent_lines) == {"codex", "claude"}
+
+    codex_line = agent_lines["codex"]
+    assert "--dangerously-bypass-approvals-and-sandbox" in codex_line
+    assert "--skip-git-repo-check" in codex_line
+    assert "--json" in codex_line
+    assert "gpt-5.5" in codex_line
+    assert "--dangerously-skip-permissions" not in codex_line
+    assert "--output-format" not in codex_line
+    assert "--verbose" not in codex_line
+
+    claude_line = agent_lines["claude"]
+    assert "--dangerously-skip-permissions" in claude_line
+    assert "--output-format" in claude_line
+    assert "stream-json" in claude_line
+    assert "--verbose" in claude_line
+    assert "--dangerously-bypass-approvals-and-sandbox" not in claude_line
+    assert "--skip-git-repo-check" not in claude_line
+    assert "Additional non-default CLI flags" in flags_description
+
+
 @pytest.mark.asyncio
 async def test_spawn_agent_can_resume_provider_session(tmp_path, config, manager, ui):
     capture_file = tmp_path / "args.txt"

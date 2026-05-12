@@ -14,6 +14,7 @@ from team_harness.agents import spawner
 from team_harness.agents.api_error_classifier import classify_agent_failure
 from team_harness.agents.manager import AgentState
 from team_harness.agents.registry import check_harness_depth
+from team_harness.agents.registry import resolve_template
 from team_harness.agents.session_capture import capture_session_id_from_path
 from team_harness.agents.template import AgentTemplate
 from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
@@ -423,12 +424,71 @@ def _require_setup() -> tuple["AgentManager", "RunLogWriter", "Config", "Console
     return _manager, _run_log, _config, _ui
 
 
-def spawn_agent_schema(allowed_types: list[str]) -> dict:
+def _format_spawn_agent_defaults(
+    *, allowed_types: list[str], config: "Config | None"
+) -> str:
+    """Describe active template defaults for the coordinator-facing schema.
+
+    The spawn_agent tool accepts raw extra flags, so the schema description is
+    the coordinator's only view into flags already provided by the selected
+    agent template. When a run config is available, this helper renders the
+    resolved templates rather than hard-coding built-in defaults.
+    """
+    if config is None:
+        return (
+            "Built-in agent templates already include their required "
+            "approval/output/session flags. Use flags only for additional "
+            "non-default CLI flags."
+        )
+
+    lines = ["Default CLI behavior by agent type. Do not repeat these through flags:"]
+    for agent_type in allowed_types:
+        template = resolve_template(agent_type=agent_type, config=config)
+        details: list[str] = []
+        if template.shared_flags:
+            details.append("shared_flags=" + json.dumps(list(template.shared_flags)))
+        if template.model_flag is not None:
+            if template.default_model is not None:
+                details.append(
+                    f"model flag {template.model_flag!r} defaults to "
+                    f"{template.default_model!r} unless spawn_agent(model=...) "
+                    "overrides it"
+                )
+            else:
+                details.append(
+                    f"model flag {template.model_flag!r} is applied only when "
+                    "spawn_agent(model=...) is provided"
+                )
+        if template.prompt_flag is not None:
+            details.append(f"prompt flag {template.prompt_flag!r} is applied")
+        if template.resume_prefix or template.resume_flags:
+            resume_tokens = list(template.resume_prefix + template.resume_flags)
+            details.append("resume mode adds " + json.dumps(resume_tokens))
+        if template.deduplicate_flags:
+            details.append(
+                "duplicate standalone flags ignored="
+                + json.dumps(list(template.deduplicate_flags))
+            )
+        if not details:
+            details.append("no default flags")
+        lines.append(f"- {agent_type}: " + "; ".join(details))
+    lines.append("Use flags only for additional CLI flags not listed above.")
+    return "\n".join(lines)
+
+
+def spawn_agent_schema(
+    allowed_types: list[str], config: "Config | None" = None
+) -> dict:
+    default_flags_description = _format_spawn_agent_defaults(
+        allowed_types=allowed_types, config=config
+    )
     return {
         "type": "function",
         "function": {
             "name": "spawn_agent",
-            "description": "Spawn a worker agent subprocess.",
+            "description": (
+                "Spawn a worker agent subprocess.\n\n" + default_flags_description
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -451,7 +511,15 @@ def spawn_agent_schema(allowed_types: list[str]) -> dict:
                             "Use IDs captured in worker_sessions.json."
                         ),
                     },
-                    "flags": {"type": "array", "items": {"type": "string"}},
+                    "flags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Additional non-default CLI flags for this worker. "
+                            "Do not repeat flags already applied by the selected "
+                            "agent template."
+                        ),
+                    },
                     "env": {"type": "object"},
                     "agents": {
                         "type": "array",
@@ -1172,7 +1240,7 @@ def build_agent_tool_bindings(
         )
 
     return [
-        (spawn_agent_schema(allowed_types), _spawn_agent),
+        (spawn_agent_schema(allowed_types, config=config), _spawn_agent),
         (AGENT_STATUS_SCHEMA, _agent_status),
         (READ_AGENT_OUTPUT_SCHEMA, _read_agent_output),
         (READ_NEW_AGENT_OUTPUT_SCHEMA, _read_new_agent_output),
