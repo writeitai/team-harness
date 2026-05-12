@@ -222,6 +222,11 @@ resume_prefix = ["resume"]
 resume_flags = ["{session_id}"]
 model_flag = "--model"
 default_model = "gpt-5.4"
+deduplicate_flags = [
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--skip-git-repo-check",
+    "--json",
+]
 reasoning_effort_flag = ["-c", "model_reasoning_effort={effort}"]
 # reasoning_effort = "high"   # uncomment to pin a level
 
@@ -256,6 +261,11 @@ model_env_vars = [
     "ANTHROPIC_MODEL",
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
+]
+deduplicate_flags = [
+    "-p",
+    "--dangerously-skip-permissions",
+    "--verbose",
 ]
 reasoning_effort_flag = ["--effort", "{effort}"]
 # default_model = "claude-sonnet-4-6"   # uncomment to pin a default
@@ -402,6 +412,11 @@ The new type appears automatically in the coordinator's `spawn_agent` tool.
 The task prompt is appended at the tail of the argv list by default; set
 `prompt_position = "after_command"` if your CLI wants the prompt earlier,
 or `prompt_flag = "-p"` if the prompt is introduced by a flag (like `gemini -p`).
+Use `deduplicate_flags` only for standalone flags that are idempotent if a
+coordinator repeats them through `spawn_agent(flags=[...])`; the built-in Codex
+template uses this for its standalone shared flags such as
+`--dangerously-bypass-approvals-and-sandbox`, and the built-in Claude template
+uses it for `-p`, `--dangerously-skip-permissions`, and `--verbose`.
 
 Placeholders that can appear inside `shared_flags`, `resume_prefix`, or
 `resume_flags`:

@@ -57,6 +57,11 @@ class AgentTemplate:
     # a single UserWarning per name per run. Intended for OpenRouter-style
     # provider wiring — see the README recipe for the exact incantation.
     provider_env: tuple[tuple[str, str], ...] = ()
+    # Standalone argv flags that are safe to treat as idempotent when callers
+    # also pass them through spawn_agent(flags=[...]). This is intentionally
+    # explicit rather than inferred from argv shape because many CLIs support
+    # meaningful repeated flags.
+    deduplicate_flags: tuple[str, ...] = ()
     session_capture: SessionCapture | None = None
 
 
@@ -72,6 +77,11 @@ DEFAULT_AGENT_TEMPLATES: dict[str, AgentTemplate] = {
         resume_flags=("{session_id}",),
         model_flag="--model",
         default_model="gpt-5.4",
+        deduplicate_flags=(
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--skip-git-repo-check",
+            "--json",
+        ),
         # Codex expresses reasoning effort via its generic -c override.
         reasoning_effort_flag=("-c", "model_reasoning_effort={effort}"),
         session_capture=SessionCapture(
@@ -117,6 +127,7 @@ DEFAULT_AGENT_TEMPLATES: dict[str, AgentTemplate] = {
             "ANTHROPIC_DEFAULT_SONNET_MODEL",
             "ANTHROPIC_DEFAULT_OPUS_MODEL",
         ),
+        deduplicate_flags=("-p", "--dangerously-skip-permissions", "--verbose"),
         # Claude Code exposes reasoning effort via --effort.
         reasoning_effort_flag=("--effort", "{effort}"),
         session_capture=SessionCapture(

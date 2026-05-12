@@ -46,8 +46,18 @@ def test_default_model_is_gpt_5_4():
 def test_default_agent_templates_structured_shape():
     assert DEFAULT_AGENT_TEMPLATES["codex"].command == ("codex", "exec")
     assert "--json" in DEFAULT_AGENT_TEMPLATES["codex"].shared_flags
+    assert DEFAULT_AGENT_TEMPLATES["codex"].deduplicate_flags == (
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--skip-git-repo-check",
+        "--json",
+    )
     assert DEFAULT_AGENT_TEMPLATES["claude"].command == ("claude",)
     assert "--verbose" in DEFAULT_AGENT_TEMPLATES["claude"].shared_flags
+    assert DEFAULT_AGENT_TEMPLATES["claude"].deduplicate_flags == (
+        "-p",
+        "--dangerously-skip-permissions",
+        "--verbose",
+    )
 
 
 def test_find_local_config_in_cwd(tmp_path):
@@ -701,6 +711,10 @@ def test_default_config_text_contains_verified_flag_tokens():
     assert 'field_path = ["thread_id"]' in text
     # Codex default model — the whole point of this follow-up.
     assert 'default_model = "gpt-5.4"' in text
+    assert (
+        'deduplicate_flags = [\n    "--dangerously-bypass-approvals-and-sandbox"'
+        in text
+    )
     # Gemini
     assert 'prompt_flag = "-p"' in text
     assert "[agents.gemini.session_capture]" in text
@@ -708,6 +722,7 @@ def test_default_config_text_contains_verified_flag_tokens():
     # Claude (the --verbose requirement is critical)
     assert '"--verbose"' in text
     assert '"--dangerously-skip-permissions"' in text
+    assert 'deduplicate_flags = [\n    "-p",' in text
     assert "[agents.claude.session_capture]" in text
     assert 'match = { type = "system", subtype = "init" }' in text
     # Claude model_env_vars — the 3 'main model' ones, NOT the haiku ones.

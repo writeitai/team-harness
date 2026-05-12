@@ -151,6 +151,97 @@ def test_build_command_codex_no_reasoning_effort_by_default():
     assert "-c" not in command
 
 
+def test_build_command_dedupes_duplicate_extra_boolean_flag():
+    command = build_command(
+        agent_type="codex",
+        prompt="do thing",
+        config=Config(),
+        extra_flags=[
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--skip-git-repo-check",
+            "--json",
+        ],
+    )
+
+    assert command.count("--dangerously-bypass-approvals-and-sandbox") == 1
+    assert command.count("--skip-git-repo-check") == 1
+    assert command.count("--json") == 1
+
+
+def test_build_command_dedupes_claude_standalone_flags():
+    command = build_command(
+        agent_type="claude",
+        prompt="review",
+        config=Config(),
+        extra_flags=["-p", "--dangerously-skip-permissions", "--verbose"],
+    )
+
+    assert command.count("-p") == 1
+    assert command.count("--dangerously-skip-permissions") == 1
+    assert command.count("--verbose") == 1
+
+
+def test_build_command_dedupes_only_template_declared_flags():
+    template = AgentTemplate(
+        command=("myagent",),
+        shared_flags=("--safe", "--approval-mode", "yolo"),
+        deduplicate_flags=("--safe",),
+        model_flag=None,
+    )
+
+    command = build_command_from_template(
+        template=template,
+        prompt="go",
+        extra_flags=["--safe", "--approval-mode", "yolo"],
+    )
+
+    assert command == [
+        "myagent",
+        "--safe",
+        "--approval-mode",
+        "yolo",
+        "--approval-mode",
+        "yolo",
+        "go",
+    ]
+
+
+def test_build_command_dedupes_only_against_shared_flags_not_prompt():
+    template = AgentTemplate(
+        command=("myagent",),
+        prompt_position="after_command",
+        deduplicate_flags=("--safe",),
+        model_flag=None,
+    )
+
+    command = build_command_from_template(
+        template=template, prompt="--safe", extra_flags=["--safe"]
+    )
+
+    assert command == ["myagent", "--safe", "--safe"]
+
+
+def test_build_command_preserves_repeatable_extra_flags_with_different_values():
+    template = AgentTemplate(
+        command=("myagent",), shared_flags=("-c", "sandbox=true"), model_flag=None
+    )
+
+    command = build_command_from_template(
+        template=template,
+        prompt="go",
+        extra_flags=["-c", "model_reasoning_effort=high"],
+    )
+
+    assert command == [
+        "myagent",
+        "-c",
+        "sandbox=true",
+        "-c",
+        "model_reasoning_effort=high",
+        "go",
+    ]
+
+
 def test_build_command_reasoning_effort_equals_form_single_token():
     """A template that uses `--effort={effort}` as a single token (rather
     than `--effort {effort}` as two tokens) still gets the substitution."""
