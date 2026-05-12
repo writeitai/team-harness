@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-05-12
+
+### Added
+
+- Coordinator-visible `spawn_agent` schema now describes built-in template
+  default CLI flags so coordinators know `flags` is only for additional
+  non-default arguments.
+- Coordinator failure diagnostics now include `salvaged_workers` metadata for
+  completed workers with usable stdout artifacts.
+
+### Changed
+
+- Default GPT model references were updated from `gpt-5.4` to `gpt-5.5`.
+
+### Fixed
+
+- `read_new_agent_output` now reads a bounded stdout window and shares cursor
+  state with `wait_for_any`, preventing large backlog replay into coordinator
+  context.
+- Duplicate standalone worker spawn flags are deduplicated against configured
+  template defaults for Codex and Claude agents.
+- Workers with `exit_code=0` but cleanup status `killed` are summarized as
+  completed successfully instead of worker crashes.
+
 ## [0.2.6] - 2026-05-06
 
 ### Added
