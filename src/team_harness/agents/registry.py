@@ -45,6 +45,15 @@ def _substitute_template_token(
     return result
 
 
+def _dedupe_extra_flags(
+    extra_flags: list[str], already_rendered_deduplicate_flags: set[str]
+) -> list[str]:
+    """Drop explicitly declared idempotent shared flags already rendered."""
+    return [
+        flag for flag in extra_flags if flag not in already_rendered_deduplicate_flags
+    ]
+
+
 def build_command_from_template(
     template: AgentTemplate,
     prompt: str,
@@ -85,7 +94,8 @@ def build_command_from_template(
     if template.prompt_position == "after_command":
         command.extend(prompt_args)
 
-    command.extend(_substitute(template.shared_flags))
+    shared_flags = _substitute(template.shared_flags)
+    command.extend(shared_flags)
     if effective_model is not None and template.model_flag is not None:
         command.extend([template.model_flag, effective_model])
     # Reasoning-effort tokens go between shared_flags/model and
@@ -94,7 +104,8 @@ def build_command_from_template(
     if mode == "resume":
         command.extend(_substitute(template.resume_flags))
     if extra_flags:
-        command.extend(extra_flags)
+        rendered_deduplicate_flags = set(template.deduplicate_flags) & set(shared_flags)
+        command.extend(_dedupe_extra_flags(extra_flags, rendered_deduplicate_flags))
     if template.prompt_position == "tail":
         command.extend(prompt_args)
     if allowed_agents is not None:

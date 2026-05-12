@@ -81,6 +81,8 @@ _STRUCTURED_AGENTS_BLOCK = """# Worker agent invocations. Each agent is describe
 # not override it via `spawn_agent(model="...")`.
 # `reasoning_effort_flag` tells the harness how to pass the level; set
 # `reasoning_effort` (commented) to actually enable it.
+# `deduplicate_flags` lists standalone shared flags that should be treated
+# as idempotent if spawn_agent(flags=[...]) repeats them.
 [agents.codex]
 command = ["codex", "exec"]
 shared_flags = [
@@ -92,6 +94,11 @@ resume_prefix = ["resume"]
 resume_flags = ["{session_id}"]
 model_flag = "--model"
 default_model = "gpt-5.4"
+deduplicate_flags = [
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--skip-git-repo-check",
+    "--json",
+]
 reasoning_effort_flag = ["-c", "model_reasoning_effort={effort}"]
 # reasoning_effort = "high"   # uncomment to pin a level (low|medium|high|xhigh)
 
@@ -163,6 +170,11 @@ model_env_vars = [
     "ANTHROPIC_MODEL",
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
+]
+deduplicate_flags = [
+    "-p",
+    "--dangerously-skip-permissions",
+    "--verbose",
 ]
 reasoning_effort_flag = ["--effort", "{effort}"]
 # default_model = "claude-sonnet-4-6"   # uncomment to pin a default
@@ -494,8 +506,8 @@ def _reject_legacy_agent_templates(
                 '"--dangerously-bypass-approvals-and-sandbox", "--json"]\n\n'
                 "See README.md → 'Adding custom agent types' for the full schema "
                 "(command / shared_flags / resume_prefix / resume_flags / "
-                "session_capture / model_flag), or run `th init --force` to "
-                "regenerate a structured sample config."
+                "session_capture / model_flag / deduplicate_flags), or run "
+                "`th init --force` to regenerate a structured sample config."
             )
 
 
@@ -515,6 +527,7 @@ def _structured_agent_keys_present(section: dict[str, object]) -> bool:
             "reasoning_effort",
             "reasoning_effort_flag",
             "provider_env",
+            "deduplicate_flags",
             "session_capture",
         )
     )
@@ -691,6 +704,14 @@ def _parse_agent_template(agent_name: str, section: dict[str, object]) -> AgentT
             section["provider_env"], agent_name=agent_name
         )
 
+    deduplicate_flags = (
+        _parse_string_tuple(section["deduplicate_flags"], key="deduplicate_flags")
+        if "deduplicate_flags" in section
+        else base.deduplicate_flags
+        if base
+        else ()
+    )
+
     session_capture = (
         _parse_session_capture(section["session_capture"])
         if "session_capture" in section
@@ -711,6 +732,7 @@ def _parse_agent_template(agent_name: str, section: dict[str, object]) -> AgentT
         reasoning_effort=reasoning_effort,
         reasoning_effort_flag=reasoning_effort_flag,
         provider_env=provider_env,
+        deduplicate_flags=deduplicate_flags,
         session_capture=session_capture,
     )
 
