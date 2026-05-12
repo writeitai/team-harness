@@ -36,6 +36,15 @@ _output_cursors: dict[str, int] = {}
 _output_locks: dict[str, asyncio.Lock] = {}
 _wait_stdout_cursors: dict[str, int] = {}
 _wait_stderr_cursors: dict[str, int] = {}
+# Keep incremental stdout reads bounded so one stale cursor cannot flood the
+# coordinator context with an entire long-running worker log.
+READ_NEW_AGENT_OUTPUT_MAX_BYTES = 64 * 1024
+
+_READ_NEW_TRUNCATION_TEMPLATE = (
+    "[read_new_agent_output truncated: omitted {omitted_bytes} of "
+    "{total_new_bytes} new stdout bytes; showing latest {returned_bytes} bytes. "
+    "Full stdout log: {stdout_path}]\n"
+)
 
 
 def _build_worker_output_footer(
@@ -63,6 +72,54 @@ def _tail_text(path: Path, n_chars: int) -> str:
         size = path.stat().st_size
         handle.seek(max(0, size - n_chars * 2))
         return handle.read().decode(errors="replace")[-n_chars:]
+
+
+def _read_new_stdout_chunk(
+    *,
+    stdout_log: Path,
+    output_cursor: int,
+    seen_stdout_cursor: int,
+    max_bytes: int = READ_NEW_AGENT_OUTPUT_MAX_BYTES,
+) -> tuple[int, bytes, int, int]:
+    """Read the unread stdout tail and return the cursor advanced to EOF.
+
+    The unread span starts at the later of the explicit read cursor and the
+    cursor maintained by wait_for_any snapshots. If that span is larger than
+    max_bytes, only the latest max_bytes are returned, while the next cursor is
+    still advanced to the current file size so the omitted backlog is not
+    replayed on a later read.
+    """
+    if not stdout_log.exists():
+        return output_cursor, b"", 0, 0
+    size = stdout_log.stat().st_size
+    cursor = max(output_cursor, seen_stdout_cursor)
+    if size <= cursor:
+        return cursor, b"", 0, 0
+    total_new_bytes = size - cursor
+    returned_bytes = min(max(0, max_bytes), total_new_bytes)
+    omitted_bytes = total_new_bytes - returned_bytes
+    with stdout_log.open("rb") as handle:
+        handle.seek(size - returned_bytes)
+        data = handle.read(returned_bytes)
+    return size, data, omitted_bytes, total_new_bytes
+
+
+def _format_new_stdout_chunk(
+    *, data: bytes, omitted_bytes: int, total_new_bytes: int, stdout_log: Path
+) -> str:
+    """Decode a stdout chunk and prepend truncation metadata when needed."""
+    text = data.decode("utf-8", errors="replace")
+    if omitted_bytes <= 0:
+        return text
+    return (
+        _READ_NEW_TRUNCATION_TEMPLATE.format(
+            omitted_bytes=omitted_bytes,
+            total_new_bytes=total_new_bytes,
+            returned_bytes=len(data),
+            stdout_path=stdout_log,
+        )
+        + text
+    )
 
 
 def _classify_if_failed(state: AgentState) -> dict | None:
@@ -105,19 +162,36 @@ def _seconds_since_last_output(stdout_log: Path, stderr_log: Path) -> float | No
 
 
 def _build_running_snapshot(
-    state: AgentState, *, advance_cursors: bool
+    state: AgentState,
+    *,
+    advance_cursors: bool,
+    stdout_cursors: dict[str, int] | None = None,
+    stderr_cursors: dict[str, int] | None = None,
 ) -> dict[str, object]:
+    """Build a wait_for_any status snapshot and optionally advance cursors.
+
+    Cursor stores are injectable so per-run tool bindings keep their own state,
+    while the module-level tool functions can share the global stores. Advancing
+    the stdout cursor here lets read_new_agent_output skip output already
+    accounted for by wait_for_any.
+    """
+    stdout_cursor_store = (
+        stdout_cursors if stdout_cursors is not None else _wait_stdout_cursors
+    )
+    stderr_cursor_store = (
+        stderr_cursors if stderr_cursors is not None else _wait_stderr_cursors
+    )
     now = datetime.now(timezone.utc)
     elapsed = int((now - state.spawn_time).total_seconds())
     stdout_total = _file_size(state.stdout_log)
     stderr_total = _file_size(state.stderr_log)
-    stdout_prev = _wait_stdout_cursors.get(state.id, 0)
-    stderr_prev = _wait_stderr_cursors.get(state.id, 0)
+    stdout_prev = stdout_cursor_store.get(state.id, 0)
+    stderr_prev = stderr_cursor_store.get(state.id, 0)
     stdout_delta = max(0, stdout_total - stdout_prev)
     stderr_delta = max(0, stderr_total - stderr_prev)
     if advance_cursors:
-        _wait_stdout_cursors[state.id] = stdout_total
-        _wait_stderr_cursors[state.id] = stderr_total
+        stdout_cursor_store[state.id] = stdout_total
+        stderr_cursor_store[state.id] = stderr_total
     last_output_age = _seconds_since_last_output(state.stdout_log, state.stderr_log)
     is_alive = state.proc.returncode is None
     stderr_tail = _tail_text(state.stderr_log, 400)
@@ -337,6 +411,8 @@ def setup(
     _session_output_dir = session_output_dir
     _output_cursors.clear()
     _output_locks.clear()
+    _wait_stdout_cursors.clear()
+    _wait_stderr_cursors.clear()
 
 
 def _require_setup() -> tuple["AgentManager", "RunLogWriter", "Config", "ConsoleBase"]:
@@ -573,23 +649,24 @@ async def read_new_agent_output(agent_id: str) -> str:
     lock = _output_locks.setdefault(agent_id, asyncio.Lock())
     async with lock:
         cursor = _output_cursors.get(agent_id, 0)
+        seen_cursor = _wait_stdout_cursors.get(agent_id, 0)
 
-        def _read() -> tuple[int, bytes]:
-            if not state.stdout_log.exists():
-                return cursor, b""
-            size = state.stdout_log.stat().st_size
-            if size <= cursor:
-                return cursor, b""
-            with state.stdout_log.open("rb") as handle:
-                handle.seek(cursor)
-                data = handle.read()
-            return cursor + len(data), data
-
-        new_cursor, data = await asyncio.to_thread(_read)
+        new_cursor, data, omitted_bytes, total_new_bytes = await asyncio.to_thread(
+            _read_new_stdout_chunk,
+            stdout_log=state.stdout_log,
+            output_cursor=cursor,
+            seen_stdout_cursor=seen_cursor,
+        )
         if not data:
             return ""
         _output_cursors[agent_id] = new_cursor
-        return data.decode("utf-8", errors="replace")
+        _wait_stdout_cursors[agent_id] = new_cursor
+        return _format_new_stdout_chunk(
+            data=data,
+            omitted_bytes=omitted_bytes,
+            total_new_bytes=total_new_bytes,
+            stdout_log=state.stdout_log,
+        )
 
 
 async def list_agents() -> str:
@@ -772,6 +849,8 @@ def build_agent_tool_bindings(
     """
     output_cursors: dict[str, int] = {}
     output_locks: dict[str, asyncio.Lock] = {}
+    wait_stdout_cursors: dict[str, int] = {}
+    wait_stderr_cursors: dict[str, int] = {}
 
     async def _spawn_agent(**kwargs: object) -> str:
         agent_type = str(kwargs["type"])
@@ -930,23 +1009,24 @@ def build_agent_tool_bindings(
         lock = output_locks.setdefault(agent_id, asyncio.Lock())
         async with lock:
             cursor = output_cursors.get(agent_id, 0)
+            seen_cursor = wait_stdout_cursors.get(agent_id, 0)
 
-            def _read() -> tuple[int, bytes]:
-                if not state.stdout_log.exists():
-                    return cursor, b""
-                size = state.stdout_log.stat().st_size
-                if size <= cursor:
-                    return cursor, b""
-                with state.stdout_log.open("rb") as handle:
-                    handle.seek(cursor)
-                    data = handle.read()
-                return cursor + len(data), data
-
-            new_cursor, data = await asyncio.to_thread(_read)
+            new_cursor, data, omitted_bytes, total_new_bytes = await asyncio.to_thread(
+                _read_new_stdout_chunk,
+                stdout_log=state.stdout_log,
+                output_cursor=cursor,
+                seen_stdout_cursor=seen_cursor,
+            )
             if not data:
                 return ""
             output_cursors[agent_id] = new_cursor
-            return data.decode("utf-8", errors="replace")
+            wait_stdout_cursors[agent_id] = new_cursor
+            return _format_new_stdout_chunk(
+                data=data,
+                omitted_bytes=omitted_bytes,
+                total_new_bytes=total_new_bytes,
+                stdout_log=state.stdout_log,
+            )
 
     async def _list_agents() -> str:
         manager.poll_exit_codes()
@@ -1014,7 +1094,12 @@ def build_agent_tool_bindings(
                 "status": _status_from_state(finished_state),
                 "elapsed_seconds": elapsed,
                 "running": [
-                    _build_running_snapshot(manager.get(aid), advance_cursors=True)
+                    _build_running_snapshot(
+                        manager.get(aid),
+                        advance_cursors=True,
+                        stdout_cursors=wait_stdout_cursors,
+                        stderr_cursors=wait_stderr_cursors,
+                    )
                     for aid in agent_ids
                     if aid != finished_id
                 ],
@@ -1033,7 +1118,12 @@ def build_agent_tool_bindings(
                     "finished_agent_id": None,
                     "timed_out": True,
                     "running": [
-                        _build_running_snapshot(manager.get(aid), advance_cursors=True)
+                        _build_running_snapshot(
+                            manager.get(aid),
+                            advance_cursors=True,
+                            stdout_cursors=wait_stdout_cursors,
+                            stderr_cursors=wait_stderr_cursors,
+                        )
                         for aid in agent_ids
                     ],
                     "patience_policy": _patience_policy(config),

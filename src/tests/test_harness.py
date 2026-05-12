@@ -1,6 +1,8 @@
 # pyright: reportMissingParameterType=false, reportArgumentType=false
 
 import asyncio
+from datetime import datetime
+from datetime import timezone
 import inspect
 import json
 
@@ -9,6 +11,7 @@ import pytest
 
 from team_harness import config as config_module
 from team_harness.agents.manager import AgentManager
+from team_harness.agents.manager import AgentState
 from team_harness.cli import main
 from team_harness.config import Config
 from team_harness.harness import _apply_agent_template_overrides
@@ -20,6 +23,7 @@ from team_harness.harness import AgentSummary
 from team_harness.harness import TeamHarness
 from team_harness.harness import TeamHarnessError
 from team_harness.harness import TeamHarnessResult
+from team_harness.tools import agent_tools
 from team_harness.tools.agent_tools import build_agent_tool_bindings
 from team_harness.tools.fs_tools import build_fs_tool_bindings
 from team_harness.tools.todo_tools import build_todo_tool_bindings
@@ -560,6 +564,132 @@ async def test_build_agent_tool_bindings_produces_closures(tmp_path):
     )
     result = await list_fn()
     assert json.loads(result) == []
+
+
+@pytest.mark.asyncio
+async def test_build_agent_tool_bindings_read_new_output_truncates_backlog(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    config = Config(
+        provider="openai_compat",
+        model="test/model",
+        api_base="http://localhost:9999",
+        api_key="test-key",
+        cwd=str(tmp_path),
+        run_dir=run_dir,
+        agent_templates={"codex": fake_agent_template()},
+    )
+    manager = AgentManager()
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=run_dir,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    ui = SilentConsole()
+    stdout = tmp_path / "agent_stdout.log"
+    stderr = tmp_path / "agent_stderr.log"
+    large_text = "b" * (agent_tools.READ_NEW_AGENT_OUTPUT_MAX_BYTES + 10)
+    stdout.write_text(large_text)
+    stderr.write_text("")
+    proc = await asyncio.create_subprocess_exec("sh", "-lc", "exit 0")
+    manager.register(
+        AgentState(
+            id="agent_1",
+            agent_type="codex",
+            prompt="p",
+            cwd=str(tmp_path),
+            proc=proc,
+            spawn_time=datetime.now(timezone.utc),
+            stdout_log=stdout,
+            stderr_log=stderr,
+        )
+    )
+    bindings = build_agent_tool_bindings(
+        manager=manager, run_log=run_log, config=config, ui=ui, allowed_types=["codex"]
+    )
+    read_new = next(
+        fn
+        for schema, fn in bindings
+        if schema["function"]["name"] == "read_new_agent_output"
+    )
+
+    first = await read_new("agent_1")
+    stdout.write_text(large_text + "next")
+    second = await read_new("agent_1")
+    await proc.wait()
+
+    assert first.startswith("[read_new_agent_output truncated:")
+    assert first.endswith("b" * agent_tools.READ_NEW_AGENT_OUTPUT_MAX_BYTES)
+    assert second == "next"
+
+
+@pytest.mark.asyncio
+async def test_build_agent_tool_bindings_wait_for_any_advances_read_new_cursor(
+    tmp_path,
+):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    config = Config(
+        provider="openai_compat",
+        model="test/model",
+        api_base="http://localhost:9999",
+        api_key="test-key",
+        cwd=str(tmp_path),
+        run_dir=run_dir,
+        agent_templates={"codex": fake_agent_template()},
+        min_agent_lifetime_before_kill_s=0.0,
+    )
+    manager = AgentManager()
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=run_dir,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    ui = SilentConsole()
+    stdout = tmp_path / "agent_stdout.log"
+    stderr = tmp_path / "agent_stderr.log"
+    stdout.write_text("before\n")
+    stderr.write_text("")
+    proc = await asyncio.create_subprocess_exec("sleep", "5")
+    manager.register(
+        AgentState(
+            id="agent_1",
+            agent_type="codex",
+            prompt="p",
+            cwd=str(tmp_path),
+            proc=proc,
+            spawn_time=datetime.now(timezone.utc),
+            stdout_log=stdout,
+            stderr_log=stderr,
+        )
+    )
+    bindings = build_agent_tool_bindings(
+        manager=manager, run_log=run_log, config=config, ui=ui, allowed_types=["codex"]
+    )
+    wait_for_any = next(
+        fn for schema, fn in bindings if schema["function"]["name"] == "wait_for_any"
+    )
+    read_new = next(
+        fn
+        for schema, fn in bindings
+        if schema["function"]["name"] == "read_new_agent_output"
+    )
+    kill_agent = next(
+        fn for schema, fn in bindings if schema["function"]["name"] == "kill_agent"
+    )
+
+    timeout_result = json.loads(await wait_for_any(["agent_1"], timeout=0.1))
+    stdout.write_text("before\nafter\n")
+    new_output = await read_new("agent_1")
+    kill_result = json.loads(await kill_agent("agent_1"))
+
+    assert timeout_result["timed_out"] is True
+    assert new_output == "after\n"
+    assert kill_result["killed"] is True
 
 
 @pytest.mark.asyncio

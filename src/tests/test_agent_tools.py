@@ -162,6 +162,91 @@ async def test_read_new_output_waits_and_kills(tmp_path, config, manager, ui):
 
 
 @pytest.mark.asyncio
+async def test_read_new_output_truncates_large_initial_backlog(
+    tmp_path, config, manager, ui
+):
+    stdout = tmp_path / "agent_stdout.log"
+    stderr = tmp_path / "agent_stderr.log"
+    large_text = "a" * (agent_tools.READ_NEW_AGENT_OUTPUT_MAX_BYTES + 10)
+    stdout.write_text(large_text)
+    stderr.write_text("")
+    proc = await asyncio.create_subprocess_exec("sh", "-lc", "exit 0")
+    state = AgentState(
+        id="agent_1",
+        agent_type="codex",
+        prompt="p",
+        cwd=str(tmp_path),
+        proc=proc,
+        spawn_time=datetime.now(timezone.utc),
+        stdout_log=stdout,
+        stderr_log=stderr,
+    )
+    manager.register(state)
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+
+    first = await agent_tools.read_new_agent_output("agent_1")
+    stdout.write_text(large_text + "tail\n")
+    second = await agent_tools.read_new_agent_output("agent_1")
+    await proc.wait()
+
+    assert first.startswith("[read_new_agent_output truncated:")
+    assert (
+        f"showing latest {agent_tools.READ_NEW_AGENT_OUTPUT_MAX_BYTES} bytes" in first
+    )
+    assert str(stdout) in first
+    assert first.endswith("a" * agent_tools.READ_NEW_AGENT_OUTPUT_MAX_BYTES)
+    assert second == "tail\n"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_any_advances_read_new_output_cursor(
+    tmp_path, config, manager, ui
+):
+    stdout = tmp_path / "agent_stdout.log"
+    stderr = tmp_path / "agent_stderr.log"
+    stdout.write_text("before\n")
+    stderr.write_text("")
+    proc = await asyncio.create_subprocess_exec("sleep", "5")
+    state = AgentState(
+        id="agent_1",
+        agent_type="codex",
+        prompt="p",
+        cwd=str(tmp_path),
+        proc=proc,
+        spawn_time=datetime.now(timezone.utc),
+        stdout_log=stdout,
+        stderr_log=stderr,
+    )
+    manager.register(state)
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+
+    timeout_result = json.loads(
+        await agent_tools.wait_for_any(["agent_1"], timeout=0.1)
+    )
+    stdout.write_text("before\nafter\n")
+    new_output = await agent_tools.read_new_agent_output("agent_1")
+    result = json.loads(await agent_tools.kill_agent("agent_1"))
+
+    assert timeout_result["timed_out"] is True
+    assert new_output == "after\n"
+    assert result["killed"] is True
+
+
+@pytest.mark.asyncio
 async def test_list_agents_and_graceful_shutdown(tmp_path, config, manager, ui):
     stdout = tmp_path / "agent_stdout.log"
     stderr = tmp_path / "agent_stderr.log"
