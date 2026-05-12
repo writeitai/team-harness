@@ -25,7 +25,7 @@ PROMPT_FILE_MAX_BYTES = 100 * 1024
 @dataclass
 class Config:
     provider: str = "openai_compat"
-    model: str = "gpt-5.4"
+    model: str = "gpt-5.5"
     api_base: str = "https://openrouter.ai/api/v1"
     api_key: str = ""
     codex_auth_path: str = ""
@@ -93,7 +93,7 @@ shared_flags = [
 resume_prefix = ["resume"]
 resume_flags = ["{session_id}"]
 model_flag = "--model"
-default_model = "gpt-5.4"
+default_model = "gpt-5.5"
 deduplicate_flags = [
     "--dangerously-bypass-approvals-and-sandbox",
     "--skip-git-repo-check",
@@ -241,7 +241,7 @@ def _default_config_text() -> str:
 provider = "openai_compat"
 
 # Model name passed to the coordinator API.
-model = "gpt-5.4"
+model = "gpt-5.5"
 
 # Base URL for the coordinator API.
 api_base = "https://openrouter.ai/api/v1"
@@ -300,7 +300,7 @@ def _local_config_text() -> str:
 provider = "openai_compat"
 
 # Model name passed to the coordinator API.
-model = "gpt-5.4"
+model = "gpt-5.5"
 
 # Base URL for the coordinator API.
 api_base = "https://openrouter.ai/api/v1"
@@ -1036,7 +1036,7 @@ def load_config(
         provider=provider_value,
         model=str(raw_model)
         if raw_model
-        else "gpt-5.4"
+        else "gpt-5.5"
         if provider_value == "openai_compat"
         else "codex-mini-latest",
         api_base=str(raw_api_base)

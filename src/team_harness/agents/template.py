@@ -76,7 +76,7 @@ DEFAULT_AGENT_TEMPLATES: dict[str, AgentTemplate] = {
         resume_prefix=("resume",),
         resume_flags=("{session_id}",),
         model_flag="--model",
-        default_model="gpt-5.4",
+        default_model="gpt-5.5",
         deduplicate_flags=(
             "--dangerously-bypass-approvals-and-sandbox",
             "--skip-git-repo-check",

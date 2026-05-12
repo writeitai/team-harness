@@ -34,8 +34,8 @@ def _write_global_config(
     return global_path
 
 
-def test_default_model_is_gpt_5_4():
-    assert Config().model == "gpt-5.4"
+def test_default_model_is_gpt_5_5():
+    assert Config().model == "gpt-5.5"
     assert Config().provider == "openai_compat"
     assert Config().output_dir == "_outputs"
     assert Config().coordinator_prompt == COORDINATOR_PROMPT
@@ -468,7 +468,7 @@ command = ["gemini", "local"]
 
     config = load_config(cwd=str(tmp_path / "project"))
 
-    assert config.model == "gpt-5.4"
+    assert config.model == "gpt-5.5"
     assert config.api_base == "https://openrouter.ai/api/v1"
     assert config.allowed_agents == ["gemini"]
     assert config.agent_templates["gemini"].command == ("gemini", "local")
@@ -532,7 +532,7 @@ def test_no_config_uses_defaults_without_creating_global_file(tmp_path, monkeypa
 
     config = load_config(cwd=str(tmp_path))
 
-    assert config.model == "gpt-5.4"
+    assert config.model == "gpt-5.5"
     assert config.provider == "openai_compat"
     assert config.global_config_path is None
     assert config.local_config_path is None
@@ -710,7 +710,7 @@ def test_default_config_text_contains_verified_flag_tokens():
     assert 'match = { type = "thread.started" }' in text
     assert 'field_path = ["thread_id"]' in text
     # Codex default model — the whole point of this follow-up.
-    assert 'default_model = "gpt-5.4"' in text
+    assert 'default_model = "gpt-5.5"' in text
     assert (
         'deduplicate_flags = [\n    "--dangerously-bypass-approvals-and-sandbox"'
         in text

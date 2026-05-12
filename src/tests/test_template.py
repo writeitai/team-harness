@@ -34,7 +34,12 @@ def test_parse_structured_template_fields():
         resume_prefix=("resume",),
         resume_flags=("{session_id}",),
         model_flag="--model",
-        default_model="gpt-5.4",
+        default_model="gpt-5.5",
+        deduplicate_flags=(
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--skip-git-repo-check",
+            "--json",
+        ),
         reasoning_effort_flag=("-c", "model_reasoning_effort={effort}"),
         session_capture=SessionCapture(
             strategy="stream_json_event",
@@ -46,9 +51,9 @@ def test_parse_structured_template_fields():
 
 def test_parse_default_model_override_as_string():
     template = _parse_agent_template(
-        "codex", {"command": ["codex", "exec"], "default_model": "gpt-5.4-turbo"}
+        "codex", {"command": ["codex", "exec"], "default_model": "gpt-5.5-turbo"}
     )
-    assert template.default_model == "gpt-5.4-turbo"
+    assert template.default_model == "gpt-5.5-turbo"
 
 
 def test_parse_default_model_cleared_with_false():
@@ -67,7 +72,7 @@ def test_parse_default_model_cleared_with_empty_string():
 
 def test_parse_default_model_inherits_from_base_when_absent():
     template = _parse_agent_template("codex", {"command": ["codex", "exec"]})
-    assert template.default_model == "gpt-5.4"
+    assert template.default_model == "gpt-5.5"
 
 
 def test_parse_model_env_vars_override():
