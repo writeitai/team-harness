@@ -48,10 +48,10 @@ def _elapsed_seconds(record: AgentRecord) -> float | None:
 
 
 def _outcome(record: AgentRecord) -> str:
-    if record.status == "killed":
-        return "killed"
     if record.exit_code == 0:
         return "succeeded"
+    if record.status == "killed":
+        return "killed"
     if record.exit_code is None:
         return "running"
     if record.session_id:
@@ -60,6 +60,8 @@ def _outcome(record: AgentRecord) -> str:
 
 
 def _summary_for(record: AgentRecord) -> str | None:
+    if record.status == "killed" and record.exit_code == 0:
+        return "Worker completed successfully, but was marked killed during coordinator cleanup."
     outcome = _outcome(record)
     if outcome == "failed_before_session":
         return "Worker exited before a provider session was captured."
@@ -68,6 +70,30 @@ def _summary_for(record: AgentRecord) -> str | None:
     if outcome == "killed":
         return "Worker was killed by team-harness."
     return None
+
+
+def _build_salvaged_worker(record: AgentRecord) -> dict[str, Any] | None:
+    if record.exit_code != 0:
+        return None
+    stdout_path = Path(record.stdout_log).resolve()
+    stdout_tail = _tail_text(stdout_path)
+    if not stdout_tail:
+        return None
+    stderr_path = Path(record.stderr_log).resolve()
+    return {
+        "agent_id": record.id,
+        "agent_type": record.agent_type,
+        "status": record.status,
+        "outcome": _outcome(record),
+        "exit_code": record.exit_code,
+        "elapsed_seconds": _elapsed_seconds(record),
+        "cwd": record.cwd,
+        "stdout_path": str(stdout_path),
+        "stderr_path": str(stderr_path),
+        "stdout_tail": stdout_tail,
+        "stderr_tail": _tail_text(stderr_path),
+        "summary": _summary_for(record),
+    }
 
 
 def _redact(value: str) -> str:
@@ -244,6 +270,12 @@ def build_worker_failure_detail(
     *, summary: str, agents: list[AgentRecord], session_output_dir: str | Path
 ) -> dict[str, Any] | None:
     session_dir = Path(session_output_dir).resolve()
+    worker_sessions_path = str((session_dir / "worker_sessions.json").resolve())
+    salvaged_workers = [
+        salvaged
+        for record in agents
+        if (salvaged := _build_salvaged_worker(record)) is not None
+    ]
     records = [
         record
         for record in agents
@@ -251,7 +283,14 @@ def build_worker_failure_detail(
         in {"failed_before_session", "failed_after_session", "killed"}
     ]
     if not records:
-        return None
+        if not agents:
+            return None
+        return {
+            "summary": summary,
+            "worker_sessions_path": worker_sessions_path,
+            "salvaged_workers": salvaged_workers,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+        }
     record = max(records, key=lambda item: item.finished_at or item.spawned_at)
     stdout_path = Path(record.stdout_log).resolve()
     stderr_path = Path(record.stderr_log).resolve()
@@ -269,8 +308,9 @@ def build_worker_failure_detail(
         "stderr_path": str(stderr_path),
         "stdout_tail": _tail_text(stdout_path),
         "stderr_tail": _tail_text(stderr_path),
+        "salvaged_workers": salvaged_workers,
         "invocation": _redacted_command(record.command),
         "invocation_path": _artifact_paths(session_dir, record)["invocation_path"],
-        "worker_sessions_path": str((session_dir / "worker_sessions.json").resolve()),
+        "worker_sessions_path": worker_sessions_path,
         "captured_at": datetime.now(timezone.utc).isoformat(),
     }
