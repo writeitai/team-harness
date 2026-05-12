@@ -125,7 +125,7 @@ def test_init_global_creates_global_config(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert global_path.exists()
-    assert 'model = "gpt-5.4"' in global_path.read_text()
+    assert 'model = "gpt-5.5"' in global_path.read_text()
     assert (global_path.parent / "coordinator_system_message.md").read_text(
         encoding="utf-8"
     ) == (COORDINATOR_PROMPT)

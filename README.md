@@ -193,7 +193,7 @@ Example global config:
 ```toml
 [coordinator]
 provider = "openai_compat"
-model = "gpt-5.4"
+model = "gpt-5.5"
 api_base = "https://openrouter.ai/api/v1"
 coordinator_system_message_file = "coordinator_system_message.md"
 worker_suffix_file = "worker_suffix.md"
@@ -221,7 +221,7 @@ shared_flags = [
 resume_prefix = ["resume"]
 resume_flags = ["{session_id}"]
 model_flag = "--model"
-default_model = "gpt-5.4"
+default_model = "gpt-5.5"
 deduplicate_flags = [
     "--dangerously-bypass-approvals-and-sandbox",
     "--skip-git-repo-check",
@@ -457,7 +457,7 @@ workers. Per-agent defaults come from `[agents.<name>].default_model`.
 ```toml
 [agents.codex]
 command = ["codex", "exec"]
-default_model = "gpt-5.4"    # every codex spawn gets --model gpt-5.4
+default_model = "gpt-5.5"    # every codex spawn gets --model gpt-5.5
 ```
 
 Clear a default on a specific agent with `default_model = false` (or an
@@ -707,7 +707,7 @@ Options:
 - Auto-compaction runs proactively before a new coordinator turn once the model-specific threshold is reached, using the same tracked total and falling back to a local estimate when provider usage is unavailable.
 - Auto-compaction only runs when the last message role is `user`, so it never compacts in the middle of a tool exchange.
 - Auto-compaction is always on in v1 and does not have a public config knob.
-- OpenAI-compatible providers may expose provider-prefixed model ids such as `openai/gpt-5.4`; model-limit resolution accepts both bare and prefixed forms.
+- OpenAI-compatible providers may expose provider-prefixed model ids such as `openai/gpt-5.5`; model-limit resolution accepts both bare and prefixed forms.
 - Manual compaction runs between turns and rewrites earlier history into a compact summary for the next turn. `/compact [focus]` never runs in the middle of a tool exchange.
 - `/compact <focus>` lets you bias what the summary emphasizes without changing the command transcript shape that the coordinator sees afterward.
 - `/clear` is the manual escape hatch when you want to keep the same session, run log, and agent state but start with a fresh conversation.

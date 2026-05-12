@@ -60,9 +60,9 @@ async def test_resolve_model_limit_fallbacks():
 async def test_resolve_model_limit_fuzzy_matches_openrouter_prefix():
     assert (
         await resolve_model_limit(
-            model_id="gpt-5.4",
+            model_id="gpt-5.5",
             client=ClientWithModels(
-                [{"id": "openai/gpt-5.4", "context_length": 1_050_000}]
+                [{"id": "openai/gpt-5.5", "context_length": 1_050_000}]
             ),
             config=Config(),
         )
@@ -74,11 +74,11 @@ async def test_resolve_model_limit_fuzzy_matches_openrouter_prefix():
 async def test_resolve_model_limit_exact_still_preferred():
     assert (
         await resolve_model_limit(
-            model_id="gpt-5.4",
+            model_id="gpt-5.5",
             client=ClientWithModels(
                 [
-                    {"id": "gpt-5.4", "context_length": 900_000},
-                    {"id": "openai/gpt-5.4", "context_length": 1_050_000},
+                    {"id": "gpt-5.5", "context_length": 900_000},
+                    {"id": "openai/gpt-5.5", "context_length": 1_050_000},
                 ]
             ),
             config=Config(),
@@ -89,14 +89,14 @@ async def test_resolve_model_limit_exact_still_preferred():
 
 @pytest.mark.asyncio
 async def test_resolve_model_limit_ambiguous_fuzzy_falls_through(monkeypatch):
-    monkeypatch.setitem(KNOWN_LIMITS, "gpt-5.4", 777_777)
+    monkeypatch.setitem(KNOWN_LIMITS, "gpt-5.5", 777_777)
     assert (
         await resolve_model_limit(
-            model_id="gpt-5.4",
+            model_id="gpt-5.5",
             client=ClientWithModels(
                 [
-                    {"id": "openai/gpt-5.4", "context_length": 1_050_000},
-                    {"id": "other/gpt-5.4", "context_length": 900_000},
+                    {"id": "openai/gpt-5.5", "context_length": 1_050_000},
+                    {"id": "other/gpt-5.5", "context_length": 900_000},
                 ]
             ),
             config=Config(),
@@ -237,14 +237,6 @@ def test_auto_compact_threshold_for_gpt_4o_uses_exact_output_cap():
 
 def test_auto_compact_threshold_for_gpt_4_1():
     assert get_auto_compact_threshold("openai/gpt-4.1", 1_047_576) == 1_014_576
-
-
-def test_auto_compact_threshold_for_gpt_5_4():
-    assert KNOWN_LIMITS["gpt-5.4"] == 1_050_000
-    assert KNOWN_LIMITS["openai/gpt-5.4"] == 1_050_000
-    assert KNOWN_MAX_OUTPUT_TOKENS["gpt-5.4"] == 128_000
-    assert KNOWN_MAX_OUTPUT_TOKENS["openai/gpt-5.4"] == 128_000
-    assert get_auto_compact_threshold("gpt-5.4", 1_050_000) == 1_017_000
 
 
 def test_auto_compact_threshold_for_gpt_5_5():

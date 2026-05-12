@@ -74,14 +74,14 @@ async def test_spawn_fresh_passes_prompt_and_model_override(tmp_path):
         config=config,
         log_dir=tmp_path / "logs",
         extra_env={"CAPTURE_FILE": str(capture_file)},
-        model="gpt-5.4",
+        model="gpt-5.5",
     )
     await asyncio.wait_for(result.proc.wait(), 2)
 
     assert capture_file.read_text(encoding="utf-8").splitlines() == [
         "--json",
         "--model",
-        "gpt-5.4",
+        "gpt-5.5",
         "hello world",
     ]
 

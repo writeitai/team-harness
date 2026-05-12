@@ -73,7 +73,7 @@ async def test_spawn_default_model_injected_as_model_flag(tmp_path):
             "codex": AgentTemplate(
                 command=(str(fake_codex),),
                 model_flag="--model",
-                default_model="gpt-5.4",
+                default_model="gpt-5.5",
             )
         }
     )
@@ -90,8 +90,8 @@ async def test_spawn_default_model_injected_as_model_flag(tmp_path):
 
     argv = argv_dump.read_text(encoding="utf-8").splitlines()
     assert "--model" in argv
-    assert "gpt-5.4" in argv
-    assert argv[argv.index("--model") + 1] == "gpt-5.4"
+    assert "gpt-5.5" in argv
+    assert argv[argv.index("--model") + 1] == "gpt-5.5"
 
 
 @pytest.mark.asyncio
@@ -106,7 +106,7 @@ async def test_spawn_explicit_model_overrides_default(tmp_path):
             "codex": AgentTemplate(
                 command=(str(fake_codex),),
                 model_flag="--model",
-                default_model="gpt-5.4",
+                default_model="gpt-5.5",
             )
         }
     )
@@ -118,13 +118,13 @@ async def test_spawn_explicit_model_overrides_default(tmp_path):
         config=config,
         log_dir=tmp_path / "logs",
         extra_env={"ARGV_DUMP": str(argv_dump)},
-        model="gpt-5.4-mini",
+        model="gpt-5.5-mini",
     )
     await asyncio.wait_for(result.proc.wait(), 2)
 
     argv = argv_dump.read_text(encoding="utf-8").splitlines()
-    assert "gpt-5.4-mini" in argv
-    assert "gpt-5.4" not in argv
+    assert "gpt-5.5-mini" in argv
+    assert "gpt-5.5" not in argv
 
 
 @pytest.mark.asyncio

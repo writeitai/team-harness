@@ -16,7 +16,7 @@ from team_harness.config import Config
 def test_build_command_default_codex_fresh():
     command = build_command(agent_type="codex", prompt="do thing", config=Config())
 
-    # The built-in codex default includes default_model="gpt-5.4" so the
+    # The built-in codex default includes default_model="gpt-5.5" so the
     # --model flag is injected even without an explicit override.
     assert command == [
         "codex",
@@ -25,7 +25,7 @@ def test_build_command_default_codex_fresh():
         "--skip-git-repo-check",
         "--json",
         "--model",
-        "gpt-5.4",
+        "gpt-5.5",
         "do thing",
     ]
 
@@ -47,7 +47,7 @@ def test_build_command_default_codex_resume():
         "--skip-git-repo-check",
         "--json",
         "--model",
-        "gpt-5.4",
+        "gpt-5.5",
         "sid-123",
         "continue",
     ]
@@ -55,13 +55,13 @@ def test_build_command_default_codex_resume():
 
 def test_build_command_codex_explicit_model_overrides_default():
     command = build_command(
-        agent_type="codex", prompt="do thing", config=Config(), model="gpt-5.4-mini"
+        agent_type="codex", prompt="do thing", config=Config(), model="gpt-5.5-mini"
     )
 
     # Explicit model wins over template.default_model.
     assert "--model" in command
-    assert "gpt-5.4-mini" in command
-    assert "gpt-5.4" not in command
+    assert "gpt-5.5-mini" in command
+    assert "gpt-5.5" not in command
 
 
 def test_build_command_codex_default_model_cleared_by_user_override():
@@ -86,7 +86,7 @@ def test_build_command_codex_default_model_cleared_by_user_override():
     command = build_command(agent_type="codex", prompt="do thing", config=config)
 
     assert "--model" not in command
-    assert "gpt-5.4" not in command
+    assert "gpt-5.5" not in command
 
 
 # ---------------------------------------------------------------------------
