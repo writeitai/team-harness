@@ -13,6 +13,7 @@ from team_harness.cli import _graceful_shutdown
 from team_harness.tools import agent_tools
 from team_harness.tracking.models import AgentRecord
 from team_harness.tracking.run_log import RunLogWriter
+from team_harness.tracking.worker_sessions import write_worker_sessions_manifest
 from tests.helpers import fake_agent_template
 
 
@@ -30,6 +31,8 @@ def test_spawn_agent_schema_exposes_resume_fields():
     }
     assert properties["resume_from_session_id"]["type"] == "string"
     assert "worker_sessions.json" in properties["resume_from_session_id"]["description"]
+    assert "semantic log stem" in properties["output_path"]["description"]
+    assert "<stem>.stdout.jsonl" in properties["output_path"]["description"]
 
 
 def test_spawn_agent_schema_describes_template_default_flags(config):
@@ -138,6 +141,53 @@ async def test_spawn_agent_appends_suffix_before_output_instruction(
     assert prompt_index < suffix_index < output_index
     assert full_prompt.endswith(footer)
     assert state.agent_type == "codex"
+
+
+@pytest.mark.asyncio
+async def test_spawn_agent_treats_output_path_as_log_stem(
+    tmp_path, config, manager, ui
+):
+    config.run_dir = tmp_path / "run"
+    config.run_dir.mkdir(exist_ok=True)
+    config.agent_templates = {"codex": fake_agent_template()}
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=config.run_dir,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+    output_stem = tmp_path / "session" / "leaf2_plan_review_codex"
+
+    agent_id = await agent_tools.spawn_agent(
+        type="codex",
+        prompt="review the plan",
+        cwd=str(tmp_path),
+        output_path=str(output_stem),
+    )
+    await asyncio.wait_for(manager.wait_one(agent_id), 2)
+    await asyncio.sleep(0.1)
+    state = manager.get(agent_id)
+
+    assert state.stdout_log == output_stem.with_name(output_stem.name + ".stdout.jsonl")
+    assert state.stderr_log == output_stem.with_name(output_stem.name + ".stderr.log")
+    assert state.stdout_log.exists()
+    assert state.stderr_log.exists()
+    assert not output_stem.exists()
+
+    output_stem.mkdir()
+    (output_stem / "review.md").write_text("review", encoding="utf-8")
+    manifest_path = write_worker_sessions_manifest(
+        run_id="run_1",
+        session_output_dir=output_stem.parent,
+        agents=run_log.snapshot_agents(),
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["workers"][0]["stdout_path"] == str(state.stdout_log.resolve())
+    assert output_stem.is_dir()
+    assert (output_stem / "review.md").read_text(encoding="utf-8") == "review"
 
 
 @pytest.mark.asyncio

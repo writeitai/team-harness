@@ -819,6 +819,11 @@ Each run creates a directory under `~/.team-harness/runs/<run-id>/` containing:
 - `<agent-id>_stdout.log` / `<agent-id>_stderr.log` — per-agent output
 - `todo.json` — persistent task list
 
+When a coordinator supplies a semantic `output_path` stem for a worker, the
+worker stdout/stderr logs are written beside that stem as
+`<stem>.stdout.jsonl` and `<stem>.stderr.log`. The stem itself remains available
+for worker-authored artifact directories or files.
+
 Each run also creates `<output_dir>/<run-id>/worker_sessions.json`, a compact
 worker index with per-agent prompt, status, timestamps, log paths, and
 resume-related metadata.

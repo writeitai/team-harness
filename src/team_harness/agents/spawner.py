@@ -34,7 +34,8 @@ async def spawn(
     model: str | None = None,
     extra_flags: list[str] | None = None,
     allowed_agents: list[str] | None = None,
-    output_path: str | None = None,
+    stdout_path: Path | None = None,
+    stderr_path: Path | None = None,
     mode: str = "fresh",
     resume_session_id: str | None = None,
 ) -> SpawnResult:
@@ -61,10 +62,8 @@ async def spawn(
         allowed_agents=allowed_agents,
     )
 
-    stdout_path = (
-        Path(output_path) if output_path else log_dir / f"{agent_id}_stdout.log"
-    )
-    stderr_path = log_dir / f"{agent_id}_stderr.log"
+    stdout_path = stdout_path or log_dir / f"{agent_id}_stdout.log"
+    stderr_path = stderr_path or log_dir / f"{agent_id}_stderr.log"
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
 

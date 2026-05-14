@@ -75,6 +75,18 @@ def _tail_text(path: Path, n_chars: int) -> str:
         return handle.read().decode(errors="replace")[-n_chars:]
 
 
+def _worker_log_paths(
+    *, run_dir: Path, agent_id: str, output_path: str | None
+) -> tuple[Path, Path]:
+    if output_path:
+        stem = Path(output_path)
+        return (
+            stem.with_name(stem.name + ".stdout.jsonl"),
+            stem.with_name(stem.name + ".stderr.log"),
+        )
+    return run_dir / f"{agent_id}_stdout.log", run_dir / f"{agent_id}_stderr.log"
+
+
 def _read_new_stdout_chunk(
     *,
     stdout_log: Path,
@@ -526,7 +538,17 @@ def spawn_agent_schema(
                         "description": "Only used when type == 'harness'.",
                         "items": {"type": "string"},
                     },
-                    "output_path": {"type": "string"},
+                    "output_path": {
+                        "type": "string",
+                        "description": (
+                            "Optional semantic log stem. Team-harness writes "
+                            "worker stdout/stderr to derived files named "
+                            "<stem>.stdout.jsonl and <stem>.stderr.log. "
+                            "Worker-authored deliverables should use separate "
+                            "files or directories under the session output "
+                            "directory."
+                        ),
+                    },
                 },
                 "required": ["type", "prompt", "cwd"],
             },
@@ -574,10 +596,9 @@ async def spawn_agent(**kwargs: object) -> str:
     run_dir = config.run_dir
     if run_dir is None:
         raise RuntimeError("config.run_dir must be set before spawning agents")
-    stdout_log = (
-        Path(output_path) if output_path else run_dir / f"{agent_id}_stdout.log"
+    stdout_log, stderr_log = _worker_log_paths(
+        run_dir=run_dir, agent_id=agent_id, output_path=output_path
     )
-    stderr_log = run_dir / f"{agent_id}_stderr.log"
     spawn_result = await spawner.spawn(
         agent_id=agent_id,
         agent_type=agent_type,
@@ -589,7 +610,8 @@ async def spawn_agent(**kwargs: object) -> str:
         model=model,
         extra_flags=flags,
         allowed_agents=agents if agent_type == "harness" else None,
-        output_path=output_path,
+        stdout_path=stdout_log,
+        stderr_path=stderr_log,
         mode=str(kwargs.get("mode", "fresh")),
         resume_session_id=(
             str(kwargs["resume_from_session_id"])
@@ -961,10 +983,9 @@ def build_agent_tool_bindings(
         run_dir = config.run_dir
         if run_dir is None:
             raise RuntimeError("config.run_dir must be set before spawning agents")
-        stdout_log = (
-            Path(output_path) if output_path else run_dir / f"{agent_id}_stdout.log"
+        stdout_log, stderr_log = _worker_log_paths(
+            run_dir=run_dir, agent_id=agent_id, output_path=output_path
         )
-        stderr_log = run_dir / f"{agent_id}_stderr.log"
         spawn_result = await spawner.spawn(
             agent_id=agent_id,
             agent_type=agent_type,
@@ -976,7 +997,8 @@ def build_agent_tool_bindings(
             model=model_val,
             extra_flags=flags,
             allowed_agents=agents_arg if agent_type == "harness" else None,
-            output_path=output_path,
+            stdout_path=stdout_log,
+            stderr_path=stderr_log,
             mode=str(kwargs.get("mode", "fresh")),
             resume_session_id=(
                 str(kwargs["resume_from_session_id"])
