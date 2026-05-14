@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-05-14
+
+### Fixed
+
+- `spawn_agent(output_path=...)` is now treated as a semantic log stem instead
+  of an exact stdout file path. Worker stdout/stderr are written to
+  `<stem>.stdout.jsonl` and `<stem>.stderr.log`, leaving `<stem>/` available for
+  worker-authored artifact directories such as review outputs.
+
 ## [0.2.7] - 2026-05-12
 
 ### Added
@@ -194,7 +203,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project-local configuration via `th init` (config.toml, coordinator system message, worker suffix and footer templates).
 - `th` CLI entry point (`team-harness` retained as compatibility alias).
 
-[Unreleased]: https://github.com/writeitai/team-harness/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/writeitai/team-harness/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/writeitai/team-harness/compare/v0.2.7...v0.2.8
+[0.2.7]: https://github.com/writeitai/team-harness/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/writeitai/team-harness/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/writeitai/team-harness/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/writeitai/team-harness/compare/v0.2.3...v0.2.4
