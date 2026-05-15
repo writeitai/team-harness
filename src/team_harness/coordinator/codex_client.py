@@ -124,11 +124,17 @@ class CodexCoordinatorClient:
         except httpx.HTTPStatusError as exc:
             raise _map_http_status_error(exc) from exc
         except httpx.TimeoutException as exc:
-            raise CoordinatorAPIError(str(exc), retryable=True) from exc
+            raise CoordinatorAPIError(
+                str(exc), retryable=True, cause_type=type(exc).__name__
+            ) from exc
         except httpx.NetworkError as exc:
-            raise CoordinatorAPIError(str(exc), retryable=True) from exc
+            raise CoordinatorAPIError(
+                str(exc), retryable=True, cause_type=type(exc).__name__
+            ) from exc
         except httpx.TransportError as exc:
-            raise CoordinatorAPIError(str(exc), retryable=True) from exc
+            raise CoordinatorAPIError(
+                str(exc), retryable=True, cause_type=type(exc).__name__
+            ) from exc
         except json.JSONDecodeError as exc:
             raise CoordinatorAPIError(
                 "Received malformed SSE JSON from Codex."
@@ -385,12 +391,14 @@ def _map_http_status_error(exc: httpx.HTTPStatusError) -> CoordinatorAPIError:
         return CoordinatorAPIError(
             "Codex authentication failed or expired. Run `codex login` and retry.",
             status_code=status_code,
+            cause_type=type(exc).__name__,
         )
     message = _http_error_message(exc.response)
     return CoordinatorAPIError(
         message,
         status_code=status_code,
         retryable=status_code == 429 or status_code >= 500,
+        cause_type=type(exc).__name__,
     )
 
 

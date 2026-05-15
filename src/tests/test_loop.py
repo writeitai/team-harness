@@ -16,6 +16,7 @@ from team_harness.coordinator.loop import _chat_with_retry
 from team_harness.coordinator.loop import _COMPACTION_BREAKER_WARNING
 from team_harness.coordinator.loop import _perform_compaction
 from team_harness.coordinator.loop import _perform_manual_compaction
+from team_harness.coordinator.loop import _retry_sleep_seconds
 from team_harness.coordinator.loop import _should_compact
 from team_harness.coordinator.loop import run_one_turn
 from team_harness.tools.registry import ToolRegistry
@@ -217,11 +218,21 @@ async def test_chat_with_retry_and_run_api_errors(
     monkeypatch.setattr("asyncio.sleep", fake_sleep)
     ok_response = make_response(content="done")
     client = SequenceClient([make_api_error(429), make_api_error(429), ok_response])
+    run_log = make_run_log(tmp_path, config, run_id="run_retry")
     response = await _chat_with_retry(
-        client=client, messages=[], tools=[], config=config, token_callback=None
+        client=client,
+        messages=[],
+        tools=[],
+        config=config,
+        run_log=run_log,
+        token_callback=None,
     )
     assert response.choices[0].message.content == "done"
     assert sleeps == [1, 2]
+    retry_data = json.loads((tmp_path / "run.json").read_text())["coordinator_retries"]
+    assert [record["attempt"] for record in retry_data] == [1, 2]
+    assert retry_data[0]["host"] == "localhost"
+    assert retry_data[0]["will_retry"] is True
 
     error_client = SequenceClient([make_api_error(400)])
     run_log = make_run_log(tmp_path, config, run_id="run_2")
@@ -240,6 +251,15 @@ async def test_chat_with_retry_and_run_api_errors(
     )
     assert should_continue is False
     assert any("API error 400" in message for message in ui.messages)
+
+
+def test_retry_sleep_seconds_uses_capped_exponential_backoff(config):
+    config.retry_base_delay_s = 2.0
+    config.retry_max_delay_s = 5.0
+
+    assert _retry_sleep_seconds(config=config, attempt=0) == 2.0
+    assert _retry_sleep_seconds(config=config, attempt=1) == 4.0
+    assert _retry_sleep_seconds(config=config, attempt=2) == 5.0
 
 
 @pytest.mark.asyncio
@@ -265,6 +285,11 @@ async def test_run_one_turn_stops_cleanly_when_retries_are_exhausted(
     )
 
     assert should_continue is False
+    data = json.loads((tmp_path / "run.json").read_text())
+    assert data["failure"]["kind"] == "coordinator_api"
+    assert data["failure"]["retry_attempts"] == 1
+    assert data["failure"]["host"] == "localhost"
+    assert data["coordinator_retries"][0]["will_retry"] is False
     assert last_logged == 0
     assert any("API error (retries exhausted)" in message for message in ui.messages)
 

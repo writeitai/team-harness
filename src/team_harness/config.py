@@ -30,6 +30,8 @@ class Config:
     api_key: str = ""
     codex_auth_path: str = ""
     max_retries: int = 5
+    retry_base_delay_s: float = 1.0
+    retry_max_delay_s: float = 30.0
     max_depth: int = 3
     coordinator_system_message: str = COORDINATOR_PROMPT
     coordinator_prompt: str = COORDINATOR_PROMPT
@@ -48,6 +50,14 @@ class Config:
     local_config_path: Path | None = None
 
     def __post_init__(self) -> None:
+        if self.retry_base_delay_s <= 0:
+            raise ValueError("retry_base_delay_s must be greater than 0")
+        if self.retry_max_delay_s <= 0:
+            raise ValueError("retry_max_delay_s must be greater than 0")
+        if self.retry_max_delay_s < self.retry_base_delay_s:
+            raise ValueError(
+                "retry_max_delay_s must be greater than or equal to retry_base_delay_s"
+            )
         default_message = COORDINATOR_PROMPT
         if (
             self.coordinator_system_message == default_message
@@ -263,6 +273,10 @@ output_dir = "_outputs"
 # Retry budget for transient API errors (429 / 5xx).
 max_retries = 5
 
+# Exponential backoff controls for coordinator retries.
+retry_base_delay_s = 1.0
+retry_max_delay_s = 30.0
+
 # Maximum nesting depth for recursive th-run agents.
 max_depth = 3
 
@@ -321,6 +335,10 @@ output_dir = "_outputs"
 
 # Retry budget for transient API errors (429 / 5xx).
 max_retries = 5
+
+# Exponential backoff controls for coordinator retries.
+retry_base_delay_s = 1.0
+retry_max_delay_s = 30.0
 
 # Maximum nesting depth for recursive th-run agents.
 max_depth = 3
@@ -934,6 +952,8 @@ def load_config(
     api_key: str | None = None,
     codex_auth_path: str | None = None,
     max_retries: int | None = None,
+    retry_base_delay_s: float | None = None,
+    retry_max_delay_s: float | None = None,
     max_depth: int | None = None,
     system_prompt: str | None = None,
     cli_system_prompt_file: str | None = None,
@@ -1053,6 +1073,16 @@ def load_config(
         max_retries=max_retries
         if max_retries is not None
         else _coordinator_int(coordinator, "max_retries", Config.max_retries),
+        retry_base_delay_s=retry_base_delay_s
+        if retry_base_delay_s is not None
+        else _coordinator_float(
+            coordinator, "retry_base_delay_s", Config.retry_base_delay_s
+        ),
+        retry_max_delay_s=retry_max_delay_s
+        if retry_max_delay_s is not None
+        else _coordinator_float(
+            coordinator, "retry_max_delay_s", Config.retry_max_delay_s
+        ),
         max_depth=max_depth
         if max_depth is not None
         else _coordinator_int(coordinator, "max_depth", Config.max_depth),
