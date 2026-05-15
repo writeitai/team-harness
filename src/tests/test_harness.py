@@ -387,6 +387,42 @@ def test_team_harness_error_renders_worker_failure_detail():
     assert "/tmp/run/worker_sessions.json" in rendered
 
 
+def test_team_harness_error_renders_coordinator_failure_detail():
+    error = TeamHarnessError(
+        "[Errno 8] nodename nor servname provided, or not known",
+        detail={
+            "kind": "coordinator_api",
+            "summary": "[Errno 8] nodename nor servname provided, or not known",
+            "run_id": "run_1",
+            "provider": "codex",
+            "host": "chatgpt.com",
+            "retry_attempts": 6,
+            "max_retries": 5,
+            "cause_type": "ConnectError",
+            "worker_sessions_path": "/tmp/run/worker_sessions.json",
+            "cleanup_workers": [
+                {
+                    "agent_id": "agent_1",
+                    "agent_type": "claude",
+                    "status": "killed",
+                    "exit_code": 143,
+                    "reason": "terminated during coordinator failure cleanup",
+                }
+            ],
+        },
+    )
+
+    rendered = str(error)
+    assert "Coordinator failure:" in rendered
+    assert "provider=codex" in rendered
+    assert "host=chatgpt.com" in rendered
+    assert "cause=ConnectError" in rendered
+    assert "Harness run: run_1" in rendered
+    assert "Cleanup terminated 1 still-running worker." in rendered
+    assert "outcome=killed" not in rendered
+    assert "exit_code=143" not in rendered
+
+
 # ---------------------------------------------------------------------------
 # Error path: TeamHarnessError raised on loop failure
 # ---------------------------------------------------------------------------

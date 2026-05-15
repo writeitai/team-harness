@@ -66,11 +66,21 @@ class ChatResponse:
 
 class CoordinatorAPIError(Exception):
     def __init__(
-        self, message: str, *, status_code: int | None = None, retryable: bool = False
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retryable: bool = False,
+        error_type: str | None = None,
+        cause_type: str | None = None,
+        host: str | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.retryable = retryable
+        self.error_type = error_type or type(self).__name__
+        self.cause_type = cause_type
+        self.host = host
 
 
 class _AsyncNullContext:
@@ -247,6 +257,9 @@ def _translate_api_error(
     if isinstance(exc, APIStatusError):
         retryable = exc.status_code == 429 or exc.status_code >= 500
         return CoordinatorAPIError(
-            exc.message, status_code=exc.status_code, retryable=retryable
+            exc.message,
+            status_code=exc.status_code,
+            retryable=retryable,
+            cause_type=type(exc).__name__,
         )
-    return CoordinatorAPIError(str(exc), retryable=True)
+    return CoordinatorAPIError(str(exc), retryable=True, cause_type=type(exc).__name__)

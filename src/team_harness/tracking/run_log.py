@@ -5,11 +5,14 @@ from pathlib import Path
 import re
 
 from team_harness.tracking.models import AgentRecord
+from team_harness.tracking.models import CoordinatorRetryRecord
+from team_harness.tracking.models import RunFailureRecord
 from team_harness.tracking.models import RunRecord
 from team_harness.tracking.models import ToolCallRecord
 from team_harness.tracking.models import TurnRecord
 
 _AGENT_ID_RE = re.compile(r"^agent_[a-zA-Z0-9]+$")
+_MAX_COORDINATOR_RETRY_RECORDS = 100
 
 
 class RunLogWriter:
@@ -35,6 +38,9 @@ class RunLogWriter:
     @property
     def error(self) -> str | None:
         return self._log.error
+
+    def snapshot_failure(self) -> RunFailureRecord | None:
+        return self._log.failure.model_copy(deep=True) if self._log.failure else None
 
     def record_turn_delta(
         self,
@@ -103,11 +109,23 @@ class RunLogWriter:
                 break
         self._flush()
 
-    def finalize(self, error: str | None = None) -> None:
+    def record_coordinator_retry(self, record: CoordinatorRetryRecord) -> None:
+        self._log.coordinator_retries.append(record)
+        if len(self._log.coordinator_retries) > _MAX_COORDINATOR_RETRY_RECORDS:
+            self._log.coordinator_retries = self._log.coordinator_retries[
+                -_MAX_COORDINATOR_RETRY_RECORDS:
+            ]
+        self._flush()
+
+    def finalize(
+        self, error: str | None = None, failure: RunFailureRecord | None = None
+    ) -> None:
         if self._log.end is None:
             self._log.end = datetime.now(timezone.utc)
         if error and not self._log.error:
             self._log.error = error
+        if failure is not None and self._log.failure is None:
+            self._log.failure = failure
         self._flush()
 
     def _flush(self) -> None:

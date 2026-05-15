@@ -34,6 +34,7 @@ from team_harness.tools.todo_tools import build_todo_tool_bindings
 from team_harness.tracking.context import ContextTracker
 from team_harness.tracking.context import KNOWN_CODEX_MODELS
 from team_harness.tracking.context import resolve_model_limit
+from team_harness.tracking.models import AgentRecord
 from team_harness.tracking.run_log import RunLogWriter
 from team_harness.tracking.worker_sessions import build_worker_failure_detail
 from team_harness.tracking.worker_sessions import write_worker_sessions_manifest
@@ -61,6 +62,8 @@ class TeamHarness:
         codex_auth_path: str | None = None,
         agents: str | list[str] | None = None,
         max_retries: int | None = None,
+        retry_base_delay_s: float | None = None,
+        retry_max_delay_s: float | None = None,
         max_depth: int | None = None,
         system_prompt: str | None = None,
         system_prompt_file: str | None = None,
@@ -77,6 +80,8 @@ class TeamHarness:
         self._codex_auth_path = codex_auth_path
         self._agents = agents
         self._max_retries = max_retries
+        self._retry_base_delay_s = retry_base_delay_s
+        self._retry_max_delay_s = retry_max_delay_s
         self._max_depth = max_depth
         self._system_prompt = system_prompt
         self._system_prompt_file = system_prompt_file
@@ -100,6 +105,8 @@ class TeamHarness:
             api_key=self._api_key,
             codex_auth_path=self._codex_auth_path,
             max_retries=self._max_retries,
+            retry_base_delay_s=self._retry_base_delay_s,
+            retry_max_delay_s=self._retry_max_delay_s,
             max_depth=self._max_depth,
             system_prompt=self._system_prompt,
             cli_system_prompt_file=self._system_prompt_file,
@@ -241,6 +248,9 @@ class TeamHarnessError(Exception):
     def __str__(self) -> str:
         if not self.detail:
             return self.message
+        kind = str(self.detail.get("kind") or "")
+        if kind.startswith("coordinator_"):
+            return _render_coordinator_error(self.message, self.detail)
         parts = [self.message]
         exit_code = self.detail.get("exit_code")
         elapsed = self.detail.get("elapsed_seconds")
@@ -320,11 +330,96 @@ def _build_error_detail(
 ) -> dict[str, Any] | None:
     if run_log is None:
         return None
+    failure = run_log.snapshot_failure()
+    if failure is not None and failure.kind.startswith("coordinator_"):
+        return _build_coordinator_failure_detail(
+            failure=failure,
+            run_log=run_log,
+            agents=run_log.snapshot_agents(),
+            session_output_dir=session_output_dir,
+        )
     return build_worker_failure_detail(
         summary=summary,
         agents=run_log.snapshot_agents(),
         session_output_dir=session_output_dir,
     )
+
+
+def _build_coordinator_failure_detail(
+    *,
+    failure: Any,
+    run_log: RunLogWriter,
+    agents: list[AgentRecord],
+    session_output_dir: str | Path,
+) -> dict[str, Any]:
+    session_dir = Path(session_output_dir).resolve()
+    cleanup_workers = [
+        {
+            "agent_id": record.id,
+            "agent_type": record.agent_type,
+            "status": record.status,
+            "exit_code": record.exit_code,
+            "reason": "terminated during coordinator failure cleanup",
+        }
+        for record in agents
+        if record.status == "killed"
+    ]
+    return {
+        "kind": failure.kind,
+        "summary": failure.message,
+        "run_id": run_log.run_id,
+        "run_json_path": str(run_log.path.resolve()),
+        "session_output_dir": str(session_dir),
+        "provider": failure.provider,
+        "model": failure.model,
+        "api_base": failure.api_base,
+        "host": failure.host,
+        "error_type": failure.error_type,
+        "cause_type": failure.cause_type,
+        "status_code": failure.status_code,
+        "retryable": failure.retryable,
+        "retry_attempts": failure.retry_attempts,
+        "max_retries": failure.max_retries,
+        "worker_sessions_path": str((session_dir / "worker_sessions.json").resolve()),
+        "cleanup_workers": cleanup_workers,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _render_coordinator_error(message: str, detail: dict[str, Any]) -> str:
+    parts = [message]
+    provider = detail.get("provider")
+    host = detail.get("host")
+    retry_attempts = detail.get("retry_attempts")
+    max_retries = detail.get("max_retries")
+    cause = detail.get("cause_type") or detail.get("error_type")
+    fields = []
+    if provider:
+        fields.append(f"provider={provider}")
+    if host:
+        fields.append(f"host={host}")
+    if retry_attempts is not None:
+        fields.append(f"retry_attempts={retry_attempts}")
+    if max_retries is not None:
+        fields.append(f"max_retries={max_retries}")
+    if cause:
+        fields.append(f"cause={cause}")
+    if fields:
+        parts.append(f"Coordinator failure: {' '.join(fields)}")
+    run_id = detail.get("run_id")
+    if run_id:
+        parts.append(f"Harness run: {run_id}")
+    worker_sessions_path = detail.get("worker_sessions_path")
+    if worker_sessions_path:
+        parts.append(f"Worker sessions: {worker_sessions_path}")
+    cleanup_workers = detail.get("cleanup_workers")
+    if isinstance(cleanup_workers, list) and cleanup_workers:
+        count = len(cleanup_workers)
+        parts.append(
+            f"Cleanup terminated {count} still-running worker"
+            f"{'' if count == 1 else 's'}."
+        )
+    return "\n\n".join(parts)
 
 
 def _build_agent_summaries(manager: AgentManager) -> list[AgentSummary]:

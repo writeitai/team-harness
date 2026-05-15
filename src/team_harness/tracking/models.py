@@ -101,6 +101,42 @@ class WorkerSessionsManifest(BaseModel):
     workers: list[WorkerSessionRecord] = Field(default_factory=list)
 
 
+class CoordinatorRetryRecord(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=False)
+
+    attempt: int
+    max_retries: int
+    will_retry: bool
+    sleep_seconds: float | None = None
+    provider: str
+    model: str
+    api_base: str
+    host: str | None = None
+    error_type: str
+    cause_type: str | None = None
+    status_code: int | None = None
+    retryable: bool
+    message: str
+    recorded_at: datetime
+
+
+class RunFailureRecord(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=False)
+
+    kind: str
+    message: str
+    provider: str
+    model: str
+    api_base: str
+    host: str | None = None
+    error_type: str
+    cause_type: str | None = None
+    status_code: int | None = None
+    retryable: bool | None = None
+    retry_attempts: int = 0
+    max_retries: int | None = None
+
+
 class RunRecord(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=False)
 
@@ -108,8 +144,10 @@ class RunRecord(BaseModel):
     start: datetime
     end: datetime | None = None
     error: str | None = None
+    failure: RunFailureRecord | None = None
     provider: str
     coordinator_model: str
     api_base: str
+    coordinator_retries: list[CoordinatorRetryRecord] = Field(default_factory=list)
     turns: list[TurnRecord] = Field(default_factory=list)
     agents: list[AgentRecord] = Field(default_factory=list)

@@ -5,6 +5,8 @@ from datetime import timezone
 import json
 
 from team_harness.tracking.models import AgentRecord
+from team_harness.tracking.models import CoordinatorRetryRecord
+from team_harness.tracking.models import RunFailureRecord
 from team_harness.tracking.models import ToolCallRecord
 from team_harness.tracking.run_log import RunLogWriter
 
@@ -101,3 +103,55 @@ def test_snapshot_agents_returns_copy(tmp_path):
 
     data = json.loads((tmp_path / "run.json").read_text())
     assert data["agents"][0]["status"] == "running"
+
+
+def test_run_log_records_coordinator_retries_and_failure(tmp_path):
+    writer = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider="codex",
+        model="gpt-5.5",
+        api_base="https://chatgpt.com/backend-api/codex/responses",
+    )
+    writer.record_coordinator_retry(
+        CoordinatorRetryRecord(
+            attempt=1,
+            max_retries=5,
+            will_retry=True,
+            sleep_seconds=1.0,
+            provider="codex",
+            model="gpt-5.5",
+            api_base="https://chatgpt.com/backend-api/codex/responses",
+            host="chatgpt.com",
+            error_type="CoordinatorAPIError",
+            cause_type="ConnectError",
+            status_code=None,
+            retryable=True,
+            message="dns failed",
+            recorded_at=datetime.now(timezone.utc),
+        )
+    )
+    writer.finalize(
+        error="dns failed",
+        failure=RunFailureRecord(
+            kind="coordinator_api",
+            message="dns failed",
+            provider="codex",
+            model="gpt-5.5",
+            api_base="https://chatgpt.com/backend-api/codex/responses",
+            host="chatgpt.com",
+            error_type="CoordinatorAPIError",
+            cause_type="ConnectError",
+            retryable=True,
+            retry_attempts=1,
+            max_retries=5,
+        ),
+    )
+
+    data = json.loads((tmp_path / "run.json").read_text())
+    assert data["error"] == "dns failed"
+    assert data["failure"]["kind"] == "coordinator_api"
+    assert data["failure"]["host"] == "chatgpt.com"
+    assert data["coordinator_retries"][0]["attempt"] == 1
+    assert data["coordinator_retries"][0]["will_retry"] is True
+    assert writer.snapshot_failure().kind == "coordinator_api"

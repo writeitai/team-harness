@@ -143,6 +143,8 @@ harness = TeamHarness(
     codex_auth_path="~/.codex/auth.json",
     agents=["codex", "gemini"], # or "codex,gemini"
     max_retries=5,
+    retry_base_delay_s=1.0,
+    retry_max_delay_s=30.0,
     max_depth=3,
     system_prompt="Extra instructions",
     system_prompt_file="prompt.txt",
@@ -365,6 +367,18 @@ deliverables there. The harness also writes a compact
 `worker_sessions.json` manifest in that directory summarizing every spawned
 worker for the run. Relative `output_dir` values resolve against the effective
 `--cwd`.
+
+Coordinator retry behavior is controlled by three `[coordinator]` keys:
+
+```toml
+max_retries = 5
+retry_base_delay_s = 1.0
+retry_max_delay_s = 30.0
+```
+
+Retry records for transient coordinator API/network failures are written to
+`run.json` under `coordinator_retries`, and the terminal run-level failure is
+written under `failure`.
 
 `th init --force` overwrites `config.toml` but preserves existing `coordinator_system_message.md`, `worker_suffix.md`, and `worker_footer.md` files to protect user customizations. Missing sidecar files are re-created.
 
