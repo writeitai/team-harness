@@ -31,8 +31,9 @@ def test_spawn_agent_schema_exposes_resume_fields():
     }
     assert properties["resume_from_session_id"]["type"] == "string"
     assert "worker_sessions.json" in properties["resume_from_session_id"]["description"]
-    assert "semantic log stem" in properties["output_path"]["description"]
-    assert "<stem>.stdout.jsonl" in properties["output_path"]["description"]
+    assert "output_path" not in properties
+    assert "filesystem-safe worker label" in properties["worker_label"]["description"]
+    assert schema["function"]["parameters"]["additionalProperties"] is False
 
 
 def test_spawn_agent_schema_describes_template_default_flags(config):
@@ -144,7 +145,74 @@ async def test_spawn_agent_appends_suffix_before_output_instruction(
 
 
 @pytest.mark.asyncio
-async def test_spawn_agent_treats_output_path_as_log_stem(
+async def test_spawn_agent_treats_worker_label_as_session_log_directory(
+    tmp_path, config, manager, ui
+):
+    config.run_dir = tmp_path / "run"
+    config.run_dir.mkdir(exist_ok=True)
+    config.agent_templates = {"codex": fake_agent_template()}
+    session_output_dir = tmp_path / "session"
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=config.run_dir,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(
+        manager=manager,
+        run_log=run_log,
+        config=config,
+        ui=ui,
+        session_output_dir=str(session_output_dir),
+    )
+
+    agent_id = await agent_tools.spawn_agent(
+        type="codex",
+        prompt="review the plan",
+        cwd=str(tmp_path),
+        worker_label="leaf2_plan_review_codex",
+    )
+    await asyncio.wait_for(manager.wait_one(agent_id), 2)
+    await asyncio.sleep(0.1)
+    state = manager.get(agent_id)
+
+    assert (
+        state.stdout_log
+        == (
+            session_output_dir
+            / "workers"
+            / f"leaf2_plan_review_codex__{agent_id}"
+            / "stdout.jsonl"
+        ).resolve()
+    )
+    assert (
+        state.stderr_log
+        == (
+            session_output_dir
+            / "workers"
+            / f"leaf2_plan_review_codex__{agent_id}"
+            / "stderr.log"
+        ).resolve()
+    )
+    assert state.stdout_log.exists()
+    assert state.stderr_log.exists()
+
+    worker_dir = state.stdout_log.parent
+    (worker_dir / "review.md").write_text("review", encoding="utf-8")
+    manifest_path = write_worker_sessions_manifest(
+        run_id="run_1",
+        session_output_dir=session_output_dir,
+        agents=run_log.snapshot_agents(),
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["workers"][0]["stdout_path"] == str(state.stdout_log.resolve())
+    assert worker_dir.is_dir()
+    assert (worker_dir / "review.md").read_text(encoding="utf-8") == "review"
+
+
+async def test_spawn_agent_rejects_path_like_worker_label(
     tmp_path, config, manager, ui
 ):
     config.run_dir = tmp_path / "run"
@@ -157,37 +225,49 @@ async def test_spawn_agent_treats_output_path_as_log_stem(
         model=config.model,
         api_base=config.api_base,
     )
-    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
-    output_stem = tmp_path / "session" / "leaf2_plan_review_codex"
-
-    agent_id = await agent_tools.spawn_agent(
-        type="codex",
-        prompt="review the plan",
-        cwd=str(tmp_path),
-        output_path=str(output_stem),
+    agent_tools.setup(
+        manager=manager,
+        run_log=run_log,
+        config=config,
+        ui=ui,
+        session_output_dir=str(tmp_path / "session"),
     )
-    await asyncio.wait_for(manager.wait_one(agent_id), 2)
-    await asyncio.sleep(0.1)
-    state = manager.get(agent_id)
 
-    assert state.stdout_log == output_stem.with_name(output_stem.name + ".stdout.jsonl")
-    assert state.stderr_log == output_stem.with_name(output_stem.name + ".stderr.log")
-    assert state.stdout_log.exists()
-    assert state.stderr_log.exists()
-    assert not output_stem.exists()
+    with pytest.raises(ValueError, match="worker_label"):
+        await agent_tools.spawn_agent(
+            type="codex",
+            prompt="review the plan",
+            cwd=str(tmp_path),
+            worker_label="../escaped",
+        )
 
-    output_stem.mkdir()
-    (output_stem / "review.md").write_text("review", encoding="utf-8")
-    manifest_path = write_worker_sessions_manifest(
+
+async def test_spawn_agent_rejects_removed_output_path(tmp_path, config, manager, ui):
+    config.run_dir = tmp_path / "run"
+    config.run_dir.mkdir(exist_ok=True)
+    config.agent_templates = {"codex": fake_agent_template()}
+    run_log = RunLogWriter(
         run_id="run_1",
-        session_output_dir=output_stem.parent,
-        agents=run_log.snapshot_agents(),
+        run_dir=config.run_dir,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
     )
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    agent_tools.setup(
+        manager=manager,
+        run_log=run_log,
+        config=config,
+        ui=ui,
+        session_output_dir=str(tmp_path / "session"),
+    )
 
-    assert manifest["workers"][0]["stdout_path"] == str(state.stdout_log.resolve())
-    assert output_stem.is_dir()
-    assert (output_stem / "review.md").read_text(encoding="utf-8") == "review"
+    with pytest.raises(ValueError, match="unknown spawn_agent fields: output_path"):
+        await agent_tools.spawn_agent(
+            type="codex",
+            prompt="review the plan",
+            cwd=str(tmp_path),
+            output_path="old-stem",
+        )
 
 
 @pytest.mark.asyncio

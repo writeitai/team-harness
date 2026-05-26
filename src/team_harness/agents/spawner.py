@@ -62,8 +62,8 @@ async def spawn(
         allowed_agents=allowed_agents,
     )
 
-    stdout_path = stdout_path or log_dir / f"{agent_id}_stdout.log"
-    stderr_path = stderr_path or log_dir / f"{agent_id}_stderr.log"
+    stdout_path = (stdout_path or log_dir / f"{agent_id}_stdout.log").resolve()
+    stderr_path = (stderr_path or log_dir / f"{agent_id}_stderr.log").resolve()
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
 
