@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `spawn_agent(worker_label=...)` now replaces `spawn_agent(output_path=...)`.
+  Worker labels are filesystem-safe names, not paths, and worker stdout/stderr
+  are always written under the run session output directory.
+
 ## [0.2.8] - 2026-05-14
 
 ### Fixed

@@ -7,6 +7,7 @@ from datetime import timezone
 import json
 import os
 from pathlib import Path
+import re
 from typing import TYPE_CHECKING
 import uuid
 
@@ -40,6 +41,19 @@ _wait_stderr_cursors: dict[str, int] = {}
 # Keep incremental stdout reads bounded so one stale cursor cannot flood the
 # coordinator context with an entire long-running worker log.
 READ_NEW_AGENT_OUTPUT_MAX_BYTES = 64 * 1024
+WORKER_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+SPAWN_AGENT_KEYS = {
+    "type",
+    "prompt",
+    "cwd",
+    "model",
+    "mode",
+    "resume_from_session_id",
+    "flags",
+    "env",
+    "agents",
+    "worker_label",
+}
 
 _READ_NEW_TRUNCATION_TEMPLATE = (
     "[read_new_agent_output truncated: omitted {omitted_bytes} of "
@@ -76,15 +90,39 @@ def _tail_text(path: Path, n_chars: int) -> str:
 
 
 def _worker_log_paths(
-    *, run_dir: Path, agent_id: str, output_path: str | None
+    *, run_dir: Path, agent_id: str, worker_label: str | None, session_output_dir: str
 ) -> tuple[Path, Path]:
-    if output_path:
-        stem = Path(output_path)
-        return (
-            stem.with_name(stem.name + ".stdout.jsonl"),
-            stem.with_name(stem.name + ".stderr.log"),
+    output_root = (
+        Path(session_output_dir).expanduser().resolve()
+        if session_output_dir
+        else run_dir.expanduser().resolve()
+    )
+    label = _worker_log_label(agent_id=agent_id, worker_label=worker_label)
+    worker_dir = (output_root / "workers" / label).resolve()
+    if not worker_dir.is_relative_to(output_root):
+        msg = f"worker log directory escaped session output directory: {worker_dir}"
+        raise ValueError(msg)
+    return worker_dir / "stdout.jsonl", worker_dir / "stderr.log"
+
+
+def _worker_log_label(*, agent_id: str, worker_label: str | None) -> str:
+    if worker_label is None:
+        return agent_id
+    label = worker_label.strip()
+    if not WORKER_LABEL_PATTERN.fullmatch(label):
+        msg = (
+            "worker_label must start with a letter or digit and contain only "
+            "letters, digits, '.', '_', or '-'"
         )
-    return run_dir / f"{agent_id}_stdout.log", run_dir / f"{agent_id}_stderr.log"
+        raise ValueError(msg)
+    return f"{label}__{agent_id}"
+
+
+def _validate_spawn_agent_kwargs(kwargs: Mapping[str, object]) -> None:
+    unknown = sorted(set(kwargs) - SPAWN_AGENT_KEYS)
+    if unknown:
+        msg = f"unknown spawn_agent fields: {', '.join(unknown)}"
+        raise ValueError(msg)
 
 
 def _read_new_stdout_chunk(
@@ -538,29 +576,30 @@ def spawn_agent_schema(
                         "description": "Only used when type == 'harness'.",
                         "items": {"type": "string"},
                     },
-                    "output_path": {
+                    "worker_label": {
                         "type": "string",
                         "description": (
-                            "Optional semantic log stem. Team-harness writes "
-                            "worker stdout/stderr to derived files named "
-                            "<stem>.stdout.jsonl and <stem>.stderr.log. "
-                            "Worker-authored deliverables should use separate "
-                            "files or directories under the session output "
-                            "directory."
+                            "Optional filesystem-safe worker label. "
+                            "Team-harness writes worker stdout/stderr under "
+                            "the session output directory at "
+                            "workers/<label>__<agent_id>/. The label must not "
+                            "contain path separators."
                         ),
                     },
                 },
                 "required": ["type", "prompt", "cwd"],
+                "additionalProperties": False,
             },
         },
     }
 
 
 async def spawn_agent(**kwargs: object) -> str:
+    _validate_spawn_agent_kwargs(kwargs)
     manager, run_log, config, ui = _require_setup()
     agent_type = str(kwargs["type"])
     prompt = str(kwargs["prompt"])
-    cwd = str(kwargs["cwd"])
+    cwd = str(Path(str(kwargs["cwd"])).expanduser().resolve())
     model = str(kwargs["model"]) if kwargs.get("model") is not None else None
     flags = (
         [str(item) for item in kwargs.get("flags", [])]
@@ -576,8 +615,8 @@ async def spawn_agent(**kwargs: object) -> str:
         if kwargs.get("agents") is not None
         else None
     )
-    output_path = (
-        str(kwargs["output_path"]) if kwargs.get("output_path") is not None else None
+    worker_label = (
+        str(kwargs["worker_label"]) if kwargs.get("worker_label") is not None else None
     )
     if agent_type == "harness":
         try:
@@ -597,7 +636,10 @@ async def spawn_agent(**kwargs: object) -> str:
     if run_dir is None:
         raise RuntimeError("config.run_dir must be set before spawning agents")
     stdout_log, stderr_log = _worker_log_paths(
-        run_dir=run_dir, agent_id=agent_id, output_path=output_path
+        run_dir=run_dir,
+        agent_id=agent_id,
+        worker_label=worker_label,
+        session_output_dir=_session_output_dir,
     )
     spawn_result = await spawner.spawn(
         agent_id=agent_id,
@@ -943,9 +985,10 @@ def build_agent_tool_bindings(
     wait_stderr_cursors: dict[str, int] = {}
 
     async def _spawn_agent(**kwargs: object) -> str:
+        _validate_spawn_agent_kwargs(kwargs)
         agent_type = str(kwargs["type"])
         prompt = str(kwargs["prompt"])
-        cwd = str(kwargs["cwd"])
+        cwd = str(Path(str(kwargs["cwd"])).expanduser().resolve())
         model_val = str(kwargs["model"]) if kwargs.get("model") is not None else None
         flags = (
             [str(item) for item in kwargs.get("flags", [])]
@@ -961,9 +1004,9 @@ def build_agent_tool_bindings(
             if kwargs.get("agents") is not None
             else None
         )
-        output_path = (
-            str(kwargs["output_path"])
-            if kwargs.get("output_path") is not None
+        worker_label = (
+            str(kwargs["worker_label"])
+            if kwargs.get("worker_label") is not None
             else None
         )
         if agent_type == "harness":
@@ -984,7 +1027,10 @@ def build_agent_tool_bindings(
         if run_dir is None:
             raise RuntimeError("config.run_dir must be set before spawning agents")
         stdout_log, stderr_log = _worker_log_paths(
-            run_dir=run_dir, agent_id=agent_id, output_path=output_path
+            run_dir=run_dir,
+            agent_id=agent_id,
+            worker_label=worker_label,
+            session_output_dir=session_output_dir,
         )
         spawn_result = await spawner.spawn(
             agent_id=agent_id,

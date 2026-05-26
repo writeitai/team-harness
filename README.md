@@ -830,17 +830,22 @@ The agent reads these files on demand via its file tools — they are not loaded
 Each run creates a directory under `~/.team-harness/runs/<run-id>/` containing:
 
 - `run.json` — full delta-based run log (losslessly replayable conversation)
-- `<agent-id>_stdout.log` / `<agent-id>_stderr.log` — per-agent output
 - `todo.json` — persistent task list
-
-When a coordinator supplies a semantic `output_path` stem for a worker, the
-worker stdout/stderr logs are written beside that stem as
-`<stem>.stdout.jsonl` and `<stem>.stderr.log`. The stem itself remains available
-for worker-authored artifact directories or files.
 
 Each run also creates `<output_dir>/<run-id>/worker_sessions.json`, a compact
 worker index with per-agent prompt, status, timestamps, log paths, and
-resume-related metadata.
+resume-related metadata. Worker stdout/stderr logs are written under the same
+session output directory:
+
+```text
+<output_dir>/<run-id>/workers/<worker-label>__<agent-id>/stdout.jsonl
+<output_dir>/<run-id>/workers/<worker-label>__<agent-id>/stderr.log
+```
+
+When a coordinator supplies `worker_label`, it is treated as a filesystem-safe
+label, not as a path. Team-harness rejects labels with path separators and keeps
+all worker logs inside the session output directory. Workers without labels use
+their generated agent id as the directory name.
 
 ## Trust model
 
