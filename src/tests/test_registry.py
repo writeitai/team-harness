@@ -299,6 +299,45 @@ def test_build_command_default_claude_contains_verbose():
     ]
 
 
+def test_build_command_default_antigravity_fresh():
+    command = build_command(
+        agent_type="antigravity", prompt="do thing", config=Config()
+    )
+
+    assert command == [
+        "agy",
+        "--dangerously-skip-permissions",
+        "--print",
+        "--print-timeout",
+        "60m",
+        "do thing",
+    ]
+
+
+def test_build_command_default_antigravity_resume_and_model_override():
+    command = build_command(
+        agent_type="antigravity",
+        prompt="continue",
+        config=Config(),
+        mode="resume",
+        resume_session_id="conversation-123",
+        model="ignored",
+    )
+
+    assert command == [
+        "agy",
+        "--dangerously-skip-permissions",
+        "--print",
+        "--print-timeout",
+        "60m",
+        "--conversation",
+        "conversation-123",
+        "continue",
+    ]
+    assert "--model" not in command
+    assert "ignored" not in command
+
+
 def test_build_command_default_openhands_fresh():
     command = build_command(agent_type="openhands", prompt="do thing", config=Config())
 

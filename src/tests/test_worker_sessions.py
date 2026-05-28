@@ -8,6 +8,7 @@ from team_harness.tracking.models import AgentRecord
 from team_harness.tracking.models import WorkerResumeInfo
 from team_harness.tracking.worker_sessions import build_worker_failure_detail
 from team_harness.tracking.worker_sessions import build_worker_sessions_manifest
+from team_harness.tracking.worker_sessions import resume_info_for_agent_type
 from team_harness.tracking.worker_sessions import write_worker_sessions_manifest
 
 
@@ -131,6 +132,13 @@ def test_custom_agent_types_default_to_no_resume_support(tmp_path):
     assert worker.session.provider_session_id is None
     assert worker.resume.supported is False
     assert worker.resume.preferred_mode is None
+
+
+def test_antigravity_resume_info_prefers_resume_mode():
+    resume = resume_info_for_agent_type("antigravity")
+
+    assert resume.supported is True
+    assert resume.preferred_mode == "resume"
 
 
 def test_write_worker_sessions_manifest_records_failed_before_session_diagnostics(

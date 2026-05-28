@@ -213,6 +213,26 @@ field_path = ["session_id"]
 # ANTHROPIC_API_KEY = ""
 # -----------------------------------------------------------------------
 
+# Antigravity CLI worker. `--print` runs a single prompt non-interactively,
+# which is the mode team-harness needs for worker subprocesses. Antigravity
+# does not expose a model flag in its CLI help, so model overrides are not
+# injected by default. `--conversation <id>` is available for explicit resume
+# when a caller already knows the Antigravity conversation id, but automatic
+# session capture is not wired up because print mode does not emit stream-json.
+[agents.antigravity]
+command = ["agy"]
+shared_flags = [
+    "--dangerously-skip-permissions",
+    "--print",
+    "--print-timeout", "60m",
+]
+resume_flags = ["--conversation", "{session_id}"]
+model_flag = false
+deduplicate_flags = [
+    "--dangerously-skip-permissions",
+    "--print",
+]
+
 # OpenHands worker. `--override-with-envs` is required or `LLM_MODEL`
 # is ignored by OpenHands-CLI. `session_capture` is intentionally
 # omitted: `--json` emits multi-line pretty JSON blocks delimited by
@@ -290,7 +310,7 @@ shutdown_timeout_s = 10.0
 min_agent_lifetime_before_kill_s = 600.0
 
 # Restrict which agent types the coordinator can spawn. Leave commented to allow all.
-# allowed_agents = ["codex", "gemini", "claude", "openhands", "opencode", "pi", "harness"]
+# allowed_agents = ["codex", "gemini", "claude", "antigravity", "openhands", "opencode", "pi", "harness"]
 
 # --- Experimental Codex subscription coordinator ---
 # provider = "codex"
@@ -353,7 +373,7 @@ shutdown_timeout_s = 10.0
 min_agent_lifetime_before_kill_s = 600.0
 
 # Restrict which agent types the coordinator can spawn. Leave commented to allow all.
-# allowed_agents = ["codex", "gemini", "claude", "openhands", "opencode", "pi", "harness"]
+# allowed_agents = ["codex", "gemini", "claude", "antigravity", "openhands", "opencode", "pi", "harness"]
 
 # --- Experimental Codex subscription coordinator ---
 # provider = "codex"
