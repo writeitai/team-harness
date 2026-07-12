@@ -116,10 +116,17 @@ For each worker the manifest still marks `running`, and that `is_group_alive` co
 caller can choose:
 
 - **drain (bounded)** *(the recommended default)* — do **not** kill it; wait (poll
-  `is_group_alive`, up to a **timeout**) for the group to exit, then parse its now-complete
-  output files exactly as the normal flow would (`session_capture` etc.) and record the salvaged
-  result. If the timeout elapses (a stuck/hung orphan), fall through to reap. This preserves
-  near-complete work and leaves the checkout in a clean, fully-applied state.
+  `is_group_alive`, up to a **timeout**) for the group to exit, then **finalize the worker's
+  manifest record from its now-complete output files** — status, exit code, captured vendor
+  session id (`session_capture`) — exactly the finalization a graceful run performs. If the
+  timeout elapses (a stuck/hung orphan), fall through to reap. This preserves near-complete work
+  and leaves the checkout in a clean, fully-applied state.
+
+  Be precise about what drain delivers: **a complete, auditable worker record plus whatever the
+  worker already did to the checkout — not a run result.** The coordinator that would have
+  consumed the worker's output is gone (it died with the parent), so drain must never fabricate
+  the run-level outcome the coordinator would have produced. The consumer decides how to record
+  the salvage in its own bookkeeping (see §5).
 - **reap** — send `SIGTERM` to the group, wait a short grace period, then `SIGKILL`. Stops the
   leftover immediately. The escape hatch: for an explicit force-stop, a hung orphan past the
   drain timeout, or a crash cause that makes finishing unsafe (an OOM that would just re-trigger,
@@ -176,8 +183,13 @@ Responsibilities split cleanly:
     the duplicate-work window where a second `/register` reclaims a task that's still running;
   - on crash recovery, for the interrupted run's manifest, **pick a policy per orphan**
     (§4.4): bounded drain (the recommended default — let an in-flight worker finish within a
-    timeout and harvest its output, then continue from that completed state), or reap (the escape
-    — kill leftovers, then re-run the iteration), or ignore;
+    timeout, then finalize its record), or reap (the escape — kill leftovers), or ignore;
+  - after a drain, **write its own salvage record** linking the drained workers to its own unit
+    of work — for loopy-loop: a `salvage.json` in the interrupted iteration's directory (drained
+    agent ids, exit codes, pointers to their harness output dirs, a diffstat of the working
+    tree) and a distinct history code (`abandoned_after_drain` rather than plain `abandoned`).
+    The interrupted unit of work is still re-run — drain preserves the workers' output and repo
+    edits, it does not produce the run result the dead coordinator never wrote;
   - surface it operationally (a `doctor` check that warns about a leftover group; a
     `stop --force` that reaps).
 
@@ -194,13 +206,13 @@ says "kill the leftover agents from the task we abandoned." Neither is process a
       (and any live `AgentState`/`AgentRecord` carrier they derive from).
 - [ ] `tracking/worker_sessions.py`: persist the new fields at spawn and on status updates.
 - [ ] `is_group_alive(pgid, starttime)` liveness helper (§4.3).
-- [ ] Policy operations: `drain` (wait for exit up to `drain_timeout_s` + harvest; timeout →
-      reap), `reap` (SIGTERM→grace→SIGKILL), and a
-      `reap_run(manifest_path, policy=..., drain_timeout_s=...)` wrapper + `th reap` CLI
+- [ ] Policy operations: `drain` (wait for exit up to `drain_timeout_s`, then finalize the
+      manifest record from the output files; timeout → reap), `reap` (SIGTERM→grace→SIGKILL),
+      and a `reap_run(manifest_path, policy=..., drain_timeout_s=...)` wrapper + `th reap` CLI
       subcommand, all with `(pgid, starttime)` verification (§4.4).
 - [ ] Tests: liveness true/false + recycled-id guard (starttime mismatch → not-alive/skip);
-      drain (short-lived worker → wait → harvest output); drain timeout → falls through to reap;
-      orphan reap (spawn a sleep, drop the handle, reap via manifest); graceful path unaffected;
-      group kill reaches a nested child.
+      drain (short-lived worker → wait → manifest record finalized from output files); drain
+      timeout → falls through to reap; orphan reap (spawn a sleep, drop the handle, reap via
+      manifest); graceful path unaffected; group kill reaches a nested child.
 - [ ] `CHANGELOG.md`: note the manifest schema addition and the new `reap` surface
       (consumer-facing — AGENTS.md Rule 3).

@@ -116,7 +116,9 @@ reap*: know what was launched, and be able to kill leftovers on restart.
   `max_depth`) is one killable group.
 - Identity + a durable `is_group_alive(pgid, starttime)` liveness check turns the restart
   decision into a **policy per orphan**, not a hardcoded kill: **drain (bounded)** — wait up to a
-  timeout for the worker to finish, then harvest its output; **reap** (SIGTERM→grace→SIGKILL) —
+  timeout for the worker to finish, then finalize its manifest record from the completed output
+  files (a worker record and its repo edits — never a fabricated run result; the dead
+  coordinator's outcome is not reconstructed); **reap** (SIGTERM→grace→SIGKILL) —
   the escape for force-stop / hung-past-timeout / unsafe-to-finish; or **ignore**. `starttime`
   verification guards every path against pid reuse. team-harness stays mechanism-neutral and does
   not hardcode the default; the recommended default for a cost-conscious, git-is-truth consumer
