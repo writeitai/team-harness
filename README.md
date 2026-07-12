@@ -1,6 +1,6 @@
 # Team Harness
 
-Coordination layer for other harnesses (Codex, Gemini, Claude Code, OpenCode, pi, OpenHands).
+Coordination layer for other harnesses (Codex, Gemini, Claude Code, Antigravity, OpenCode, pi, OpenHands).
 
 <br>
 
@@ -55,6 +55,7 @@ Install with `pip install openhands` (the PyPI distribution name is `openhands`,
 | `codex`   | [Codex CLI](https://github.com/openai/codex)               |
 | `gemini`  | [Gemini CLI](https://github.com/google-gemini/gemini-cli)  |
 | `claude`  | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) |
+| `antigravity` | [Antigravity CLI](https://antigravity.google/docs/cli-overview) |
 | `openhands` | [OpenHands CLI](https://github.com/OpenHands/OpenHands-CLI) |
 | `opencode`| [opencode](https://github.com/opencode-ai/opencode)        |
 | `pi`      | [pi](https://github.com/badlogic/pi-mono)                  |
@@ -285,6 +286,20 @@ strategy = "stream_json_event"
 match = { type = "system", subtype = "init" }
 field_path = ["session_id"]
 
+[agents.antigravity]
+command = ["agy"]
+shared_flags = [
+    "--dangerously-skip-permissions",
+    "--print",
+    "--print-timeout", "60m",
+]
+resume_flags = ["--conversation", "{session_id}"]
+model_flag = false
+deduplicate_flags = [
+    "--dangerously-skip-permissions",
+    "--print",
+]
+
 [agents.openhands]
 command = ["openhands"]
 shared_flags = ["--headless", "--json", "--override-with-envs"]
@@ -305,6 +320,8 @@ model_flag = "--model"
 OpenHands runs are not auto-resumable from team-harness today. The `--json` output format is not parseable as stream-json.
 
 `--override-with-envs` is required so `LLM_MODEL` injection works. A side-effect is that any `LLM_MODEL`, `LLM_API_KEY`, or `LLM_BASE_URL` already set in your shell will also be picked up by the worker. Unset or override them if you want deterministic per-run behavior.
+
+Antigravity runs use `agy --print` so the worker can run as a non-interactive subprocess. The CLI does not expose a model flag in `agy --help`, so team-harness does not inject `--model` for this worker by default. Automatic session capture is not configured because print mode does not emit stream-json; callers that already know a conversation id can still use resume mode, which renders `--conversation <id>`.
 
 Custom `[agents.openhands]` sections in existing `.team-harness/config.toml` files will, after upgrade, inherit the new built-in defaults for any fields they do not explicitly set (including `shared_flags`). If your custom section was a standalone agent that coincidentally used the name `openhands`, rename it or explicitly clear inherited fields (e.g. `shared_flags = []`, `prompt_flag = false`, `model_env_vars = []`).
 
@@ -431,6 +448,8 @@ coordinator repeats them through `spawn_agent(flags=[...])`; the built-in Codex
 template uses this for its standalone shared flags such as
 `--dangerously-bypass-approvals-and-sandbox`, and the built-in Claude template
 uses it for `-p`, `--dangerously-skip-permissions`, and `--verbose`.
+The built-in Antigravity template uses it for `--dangerously-skip-permissions`
+and `--print`.
 
 Placeholders that can appear inside `shared_flags`, `resume_prefix`, or
 `resume_flags`:

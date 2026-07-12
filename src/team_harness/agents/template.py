@@ -136,6 +136,19 @@ DEFAULT_AGENT_TEMPLATES: dict[str, AgentTemplate] = {
             field_path=("session_id",),
         ),
     ),
+    "antigravity": AgentTemplate(
+        command=("agy",),
+        shared_flags=(
+            "--dangerously-skip-permissions",
+            "--print",
+            "--print-timeout",
+            "60m",
+        ),
+        resume_flags=("--conversation", "{session_id}"),
+        model_flag=None,
+        deduplicate_flags=("--dangerously-skip-permissions", "--print"),
+        session_capture=None,
+    ),
     "openhands": AgentTemplate(
         command=("openhands",),
         shared_flags=("--headless", "--json", "--override-with-envs"),

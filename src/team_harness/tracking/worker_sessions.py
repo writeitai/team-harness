@@ -26,6 +26,8 @@ def resume_info_for_agent_type(agent_type: str) -> WorkerResumeInfo:
         return WorkerResumeInfo(supported=True, preferred_mode="resume")
     if agent_type == "claude":
         return WorkerResumeInfo(supported=True, preferred_mode="resume")
+    if agent_type == "antigravity":
+        return WorkerResumeInfo(supported=True, preferred_mode="resume")
     if agent_type == "opencode":
         return WorkerResumeInfo(supported=True, preferred_mode="continue")
     # openhands intentionally falls through: no session_capture, no resume wiring yet

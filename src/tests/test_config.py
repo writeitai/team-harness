@@ -58,6 +58,14 @@ def test_default_agent_templates_structured_shape():
         "--dangerously-skip-permissions",
         "--verbose",
     )
+    assert DEFAULT_AGENT_TEMPLATES["antigravity"].command == ("agy",)
+    assert DEFAULT_AGENT_TEMPLATES["antigravity"].shared_flags == (
+        "--dangerously-skip-permissions",
+        "--print",
+        "--print-timeout",
+        "60m",
+    )
+    assert DEFAULT_AGENT_TEMPLATES["antigravity"].model_flag is None
 
 
 def test_find_local_config_in_cwd(tmp_path):
@@ -556,6 +564,7 @@ def test_default_config_text_uses_structured_agents():
     assert "[agents.codex]" in default_config
     assert 'command = ["codex", "exec"]' in default_config
     assert "[agents.codex.session_capture]" in default_config
+    assert "[agents.antigravity]" in default_config
     assert 'command = ["th", "run"]' in default_config
     assert (
         'coordinator_system_message_file = "coordinator_system_message.md"'
@@ -573,6 +582,7 @@ def test_local_config_text_uses_structured_agents():
     assert re.search(r"(?m)^template\s*=\s*\"", local_config) is None
     assert "[agents.codex]" in local_config
     assert 'command = ["codex", "exec"]' in local_config
+    assert "[agents.antigravity]" in local_config
 
 
 def _write_sample_and_load(
@@ -725,6 +735,13 @@ def test_default_config_text_contains_verified_flag_tokens():
     assert 'deduplicate_flags = [\n    "-p",' in text
     assert "[agents.claude.session_capture]" in text
     assert 'match = { type = "system", subtype = "init" }' in text
+    # Antigravity
+    assert "[agents.antigravity]" in text
+    assert 'command = ["agy"]' in text
+    assert '"--print"' in text
+    assert '"--print-timeout", "60m"' in text
+    assert 'resume_flags = ["--conversation", "{session_id}"]' in text
+    assert "model_flag = false" in text
     # Claude model_env_vars — the 3 'main model' ones, NOT the haiku ones.
     assert '"ANTHROPIC_MODEL"' in text
     assert '"ANTHROPIC_DEFAULT_SONNET_MODEL"' in text
