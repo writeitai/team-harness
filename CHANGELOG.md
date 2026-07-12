@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Built-in `antigravity` worker support for Google Antigravity CLI (`agy`)
   print-mode subprocesses.
+- **Durable worker process identity and orphan reaping (TH-D5).** Workers are
+  now spawned as leaders of their own process group (`start_new_session=True`),
+  and their `pid`/`pgid`/`starttime` are persisted at spawn time in `run.json`
+  (and surfaced in `worker_sessions.json`). New `th reap RUN_REF` command and
+  `team_harness.tracking.reaper.reap_run()` API apply a policy to workers a
+  crashed run left behind: `drain` (default — wait for them to finish, then
+  finalize their records), `reap` (SIGTERM→grace→SIGKILL the group), or
+  `ignore`. Every action verifies `(pgid, starttime)` identity, so a recycled
+  pid is never touched. Design: `design/designs/process-lifecycle-and-reaping.md`.
+
+### Changed
+
+- `worker_sessions.json` `schema_version` bumped 2 → 3: worker records gain
+  optional `pid`, `pgid`, and `starttime` fields (null for runs recorded by
+  older versions).
+- `run.json` gains a top-level `session_output_dir` field (recorded at run
+  start) and worker entries gain `pid`/`pgid`/`starttime`; `run.json` is now
+  written atomically (temp file + rename) so a crash can never truncate it.
+- Graceful shutdown now terminates a straggler worker's whole process group
+  when its pgid is known, not just the leader process — a worker CLI's own
+  child processes no longer outlive shutdown. Note: because workers now run in
+  their own process group, they no longer receive terminal Ctrl+C directly;
+  team-harness's own shutdown/cleanup paths handle their termination.
 
 ## [0.2.10] - 2026-05-26
 

@@ -1,6 +1,10 @@
 # Design: Worker Process Lifecycle and Orphan Reaping
 
-**Status:** Proposed (design accepted as TH-D5; implementation pending)
+**Status:** Implemented (design accepted as TH-D5; shipped in the process-lifecycle
+change — see `CHANGELOG.md` Unreleased. Implementation notes: the crash-durable
+record is `run.json`, which is flushed at spawn time — `worker_sessions.json` is
+finalize-only, so `reap_run()` reads `run.json`; and liveness excludes zombies,
+which hold no resources and cannot be killed.)
 **Date:** 2026-07-12
 **Decision:** `design/decisions.md` TH-D5 (and its premises TH-D2, TH-D4).
 **Primary consumer:** `loopy-loop`, which runs team-harness in a long-horizon loop and needs
@@ -200,19 +204,25 @@ says "kill the leftover agents from the task we abandoned." Neither is process a
 
 ## 6. Implementation checklist
 
-- [ ] `agents/spawner.py`: `start_new_session=True`; capture `pid`/`pgid`/`starttime` into the
+- [x] `agents/spawner.py`: `start_new_session=True`; capture `pid`/`pgid`/`starttime` into the
       `SpawnResult`.
-- [ ] `tracking/models.py`: add `pid`/`pgid`/`starttime` to `WorkerSessionRecord`
-      (and any live `AgentState`/`AgentRecord` carrier they derive from).
-- [ ] `tracking/worker_sessions.py`: persist the new fields at spawn and on status updates.
-- [ ] `is_group_alive(pgid, starttime)` liveness helper (§4.3).
-- [ ] Policy operations: `drain` (wait for exit up to `drain_timeout_s`, then finalize the
-      manifest record from the output files; timeout → reap), `reap` (SIGTERM→grace→SIGKILL),
-      and a `reap_run(manifest_path, policy=..., drain_timeout_s=...)` wrapper + `th reap` CLI
-      subcommand, all with `(pgid, starttime)` verification (§4.4).
-- [ ] Tests: liveness true/false + recycled-id guard (starttime mismatch → not-alive/skip);
-      drain (short-lived worker → wait → manifest record finalized from output files); drain
-      timeout → falls through to reap; orphan reap (spawn a sleep, drop the handle, reap via
-      manifest); graceful path unaffected; group kill reaches a nested child.
-- [ ] `CHANGELOG.md`: note the manifest schema addition and the new `reap` surface
-      (consumer-facing — AGENTS.md Rule 3).
+- [x] `tracking/models.py`: add `pid`/`pgid`/`starttime` to `WorkerSessionRecord`
+      (and the `AgentRecord` carrier persisted at spawn time in `run.json`; `AgentState`
+      carries `pgid` so graceful shutdown can group-kill stragglers).
+- [x] `tracking/worker_sessions.py`: persist the new fields at spawn and on status updates.
+- [x] Liveness helper (§4.3) — implemented as `probe_group(pgid, starttime)` in
+      `agents/process_identity.py`, returning a verdict (`dead` / `ours` /
+      `identity_mismatch` / `unverifiable`) rather than a bare bool; zombies are excluded.
+- [x] Policy operations: `drain` (wait for exit up to `drain_timeout_s`, then finalize the
+      record; timeout → reap), `reap` (SIGTERM→grace→SIGKILL), and
+      `reap_run(run_ref, policy=..., drain_timeout_s=...)` + `th reap` CLI subcommand, all with
+      `(pgid, starttime)` verification (§4.4). Note: `reap_run` reads **`run.json`** (flushed
+      at spawn time — the crash-durable record), not `worker_sessions.json` (finalize-only);
+      it refreshes the manifest afterward via the run's recorded `session_output_dir`.
+- [x] Tests (`src/tests/test_process_lifecycle.py`): liveness true/false + recycled-id guard;
+      drain (short-lived worker → wait → record finalized); drain timeout → falls through to
+      reap; orphan reap; ignore policy; pre-identity records (`no_process_identity`); manifest
+      refresh; spawner group leadership; graceful leader-kill fallback preserved; group kill
+      reaches a nested child.
+- [x] `CHANGELOG.md`: manifest schema 2→3, `run.json` additions + atomic writes, `th reap`,
+      and the group-kill shutdown change (consumer-facing — AGENTS.md Rule 3).

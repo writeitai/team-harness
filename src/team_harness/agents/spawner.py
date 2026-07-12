@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import uuid
 
+from team_harness.agents.process_identity import capture_starttime
 from team_harness.agents.registry import build_command
 from team_harness.agents.registry import resolve_template
 from team_harness.agents.template import AgentTemplate
@@ -21,6 +22,11 @@ class SpawnResult:
     command: list[str]
     template: AgentTemplate
     generated_uuid: str | None
+    # Durable process identity (TH-D5). The worker is spawned as the leader of
+    # its own process group, so pgid == pid; starttime guards against pid reuse.
+    pid: int | None = None
+    pgid: int | None = None
+    starttime: str | None = None
 
 
 async def spawn(
@@ -84,6 +90,10 @@ async def spawn(
     stdout_file = stdout_path.open("wb")
     stderr_file = stderr_path.open("wb")
     try:
+        # start_new_session makes the worker the leader of its own process group
+        # (pgid == pid), so the whole worker subtree — including any helpers the
+        # CLI spawns — is one killable/watchable unit that survives the parent.
+        # Identity is persisted at spawn time via the run log (TH-D5).
         proc = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(cwd),
@@ -91,10 +101,17 @@ async def spawn(
             stdout=stdout_file,
             stderr=stderr_file,
             env=merged_env,
+            start_new_session=True,
         )
     finally:
         stdout_file.close()
         stderr_file.close()
     return SpawnResult(
-        proc=proc, command=command, template=template, generated_uuid=generated_uuid
+        proc=proc,
+        command=command,
+        template=template,
+        generated_uuid=generated_uuid,
+        pid=proc.pid,
+        pgid=proc.pid,
+        starttime=capture_starttime(proc.pid),
     )

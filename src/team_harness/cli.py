@@ -34,6 +34,10 @@ from team_harness.tools import fs_tools
 from team_harness.tools import todo_tools
 from team_harness.tracking.context import ContextTracker
 from team_harness.tracking.context import resolve_model_limit
+from team_harness.tracking.reaper import DEFAULT_DRAIN_TIMEOUT_S
+from team_harness.tracking.reaper import DEFAULT_GRACE_S
+from team_harness.tracking.reaper import reap_run
+from team_harness.tracking.reaper import resolve_run_json
 from team_harness.tracking.run_log import RunLogWriter
 from team_harness.ui.console import ConsoleBase
 from team_harness.ui.console import make_console
@@ -206,6 +210,65 @@ def logs(run_id: str | None) -> None:
         click.echo("No runs yet.")
 
 
+@main.command()
+@click.argument("run_ref")
+@click.option(
+    "--policy",
+    type=click.Choice(["drain", "reap", "ignore"]),
+    default="drain",
+    show_default=True,
+    help="drain: wait for orphans to finish (timeout → kill); "
+    "reap: kill now; ignore: only record what is still running.",
+)
+@click.option(
+    "--drain-timeout-s",
+    type=float,
+    default=DEFAULT_DRAIN_TIMEOUT_S,
+    show_default=True,
+    help="Max seconds to wait for an orphan to finish under --policy drain.",
+)
+@click.option(
+    "--grace-s",
+    type=float,
+    default=DEFAULT_GRACE_S,
+    show_default=True,
+    help="Seconds between SIGTERM and SIGKILL when killing a group.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Print the report as JSON.")
+def reap(
+    run_ref: str, policy: str, drain_timeout_s: float, grace_s: float, as_json: bool
+) -> None:
+    """Handle workers orphaned by a crashed run.
+
+    RUN_REF is a run id (resolved under the runs dir), a run directory, or a
+    direct path to its run.json. Every action verifies process identity
+    (pgid + start time), so a recycled pid is never touched.
+    """
+    candidate = Path(run_ref)
+    if not candidate.exists():
+        candidate = RUNS_DIR / run_ref
+    run_json = resolve_run_json(candidate)
+    if not run_json.exists():
+        click.echo(f"ERROR: run.json not found for '{run_ref}'", err=True)
+        raise SystemExit(1)
+    report = reap_run(
+        run_json,
+        policy=policy,  # type: ignore[arg-type]  # click.Choice guarantees the literal
+        drain_timeout_s=drain_timeout_s,
+        grace_s=grace_s,
+    )
+    if as_json:
+        click.echo(json.dumps(report.model_dump(mode="json"), indent=2))
+        return
+    if not report.workers:
+        click.echo(f"{report.run_id}: no workers were left marked running.")
+        return
+    for worker in report.workers:
+        click.echo(
+            f"{worker.agent_id} ({worker.agent_type}) pgid={worker.pgid}: {worker.outcome}"
+        )
+
+
 def _prepare_task(task: str | None, task_file: str | None) -> str:
     if task and task_file:
         raise click.UsageError("Provide either TASK or --file, not both.")
@@ -259,6 +322,7 @@ async def _repl(**kwargs: Any) -> None:
             provider=config.provider,
             model=config.model,
             api_base=client.api_base,
+            session_output_dir=str(session_output_dir),
         )
         model_limit = await resolve_model_limit(
             model_id=config.model, client=client, config=config

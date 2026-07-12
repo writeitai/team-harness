@@ -671,6 +671,7 @@ async def spawn_agent(**kwargs: object) -> str:
         stdout_log=stdout_log,
         stderr_log=stderr_log,
         session_id=spawn_result.generated_uuid,
+        pgid=spawn_result.pgid,
     )
     manager.register(state)
     record = AgentRecord(
@@ -685,6 +686,9 @@ async def spawn_agent(**kwargs: object) -> str:
         stdout_log=str(stdout_log),
         stderr_log=str(stderr_log),
         session_id=state.session_id,
+        pid=spawn_result.pid,
+        pgid=spawn_result.pgid,
+        starttime=spawn_result.starttime,
     )
     run_log.record_agent_spawn(record)
     ui.agent_event(event="spawned", state=state)
@@ -1062,6 +1066,7 @@ def build_agent_tool_bindings(
             stdout_log=stdout_log,
             stderr_log=stderr_log,
             session_id=spawn_result.generated_uuid,
+            pgid=spawn_result.pgid,
         )
         manager.register(state)
         record = AgentRecord(
@@ -1078,6 +1083,9 @@ def build_agent_tool_bindings(
             stderr_log=str(stderr_log),
             session_id=state.session_id,
             resume=resume_info_for_agent_type(agent_type),
+            pid=spawn_result.pid,
+            pgid=spawn_result.pgid,
+            starttime=spawn_result.starttime,
         )
         run_log.record_agent_spawn(record)
         ui.agent_event(event="spawned", state=state)

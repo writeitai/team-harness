@@ -1,6 +1,7 @@
 from datetime import datetime
 from datetime import timezone
 import json
+import os
 from pathlib import Path
 import re
 
@@ -19,7 +20,13 @@ class RunLogWriter:
     path: Path
 
     def __init__(
-        self, run_id: str, run_dir: Path, provider: str, model: str, api_base: str
+        self,
+        run_id: str,
+        run_dir: Path,
+        provider: str,
+        model: str,
+        api_base: str,
+        session_output_dir: str | None = None,
     ) -> None:
         self.path = run_dir / "run.json"
         self._log = RunRecord(
@@ -28,6 +35,7 @@ class RunLogWriter:
             provider=provider,
             coordinator_model=model,
             api_base=api_base,
+            session_output_dir=session_output_dir,
         )
         self._flush()
 
@@ -129,5 +137,10 @@ class RunLogWriter:
         self._flush()
 
     def _flush(self) -> None:
+        # Atomic write: run.json is the crash-durable record of what this run
+        # launched (TH-D5 reads it to reap orphans), so a crash mid-write must
+        # never leave it truncated.
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self._log.model_dump(mode="json"), indent=2))
+        temp_path = self.path.with_name(self.path.name + ".tmp")
+        temp_path.write_text(json.dumps(self._log.model_dump(mode="json"), indent=2))
+        os.replace(temp_path, self.path)

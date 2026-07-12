@@ -20,6 +20,10 @@ class AgentState:
     exit_code: int | None = None
     finished_at: datetime | None = None
     failure_classification: dict | None = None
+    # Process-group id when spawned with start_new_session (pgid == pid); lets
+    # shutdown kill the whole worker subtree, not just the leader (TH-D5).
+    # None for test doubles / externally-constructed states → leader-only kill.
+    pgid: int | None = None
 
 
 class AgentManager:
