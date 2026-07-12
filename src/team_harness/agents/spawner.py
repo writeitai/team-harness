@@ -106,6 +106,12 @@ async def spawn(
     finally:
         stdout_file.close()
         stderr_file.close()
+    # Identity capture: retry once while the child is definitely still ours
+    # (unreaped) — without a starttime the worker can later only be waited on,
+    # never verifiably killed (probe verdict "unverifiable").
+    starttime = capture_starttime(proc.pid)
+    if starttime is None and proc.returncode is None:
+        starttime = capture_starttime(proc.pid)
     return SpawnResult(
         proc=proc,
         command=command,
@@ -113,5 +119,5 @@ async def spawn(
         generated_uuid=generated_uuid,
         pid=proc.pid,
         pgid=proc.pid,
-        starttime=capture_starttime(proc.pid),
+        starttime=starttime,
     )

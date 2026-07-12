@@ -931,6 +931,8 @@ async def kill_agent(agent_id: str, *, force: bool = False) -> str:
     except asyncio.TimeoutError:
         state.proc.kill()
         await state.proc.wait()
+    # The leader is dead; make sure its group (helper processes) dies too.
+    await manager.ensure_group_dead(agent_id)
     state.exit_code = state.proc.returncode
     state.finished_at = datetime.now(timezone.utc)
     state.status = "killed"
@@ -1296,6 +1298,8 @@ def build_agent_tool_bindings(
         except asyncio.TimeoutError:
             state.proc.kill()
             await state.proc.wait()
+        # The leader is dead; make sure its group (helper processes) dies too.
+        await manager.ensure_group_dead(agent_id)
         state.exit_code = state.proc.returncode
         state.finished_at = datetime.now(timezone.utc)
         state.status = "killed"

@@ -527,6 +527,18 @@ async def _graceful_shutdown(
                             state.finished_at = datetime.now(timezone.utc)
                         if ui is not None:
                             ui.agent_event(event="killed", state=state)
+    # Final sweep: a leader-only exit can leave helper processes alive in the
+    # worker's group (including a leader that exited *successfully* while a
+    # child it spawned keeps running), and a TERM-ignoring worker survives the
+    # phase above. Escalate to a verified group kill for every trusted pgid.
+    sweep_targets = [state.id for state in manager.list_all() if state.pgid is not None]
+    if sweep_targets:
+        await asyncio.gather(
+            *(
+                manager.ensure_group_dead(agent_id, term_wait_s=terminate_wait)
+                for agent_id in sweep_targets
+            )
+        )
     _sync_terminal_agents(manager, run_log)
 
 

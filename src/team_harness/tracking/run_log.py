@@ -4,7 +4,9 @@ import json
 import os
 from pathlib import Path
 import re
+import tempfile
 
+from team_harness.agents.process_identity import capture_starttime
 from team_harness.tracking.models import AgentRecord
 from team_harness.tracking.models import CoordinatorRetryRecord
 from team_harness.tracking.models import RunFailureRecord
@@ -29,6 +31,7 @@ class RunLogWriter:
         session_output_dir: str | None = None,
     ) -> None:
         self.path = run_dir / "run.json"
+        parent_pid = os.getpid()
         self._log = RunRecord(
             run_id=run_id,
             start=datetime.now(timezone.utc),
@@ -36,6 +39,10 @@ class RunLogWriter:
             coordinator_model=model,
             api_base=api_base,
             session_output_dir=session_output_dir,
+            # Recorded so a recovery process can verify whether this run's
+            # owner is still alive before reaping its workers (TH-D5).
+            parent_pid=parent_pid,
+            parent_starttime=capture_starttime(parent_pid),
         )
         self._flush()
 
@@ -139,8 +146,19 @@ class RunLogWriter:
     def _flush(self) -> None:
         # Atomic write: run.json is the crash-durable record of what this run
         # launched (TH-D5 reads it to reap orphans), so a crash mid-write must
-        # never leave it truncated.
+        # never leave it truncated. The temp name is unique per write so a
+        # concurrent writer (e.g. a forced reap) cannot race on one path.
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = self.path.with_name(self.path.name + ".tmp")
-        temp_path.write_text(json.dumps(self._log.model_dump(mode="json"), indent=2))
-        os.replace(temp_path, self.path)
+        fd, temp_name = tempfile.mkstemp(
+            dir=self.path.parent, prefix=self.path.name + ".", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w") as handle:
+                json.dump(self._log.model_dump(mode="json"), handle, indent=2)
+            os.replace(temp_name, self.path)
+        except BaseException:
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
+            raise

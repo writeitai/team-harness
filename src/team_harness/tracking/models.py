@@ -160,6 +160,11 @@ class RunRecord(BaseModel):
     # Recorded at run start so a post-crash reap can refresh the
     # worker_sessions.json manifest in the right place (TH-D5).
     session_output_dir: str | None = None
+    # Identity of the process that owns this run, recorded at run start.
+    # reap_run refuses to touch a run whose parent is still alive (verified
+    # by pid + starttime) unless forced — guarding live runs from being reaped.
+    parent_pid: int | None = None
+    parent_starttime: str | None = None
     coordinator_retries: list[CoordinatorRetryRecord] = Field(default_factory=list)
     turns: list[TurnRecord] = Field(default_factory=list)
     agents: list[AgentRecord] = Field(default_factory=list)

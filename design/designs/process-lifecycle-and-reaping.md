@@ -1,10 +1,37 @@
 # Design: Worker Process Lifecycle and Orphan Reaping
 
-**Status:** Implemented (design accepted as TH-D5; shipped in the process-lifecycle
-change — see `CHANGELOG.md` Unreleased. Implementation notes: the crash-durable
-record is `run.json`, which is flushed at spawn time — `worker_sessions.json` is
-finalize-only, so `reap_run()` reads `run.json`; and liveness excludes zombies,
-which hold no resources and cannot be killed.)
+**Status:** Implemented, reviewed, and hardened (design accepted as TH-D5; shipped in
+the process-lifecycle change — see `CHANGELOG.md` Unreleased). Two independent
+adversarial reviews (Codex, Antigravity) drove the hardening; their key corrections
+are folded into the sections below. Implementation notes:
+
+- The crash-durable record is **`run.json`** (flushed at spawn time);
+  `worker_sessions.json` is finalize-only, so `reap_run()` reads `run.json` and
+  refreshes the manifest afterward.
+- Liveness excludes **zombies** (no resources, cannot be killed).
+- Identity tokens: Linux uses the exact kernel identity (**boot id +
+  `/proc/<pid>/stat` start ticks** — immune to NTP/wall-clock shifts and
+  same-second pid reuse); macOS falls back to the pinned-locale/UTC `ps lstart`
+  string (second resolution — a documented residual reuse window).
+- A group whose **leader is gone is unverifiable**: once a group has fully emptied,
+  its pgid can be recycled by an unrelated new session, so surviving leaderless
+  members are never attributed to us — waiting on them is allowed, killing is
+  refused. (In-run shutdown accepts a narrower version of this risk — see §4.4.)
+- Identity is **re-verified before every signal escalation**; `killed` and terminal
+  statuses are recorded only when the group is *observed* gone
+  (`kill_failed_still_running` otherwise); probe failures (broken `ps`) surface as
+  `probe_failed`, never as "exited".
+- `reap_run` **refuses a live run** (parent pid + starttime recorded at run start;
+  `force` overrides), validates inputs before acting, serializes concurrent reapers
+  on an advisory lock, supports per-agent policies and `dry_run`, and keeps report
+  history.
+
+**Accepted limitations** (revisit if they bite): macOS second-resolution identity;
+a userspace probe→signal TOCTOU window narrower than one poll interval (a
+supervisor-leader architecture would close it and is a documented non-goal for
+now); `SIGTERM` to the parent bypasses Python `finally` cleanup (containers should
+stop with a signal the entrypoint handles, or rely on `th reap` afterwards);
+post-hoc session capture uses the *current* config's template spec.
 **Date:** 2026-07-12
 **Decision:** `design/decisions.md` TH-D5 (and its premises TH-D2, TH-D4).
 **Primary consumer:** `loopy-loop`, which runs team-harness in a long-horizon loop and needs

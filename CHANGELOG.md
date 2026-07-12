@@ -16,10 +16,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and their `pid`/`pgid`/`starttime` are persisted at spawn time in `run.json`
   (and surfaced in `worker_sessions.json`). New `th reap RUN_REF` command and
   `team_harness.tracking.reaper.reap_run()` API apply a policy to workers a
-  crashed run left behind: `drain` (default — wait for them to finish, then
-  finalize their records), `reap` (SIGTERM→grace→SIGKILL the group), or
-  `ignore`. Every action verifies `(pgid, starttime)` identity, so a recycled
-  pid is never touched. Design: `design/designs/process-lifecycle-and-reaping.md`.
+  crashed run left behind: `drain` (default — wait, under ONE shared deadline,
+  for them to finish, then finalize their records incl. best-effort vendor
+  session-id capture), `reap` (SIGTERM→grace→SIGKILL the group, verified), or
+  `ignore` — with per-agent policy overrides (`policies={agent_id: ...}`) and a
+  `--dry-run` probe mode. Design: `design/designs/process-lifecycle-and-reaping.md`.
+
+  Safety hardening (driven by two independent adversarial reviews):
+  - Start-time identity uses the exact kernel token on Linux (boot id +
+    `/proc/<pid>/stat` start ticks — immune to wall-clock/NTP shifts and
+    same-second pid reuse); the second-resolution `ps lstart` string remains
+    the macOS fallback with a documented residual window.
+  - A group whose leader is gone is **unverifiable** — waiting on it is
+    allowed, killing it is refused (a recycled session could look identical).
+  - Identity is re-verified immediately before every TERM/KILL escalation, and
+    outcomes are honest: `killed`/terminal statuses only after the group is
+    *observed* gone; failures surface as `kill_failed_still_running`.
+  - A broken/missing `ps` raises and is reported as `probe_failed` — never
+    silently treated as "the worker exited".
+  - `reap_run` refuses to act while the run's original parent process is still
+    alive (identity recorded at run start; `--force` overrides), validates
+    policy/timeout arguments **before** touching anything, and serializes
+    concurrent reapers on an advisory lock with unique atomic temp files.
+  - Reap reports are kept as history (`reap_report_<ts>.json`); a no-op run
+    never clobbers an earlier report with real outcomes.
 
 ### Changed
 
@@ -29,11 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `run.json` gains a top-level `session_output_dir` field (recorded at run
   start) and worker entries gain `pid`/`pgid`/`starttime`; `run.json` is now
   written atomically (temp file + rename) so a crash can never truncate it.
-- Graceful shutdown now terminates a straggler worker's whole process group
-  when its pgid is known, not just the leader process — a worker CLI's own
-  child processes no longer outlive shutdown. Note: because workers now run in
-  their own process group, they no longer receive terminal Ctrl+C directly;
-  team-harness's own shutdown/cleanup paths handle their termination.
+- Graceful shutdown and `kill_agent` are now group-aware end to end: stragglers
+  get a group SIGTERM with a verified SIGKILL escalation, and a final sweep
+  kills surviving group members even when the leader already exited (e.g. a
+  worker that exited successfully but left a background child running — both
+  cases were reproduced by review before the fix). Note: because workers now
+  run in their own process group, they no longer receive terminal Ctrl+C
+  directly; team-harness's own shutdown/cleanup paths handle their termination,
+  and a hard-killed parent's leftovers are covered by `th reap`.
 
 ## [0.2.10] - 2026-05-26
 
