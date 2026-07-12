@@ -114,13 +114,17 @@ reap*: know what was launched, and be able to kill leftovers on restart.
 - The existing worker-session manifest gains `pid`/`pgid`/`starttime`; spawning gains
   `start_new_session=True` so a whole worker (and any nested sub-workers, up to the configured
   `max_depth`) is one killable group.
-- A new reaping API (e.g. `reap(manifest_path)` / `kill_run(run_id)`) kills still-alive groups,
-  verifying `starttime` to avoid killing a recycled pid/pgid. This extends `AgentManager.kill()`
-  from in-memory-only to persisted-and-reapable.
+- Identity + a durable `is_group_alive(pgid, starttime)` liveness check turns the restart
+  decision into a **policy per orphan**, not a hardcoded kill: **reap** (SIGTERM→grace→SIGKILL;
+  the default), **drain** (let an expensive/nearly-done worker finish, then harvest its output —
+  requires pausing fresh work until it exits, and salvages a worker's output, not necessarily
+  the run), or **ignore**. `starttime` verification guards every path against pid reuse. This
+  extends `AgentManager.kill()` from in-memory-only to persisted-and-reapable.
 - **Consumer contract (loopy-loop):** the consumer owns *its own* process liveness (e.g. a
-  worker pid + heartbeat) and, on crash recovery, calls team-harness reap for the interrupted
-  run before starting fresh. team-harness provides the manifest + reap; the consumer decides
-  when to reap. See `design/designs/process-lifecycle-and-reaping.md` for the full contract.
+  worker pid + heartbeat) and, on crash recovery, chooses a policy per orphan for the interrupted
+  run before starting fresh. team-harness provides the manifest, the liveness check, and the
+  policy operations; the consumer decides which and when. See
+  `design/designs/process-lifecycle-and-reaping.md` for the full contract.
 - **Cross-platform:** `start_new_session` + `os.killpg` work on macOS (dev) and Linux (prod);
   cgroup-based supervision would be more bulletproof but is Linux-only and is a documented
   non-goal for now.

@@ -93,23 +93,56 @@ can tell "the group we launched" from "a recycled id now owned by something else
 at spawn time and keep updating `status`/`exit_code`/`finished_at` on exit, exactly as the
 manifest is maintained today.
 
-### 4.3 A reap operation
+### 4.3 A durable liveness check
 
-Add an operation — e.g. `reap_run(manifest_path) -> ReapReport` (and/or a `th reap` CLI
-subcommand) — that:
+Once identity is persisted, "is this worker still running?" becomes a durable, cross-process
+question — today it can only be answered through the in-memory `Process` handle, which dies
+with the parent. Add a small helper:
 
-1. reads the manifest,
-2. for each worker still marked `running`, checks whether `pgid` is alive **and** its
-   `starttime` matches what we recorded,
-3. if and only if both match, sends `SIGTERM` to the group, waits a short grace period, then
-   `SIGKILL`,
-4. records the outcome (`reaped` / `already-exited` / `identity-mismatch-skipped`) back into the
-   manifest and returns a small report.
+```
+is_group_alive(pgid, starttime) -> bool
+```
 
-This is the natural extension of `AgentManager.kill()` from "terminate an in-memory handle" to
-"terminate a persisted, possibly-orphaned group, safely."
+that checks the group leader exists (`os.kill(pgid, 0)` / a `/proc` probe) **and** its
+`starttime` matches what we recorded. The `starttime` guard is what makes this safe against pid
+reuse: a live pid with a *different* start time is a recycled id, not our worker. This helper
+underpins both the reclaim-safety check (a consumer verifying "is the previous run actually
+dead?") and every policy below.
 
-### 4.4 What we deliberately do NOT do
+### 4.4 On restart, choose a policy per worker — reap is one option, not the only one
+
+Persisted identity + liveness turns the restart decision from a hardcoded kill into a **policy**.
+For each worker the manifest still marks `running`, and that `is_group_alive` confirms, the
+caller can choose:
+
+- **reap** *(the default for a fast, clean restart)* — send `SIGTERM` to the group, wait a short
+  grace period, then `SIGKILL`. Stops the leftover immediately.
+- **drain** *(let it finish, then harvest)* — do **not** kill it; wait (poll `is_group_alive`)
+  until the group exits, then parse its now-complete output files exactly as the normal flow
+  would (`session_capture` etc.) and record the salvaged result. Worthwhile when the in-flight
+  work is expensive or nearly done.
+- **ignore** — leave it and record that it was left running (e.g. a human will decide).
+
+Two properties make this safe and honest, and callers must respect them:
+
+- **Drain requires serialization.** While an orphan is draining, the caller must not start new
+  work on the same checkout — two writers on one working tree is exactly the corruption a
+  single-worker consumer avoids. Drain therefore *pauses* fresh work until the orphan exits, and
+  can block for a long time (a worker may be a 45-minute run). When you can't afford that wait,
+  reap and re-run instead.
+- **Drain salvages a worker, not necessarily a run.** If the caller's *coordinator* died too
+  (e.g. loopy-loop runs the coordinator loop inside its worker, so a worker crash kills the
+  coordinator conversation with it), draining a worker recovers that worker's output and the repo
+  changes it made — but the orchestrating run is gone and still has to be re-run or reconstructed.
+  Drain is a salvage tool, not a run-resume tool (run continuation is TH-D4, session resume).
+
+The reap path is the natural extension of `AgentManager.kill()` from "terminate an in-memory
+handle" to "terminate a persisted, possibly-orphaned group, safely." A convenient wrapper —
+`reap_run(manifest_path, policy=...) -> ReapReport` (and/or a `th reap` CLI subcommand) — applies
+a chosen policy across a run's manifest and records the outcome (`reaped` / `drained` /
+`already-exited` / `identity-mismatch-skipped` / `left-running`) back into it.
+
+### 4.5 What we deliberately do NOT do
 
 - No process **adoption**/reattachment (TH-D2).
 - No cgroup/systemd-scope supervision. It would be more bulletproof but is Linux-only; we
@@ -122,15 +155,18 @@ This is the natural extension of `AgentManager.kill()` from "terminate an in-mem
 Responsibilities split cleanly:
 
 - **team-harness owns worker-process lifecycle**: it launches workers in their own groups,
-  persists their identity, and provides `reap`. It does **not** decide *when* to reap — it has
-  no knowledge of the consumer's crash/restart semantics.
-- **The consumer owns its own liveness and the reap trigger.** `loopy-loop` runs the harness
-  inside its own `loopy worker` process. It should:
+  persists their identity, and provides the liveness helper and the policy operations (reap /
+  drain / ignore). It does **not** decide *which policy* or *when* — it has no knowledge of the
+  consumer's crash/restart semantics.
+- **The consumer owns liveness of its own process and the policy decision.** `loopy-loop` runs
+  the harness inside its own `loopy worker` process. It should:
   - record its **worker pid + a heartbeat** in the session directory, so a restarted
     coordinator can tell "the worker is alive and busy" from "the worker is dead" — this closes
     the duplicate-work window where a second `/register` reclaims a task that's still running;
-  - on crash recovery, before starting fresh work for an interrupted run, call team-harness
-    **reap** for that run's manifest to kill any orphaned workers;
+  - on crash recovery, for the interrupted run's manifest, **pick a policy per orphan**: reap
+    (the default — kill leftovers, then re-run the iteration), or drain (wait for an
+    expensive/nearly-done worker to finish and harvest its output, *pausing* fresh work until it
+    exits — see §4.4), or ignore;
   - surface it operationally (a `doctor` check that warns about a leftover group; a
     `stop --force` that reaps).
 
@@ -146,9 +182,13 @@ says "kill the leftover agents from the task we abandoned." Neither is process a
 - [ ] `tracking/models.py`: add `pid`/`pgid`/`starttime` to `WorkerSessionRecord`
       (and any live `AgentState`/`AgentRecord` carrier they derive from).
 - [ ] `tracking/worker_sessions.py`: persist the new fields at spawn and on status updates.
-- [ ] New `reap` function + `th reap` CLI subcommand, with `(pgid, starttime)` verification.
-- [ ] Tests: orphan simulation (spawn a sleep, drop the handle, reap via manifest); recycled-id
-      guard (starttime mismatch → skip); graceful path unaffected; group kill reaches a
-      nested child.
+- [ ] `is_group_alive(pgid, starttime)` liveness helper (§4.3).
+- [ ] Policy operations: `reap` (SIGTERM→grace→SIGKILL), `drain` (wait for exit + harvest),
+      and a `reap_run(manifest_path, policy=...)` wrapper + `th reap` CLI subcommand, all with
+      `(pgid, starttime)` verification (§4.4).
+- [ ] Tests: liveness true/false + recycled-id guard (starttime mismatch → not-alive/skip);
+      orphan reap (spawn a sleep, drop the handle, reap via manifest); drain (short-lived
+      worker → wait → harvest output); graceful path unaffected; group kill reaches a nested
+      child.
 - [ ] `CHANGELOG.md`: note the manifest schema addition and the new `reap` surface
       (consumer-facing — AGENTS.md Rule 3).
