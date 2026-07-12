@@ -109,38 +109,49 @@ reuse: a live pid with a *different* start time is a recycled id, not our worker
 underpins both the reclaim-safety check (a consumer verifying "is the previous run actually
 dead?") and every policy below.
 
-### 4.4 On restart, choose a policy per worker — reap is one option, not the only one
+### 4.4 On restart, choose a policy per worker — bounded drain is the sensible default
 
 Persisted identity + liveness turns the restart decision from a hardcoded kill into a **policy**.
 For each worker the manifest still marks `running`, and that `is_group_alive` confirms, the
 caller can choose:
 
-- **reap** *(the default for a fast, clean restart)* — send `SIGTERM` to the group, wait a short
-  grace period, then `SIGKILL`. Stops the leftover immediately.
-- **drain** *(let it finish, then harvest)* — do **not** kill it; wait (poll `is_group_alive`)
-  until the group exits, then parse its now-complete output files exactly as the normal flow
-  would (`session_capture` etc.) and record the salvaged result. Worthwhile when the in-flight
-  work is expensive or nearly done.
+- **drain (bounded)** *(the recommended default)* — do **not** kill it; wait (poll
+  `is_group_alive`, up to a **timeout**) for the group to exit, then parse its now-complete
+  output files exactly as the normal flow would (`session_capture` etc.) and record the salvaged
+  result. If the timeout elapses (a stuck/hung orphan), fall through to reap. This preserves
+  near-complete work and leaves the checkout in a clean, fully-applied state.
+- **reap** — send `SIGTERM` to the group, wait a short grace period, then `SIGKILL`. Stops the
+  leftover immediately. The escape hatch: for an explicit force-stop, a hung orphan past the
+  drain timeout, or a crash cause that makes finishing unsafe (an OOM that would just re-trigger,
+  disk full).
 - **ignore** — leave it and record that it was left running (e.g. a human will decide).
 
-Two properties make this safe and honest, and callers must respect them:
+Why drain is the better default (for a cost-conscious, git-is-truth consumer):
 
-- **Drain requires serialization.** While an orphan is draining, the caller must not start new
-  work on the same checkout — two writers on one working tree is exactly the corruption a
-  single-worker consumer avoids. Drain therefore *pauses* fresh work until the orphan exits, and
-  can block for a long time (a worker may be a 45-minute run). When you can't afford that wait,
-  reap and re-run instead.
-- **Drain salvages a worker, not necessarily a run.** If the caller's *coordinator* died too
-  (e.g. loopy-loop runs the coordinator loop inside its worker, so a worker crash kills the
-  coordinator conversation with it), draining a worker recovers that worker's output and the repo
-  changes it made — but the orchestrating run is gone and still has to be re-run or reconstructed.
-  Drain is a salvage tool, not a run-resume tool (run continuation is TH-D4, session resume).
+- **Killing mid-edit can corrupt the working tree.** An agent killed while writing files or
+  staging changes leaves a half-applied mess; letting it finish yields a clean, complete change.
+- **Completed work survives even if the iteration re-runs.** Under a git-is-truth consumer, a
+  drained worker's commits/edits sit in the working tree, and the *next* run's fresh coordinator
+  sees and builds on them. So drain salvages the substantive output (the repo change), not just a
+  worker's stdout. (What it does *not* salvage is the dead coordinator's orchestration — draining
+  is a salvage tool, not a run-resume tool; run continuation is TH-D4, session resume. The
+  iteration may still be re-run, but from a better, completed starting point.)
+- **The usual objection is weaker than it looks.** Draining happens *during recovery, before any
+  new work is dispatched*, so there is no concurrent second writer on the checkout — the
+  serialization is automatic, and the only real cost is latency, which the **timeout** bounds.
+
+team-harness stays **mechanism-neutral**: it provides the liveness check, the three operations,
+and the drain timeout, but does **not** hardcode which policy is the default — the crash/restart
+semantics that decide belong to the consumer. The *recommendation* above (bounded drain) is what
+suits a cost-conscious, git-is-truth consumer like loopy-loop; a different consumer may prefer
+reap for the fastest clean slate.
 
 The reap path is the natural extension of `AgentManager.kill()` from "terminate an in-memory
 handle" to "terminate a persisted, possibly-orphaned group, safely." A convenient wrapper —
-`reap_run(manifest_path, policy=...) -> ReapReport` (and/or a `th reap` CLI subcommand) — applies
-a chosen policy across a run's manifest and records the outcome (`reaped` / `drained` /
-`already-exited` / `identity-mismatch-skipped` / `left-running`) back into it.
+`reap_run(manifest_path, policy=..., drain_timeout_s=...) -> ReapReport` (and/or a `th reap` CLI
+subcommand) — applies a chosen policy across a run's manifest and records the outcome (`drained` /
+`reaped` / `drain-timed-out-then-reaped` / `already-exited` / `identity-mismatch-skipped` /
+`left-running`) back into it.
 
 ### 4.5 What we deliberately do NOT do
 
@@ -163,10 +174,10 @@ Responsibilities split cleanly:
   - record its **worker pid + a heartbeat** in the session directory, so a restarted
     coordinator can tell "the worker is alive and busy" from "the worker is dead" — this closes
     the duplicate-work window where a second `/register` reclaims a task that's still running;
-  - on crash recovery, for the interrupted run's manifest, **pick a policy per orphan**: reap
-    (the default — kill leftovers, then re-run the iteration), or drain (wait for an
-    expensive/nearly-done worker to finish and harvest its output, *pausing* fresh work until it
-    exits — see §4.4), or ignore;
+  - on crash recovery, for the interrupted run's manifest, **pick a policy per orphan**
+    (§4.4): bounded drain (the recommended default — let an in-flight worker finish within a
+    timeout and harvest its output, then continue from that completed state), or reap (the escape
+    — kill leftovers, then re-run the iteration), or ignore;
   - surface it operationally (a `doctor` check that warns about a leftover group; a
     `stop --force` that reaps).
 
@@ -183,12 +194,13 @@ says "kill the leftover agents from the task we abandoned." Neither is process a
       (and any live `AgentState`/`AgentRecord` carrier they derive from).
 - [ ] `tracking/worker_sessions.py`: persist the new fields at spawn and on status updates.
 - [ ] `is_group_alive(pgid, starttime)` liveness helper (§4.3).
-- [ ] Policy operations: `reap` (SIGTERM→grace→SIGKILL), `drain` (wait for exit + harvest),
-      and a `reap_run(manifest_path, policy=...)` wrapper + `th reap` CLI subcommand, all with
-      `(pgid, starttime)` verification (§4.4).
+- [ ] Policy operations: `drain` (wait for exit up to `drain_timeout_s` + harvest; timeout →
+      reap), `reap` (SIGTERM→grace→SIGKILL), and a
+      `reap_run(manifest_path, policy=..., drain_timeout_s=...)` wrapper + `th reap` CLI
+      subcommand, all with `(pgid, starttime)` verification (§4.4).
 - [ ] Tests: liveness true/false + recycled-id guard (starttime mismatch → not-alive/skip);
-      orphan reap (spawn a sleep, drop the handle, reap via manifest); drain (short-lived
-      worker → wait → harvest output); graceful path unaffected; group kill reaches a nested
-      child.
+      drain (short-lived worker → wait → harvest output); drain timeout → falls through to reap;
+      orphan reap (spawn a sleep, drop the handle, reap via manifest); graceful path unaffected;
+      group kill reaches a nested child.
 - [ ] `CHANGELOG.md`: note the manifest schema addition and the new `reap` surface
       (consumer-facing — AGENTS.md Rule 3).

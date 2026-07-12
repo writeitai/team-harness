@@ -115,11 +115,14 @@ reap*: know what was launched, and be able to kill leftovers on restart.
   `start_new_session=True` so a whole worker (and any nested sub-workers, up to the configured
   `max_depth`) is one killable group.
 - Identity + a durable `is_group_alive(pgid, starttime)` liveness check turns the restart
-  decision into a **policy per orphan**, not a hardcoded kill: **reap** (SIGTERM→grace→SIGKILL;
-  the default), **drain** (let an expensive/nearly-done worker finish, then harvest its output —
-  requires pausing fresh work until it exits, and salvages a worker's output, not necessarily
-  the run), or **ignore**. `starttime` verification guards every path against pid reuse. This
-  extends `AgentManager.kill()` from in-memory-only to persisted-and-reapable.
+  decision into a **policy per orphan**, not a hardcoded kill: **drain (bounded)** — wait up to a
+  timeout for the worker to finish, then harvest its output; **reap** (SIGTERM→grace→SIGKILL) —
+  the escape for force-stop / hung-past-timeout / unsafe-to-finish; or **ignore**. `starttime`
+  verification guards every path against pid reuse. team-harness stays mechanism-neutral and does
+  not hardcode the default; the recommended default for a cost-conscious, git-is-truth consumer
+  is **bounded drain** (it avoids wasting near-complete work and half-applied edits, and the
+  serialization objection is moot because draining happens during recovery before new work is
+  dispatched). This extends `AgentManager.kill()` from in-memory-only to persisted-and-reapable.
 - **Consumer contract (loopy-loop):** the consumer owns *its own* process liveness (e.g. a
   worker pid + heartbeat) and, on crash recovery, chooses a policy per orphan for the interrupted
   run before starting fresh. team-harness provides the manifest, the liveness check, and the
