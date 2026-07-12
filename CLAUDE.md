@@ -1,6 +1,13 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. It is the **developer reference** (commands, architecture, release process).
+
+## Working agreement & design decisions — read first
+
+- **[`AGENTS.md`](./AGENTS.md)** is the working agreement (how to make changes here). Read it before non-trivial work.
+- **[`design/decisions.md`](./design/decisions.md)** is the canonical Architecture Decision Log (TH-D1, TH-D2, …) — *why* the system is the way it is. **Record new architectural decisions there**, and don't "fix" the deliberate ones (notably **TH-D2** one-shot workers and **TH-D3** normal-return-≠-success) without reading the entry first.
+- **`design/designs/`** holds binding design docs; **`design/analysis/`** holds working notes. Design/decision docs must be understandable cold by a future agent or a non-specialist human (AGENTS.md Rule 2).
+- team-harness is a **library other projects depend on** (e.g. `loopy-loop`); treat `TeamHarnessResult`, worker spawn/lifecycle behavior, and the config/template contract as public API (AGENTS.md Rule 3).
 
 ## Development Commands
 
