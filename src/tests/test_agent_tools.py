@@ -55,7 +55,7 @@ def test_spawn_agent_schema_describes_template_default_flags(config):
     assert "--dangerously-bypass-approvals-and-sandbox" in codex_line
     assert "--skip-git-repo-check" in codex_line
     assert "--json" in codex_line
-    assert "gpt-5.5" in codex_line
+    assert "gpt-5.6-sol" in codex_line
     assert "--dangerously-skip-permissions" not in codex_line
     assert "--output-format" not in codex_line
     assert "--verbose" not in codex_line

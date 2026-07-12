@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Built-in `antigravity` worker support for Google Antigravity CLI (`agy`)
   print-mode subprocesses.
+- Recognition of the GPT-5.6 model family (`gpt-5.6-sol`, `gpt-5.6-terra`,
+  `gpt-5.6-luna`, and their `openai/`-prefixed forms) in the context-tracking
+  registries: 1.5M-token context window, 128K max output, and a Codex
+  subscription cap mirroring gpt-5.5's 400K until OpenAI publishes 5.6's.
+
+### Changed
+
+- Default coordinator and codex-worker model bumped from `gpt-5.5` to
+  `gpt-5.6-sol` (OpenAI's new frontier tier). `gpt-5.5` remains fully
+  supported — override `model` / `default_model` in config to pin it, or
+  select `gpt-5.6-terra` / `gpt-5.6-luna` for the cheaper tiers.
 
 ## [0.2.10] - 2026-05-26
 
