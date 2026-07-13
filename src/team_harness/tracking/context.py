@@ -16,6 +16,13 @@ KNOWN_LIMITS: dict[str, int] = {
     "openai/gpt-5.5": 1_000_000,
     "gpt-5.5-pro": 1_000_000,
     "openai/gpt-5.5-pro": 1_000_000,
+    # GPT-5.6 family (Sol / Terra / Luna) share a 1.5M-token context window.
+    "gpt-5.6-sol": 1_500_000,
+    "openai/gpt-5.6-sol": 1_500_000,
+    "gpt-5.6-terra": 1_500_000,
+    "openai/gpt-5.6-terra": 1_500_000,
+    "gpt-5.6-luna": 1_500_000,
+    "openai/gpt-5.6-luna": 1_500_000,
     "openai/gpt-4.1": 1_047_576,
     "openai/gpt-4.1-mini": 1_047_576,
     "openai/gpt-4o": 128_000,
@@ -36,6 +43,12 @@ KNOWN_MAX_OUTPUT_TOKENS: dict[str, int] = {
     "openai/gpt-5.5": 128_000,
     "gpt-5.5-pro": 128_000,
     "openai/gpt-5.5-pro": 128_000,
+    "gpt-5.6-sol": 128_000,
+    "openai/gpt-5.6-sol": 128_000,
+    "gpt-5.6-terra": 128_000,
+    "openai/gpt-5.6-terra": 128_000,
+    "gpt-5.6-luna": 128_000,
+    "openai/gpt-5.6-luna": 128_000,
     "openai/gpt-4.1": 32_768,
     "openai/gpt-4.1-mini": 32_768,
     "openai/gpt-4o": 16_384,
@@ -53,9 +66,23 @@ KNOWN_CODEX_MODELS = {
     "gpt-5.1-codex-max",
     "openai/gpt-5.1-codex-max",
     "gpt-5.5",
+    "gpt-5.6-sol",
+    "openai/gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "openai/gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "openai/gpt-5.6-luna",
 }
 
-KNOWN_CODEX_LIMITS: dict[str, int] = {"gpt-5.5": 400_000}
+# Effective context under the Codex subscription (throttled below the raw API
+# window). GPT-5.6's subscription cap is not published, so we mirror gpt-5.5's
+# 400K until OpenAI documents otherwise.
+KNOWN_CODEX_LIMITS: dict[str, int] = {
+    "gpt-5.5": 400_000,
+    "gpt-5.6-sol": 400_000,
+    "gpt-5.6-terra": 400_000,
+    "gpt-5.6-luna": 400_000,
+}
 
 
 async def resolve_model_limit(model_id: str, client: Any, config: Config) -> int:

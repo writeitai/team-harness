@@ -6,6 +6,7 @@ from team_harness.config import Config
 from team_harness.coordinator.loop import _should_compact
 from team_harness.tracking.context import ContextTracker
 from team_harness.tracking.context import get_auto_compact_threshold
+from team_harness.tracking.context import KNOWN_CODEX_MODELS
 from team_harness.tracking.context import KNOWN_LIMITS
 from team_harness.tracking.context import KNOWN_MAX_OUTPUT_TOKENS
 from team_harness.tracking.context import resolve_model_limit
@@ -249,6 +250,17 @@ def test_auto_compact_threshold_for_gpt_5_5():
     assert KNOWN_MAX_OUTPUT_TOKENS["gpt-5.5-pro"] == 128_000
     assert KNOWN_MAX_OUTPUT_TOKENS["openai/gpt-5.5-pro"] == 128_000
     assert get_auto_compact_threshold("gpt-5.5", 1_000_000) == 967_000
+
+
+def test_gpt_5_6_family_registry_entries():
+    for model_id in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+        assert KNOWN_LIMITS[model_id] == 1_500_000
+        assert KNOWN_LIMITS[f"openai/{model_id}"] == 1_500_000
+        assert KNOWN_MAX_OUTPUT_TOKENS[model_id] == 128_000
+        assert KNOWN_MAX_OUTPUT_TOKENS[f"openai/{model_id}"] == 128_000
+        assert model_id in KNOWN_CODEX_MODELS
+        assert f"openai/{model_id}" in KNOWN_CODEX_MODELS
+    assert get_auto_compact_threshold("gpt-5.6-sol", 1_500_000) == 1_467_000
 
 
 def test_auto_compact_threshold_for_unknown_model_limit_uses_fallback_reserve():

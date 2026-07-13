@@ -40,9 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     concurrent reapers on an advisory lock with unique atomic temp files.
   - Reap reports are kept as history (`reap_report_<ts>.json`); a no-op run
     never clobbers an earlier report with real outcomes.
+- Recognition of the GPT-5.6 model family (`gpt-5.6-sol`, `gpt-5.6-terra`,
+  `gpt-5.6-luna`, and their `openai/`-prefixed forms) in the context-tracking
+  registries: 1.5M-token context window, 128K max output, and a Codex
+  subscription cap mirroring gpt-5.5's 400K until OpenAI publishes 5.6's.
 
 ### Changed
 
+- Default coordinator and codex-worker model bumped from `gpt-5.5` to
+  `gpt-5.6-sol` (OpenAI's new frontier tier). `gpt-5.5` remains fully
+  supported — override `model` / `default_model` in config to pin it, or
+  select `gpt-5.6-terra` / `gpt-5.6-luna` for the cheaper tiers.
 - `worker_sessions.json` `schema_version` bumped 2 → 3: worker records gain
   optional `pid`, `pgid`, and `starttime` fields (null for runs recorded by
   older versions).

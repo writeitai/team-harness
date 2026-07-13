@@ -34,7 +34,7 @@ def test_parse_structured_template_fields():
         resume_prefix=("resume",),
         resume_flags=("{session_id}",),
         model_flag="--model",
-        default_model="gpt-5.5",
+        default_model="gpt-5.6-sol",
         deduplicate_flags=(
             "--dangerously-bypass-approvals-and-sandbox",
             "--skip-git-repo-check",
@@ -72,7 +72,7 @@ def test_parse_default_model_cleared_with_empty_string():
 
 def test_parse_default_model_inherits_from_base_when_absent():
     template = _parse_agent_template("codex", {"command": ["codex", "exec"]})
-    assert template.default_model == "gpt-5.5"
+    assert template.default_model == "gpt-5.6-sol"
 
 
 def test_parse_model_env_vars_override():
