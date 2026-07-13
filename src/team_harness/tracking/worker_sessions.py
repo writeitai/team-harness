@@ -54,6 +54,10 @@ def _outcome(record: AgentRecord) -> str:
         return "succeeded"
     if record.status == "killed":
         return "killed"
+    # Post-crash reap verdicts (TH-D5): the parent that spawned the worker died,
+    # so an orphan's exit code is unobtainable — status carries the outcome.
+    if record.status in {"drained", "reaped", "drain_timed_out_then_reaped"}:
+        return record.status
     if record.exit_code is None:
         return "running"
     if record.session_id:
@@ -71,6 +75,18 @@ def _summary_for(record: AgentRecord) -> str | None:
         return "Worker exited after a provider session was captured."
     if outcome == "killed":
         return "Worker was killed by team-harness."
+    if outcome == "drained":
+        return (
+            "Worker was orphaned by a parent crash, allowed to finish (drained); "
+            "its exit code is unknown because the original parent is gone."
+        )
+    if outcome == "reaped":
+        return "Worker was orphaned by a parent crash and killed during reaping."
+    if outcome == "drain_timed_out_then_reaped":
+        return (
+            "Worker was orphaned by a parent crash, did not finish within the "
+            "drain timeout, and was killed."
+        )
     return None
 
 
@@ -210,6 +226,9 @@ def _build_worker_session_record(
             log_path=str(stdout_path), provider_session_id=record.session_id
         ),
         resume=record.resume or resume_info_for_agent_type(record.agent_type),
+        pid=record.pid,
+        pgid=record.pgid,
+        starttime=record.starttime,
     )
 
 

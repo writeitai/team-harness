@@ -42,6 +42,11 @@ class AgentRecord(BaseModel):
     stderr_log: str
     session_id: str | None = None
     resume: "WorkerResumeInfo | None" = None
+    # Durable process identity (TH-D5): the worker is its own process-group
+    # leader (pgid == pid); starttime guards liveness/kill against pid reuse.
+    pid: int | None = None
+    pgid: int | None = None
+    starttime: str | None = None
 
 
 class WorkerResumeInfo(BaseModel):
@@ -89,12 +94,16 @@ class WorkerSessionRecord(BaseModel):
     stderr_tail_path: str | None = None
     session: WorkerSessionInfo
     resume: WorkerResumeInfo
+    # Durable process identity (TH-D5); None for runs recorded before v0.2.11.
+    pid: int | None = None
+    pgid: int | None = None
+    starttime: str | None = None
 
 
 class WorkerSessionsManifest(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=False)
 
-    schema_version: int = 2
+    schema_version: int = 3
     run_id: str
     generated_at: datetime
     session_output_dir: str
@@ -148,6 +157,14 @@ class RunRecord(BaseModel):
     provider: str
     coordinator_model: str
     api_base: str
+    # Recorded at run start so a post-crash reap can refresh the
+    # worker_sessions.json manifest in the right place (TH-D5).
+    session_output_dir: str | None = None
+    # Identity of the process that owns this run, recorded at run start.
+    # reap_run refuses to touch a run whose parent is still alive (verified
+    # by pid + starttime) unless forced — guarding live runs from being reaped.
+    parent_pid: int | None = None
+    parent_starttime: str | None = None
     coordinator_retries: list[CoordinatorRetryRecord] = Field(default_factory=list)
     turns: list[TurnRecord] = Field(default_factory=list)
     agents: list[AgentRecord] = Field(default_factory=list)

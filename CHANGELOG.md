@@ -11,6 +11,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Built-in `antigravity` worker support for Google Antigravity CLI (`agy`)
   print-mode subprocesses.
+- **Durable worker process identity and orphan reaping (TH-D5).** Workers are
+  now spawned as leaders of their own process group (`start_new_session=True`),
+  and their `pid`/`pgid`/`starttime` are persisted at spawn time in `run.json`
+  (and surfaced in `worker_sessions.json`). New `th reap RUN_REF` command and
+  `team_harness.tracking.reaper.reap_run()` API apply a policy to workers a
+  crashed run left behind: `drain` (default — wait, under ONE shared deadline,
+  for them to finish, then finalize their records incl. best-effort vendor
+  session-id capture), `reap` (SIGTERM→grace→SIGKILL the group, verified), or
+  `ignore` — with per-agent policy overrides (`policies={agent_id: ...}`) and a
+  `--dry-run` probe mode. Design: `design/designs/process-lifecycle-and-reaping.md`.
+
+  Safety hardening (driven by two independent adversarial reviews):
+  - Start-time identity uses the exact kernel token on Linux (boot id +
+    `/proc/<pid>/stat` start ticks — immune to wall-clock/NTP shifts and
+    same-second pid reuse); the second-resolution `ps lstart` string remains
+    the macOS fallback with a documented residual window.
+  - A group whose leader is gone is **unverifiable** — waiting on it is
+    allowed, killing it is refused (a recycled session could look identical).
+  - Identity is re-verified immediately before every TERM/KILL escalation, and
+    outcomes are honest: `killed`/terminal statuses only after the group is
+    *observed* gone; failures surface as `kill_failed_still_running`.
+  - A broken/missing `ps` raises and is reported as `probe_failed` — never
+    silently treated as "the worker exited".
+  - `reap_run` refuses to act while the run's original parent process is still
+    alive (identity recorded at run start; `--force` overrides), validates
+    policy/timeout arguments **before** touching anything, and serializes
+    concurrent reapers on an advisory lock with unique atomic temp files.
+  - Reap reports are kept as history (`reap_report_<ts>.json`); a no-op run
+    never clobbers an earlier report with real outcomes.
 - Recognition of the GPT-5.6 model family (`gpt-5.6-sol`, `gpt-5.6-terra`,
   `gpt-5.6-luna`, and their `openai/`-prefixed forms) in the context-tracking
   registries: 1.5M-token context window, 128K max output, and a Codex
@@ -22,6 +51,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gpt-5.6-sol` (OpenAI's new frontier tier). `gpt-5.5` remains fully
   supported — override `model` / `default_model` in config to pin it, or
   select `gpt-5.6-terra` / `gpt-5.6-luna` for the cheaper tiers.
+- `worker_sessions.json` `schema_version` bumped 2 → 3: worker records gain
+  optional `pid`, `pgid`, and `starttime` fields (null for runs recorded by
+  older versions).
+- `run.json` gains a top-level `session_output_dir` field (recorded at run
+  start) and worker entries gain `pid`/`pgid`/`starttime`; `run.json` is now
+  written atomically (temp file + rename) so a crash can never truncate it.
+- Graceful shutdown and `kill_agent` are now group-aware end to end: stragglers
+  get a group SIGTERM with a verified SIGKILL escalation, and a final sweep
+  kills surviving group members even when the leader already exited (e.g. a
+  worker that exited successfully but left a background child running — both
+  cases were reproduced by review before the fix). Note: because workers now
+  run in their own process group, they no longer receive terminal Ctrl+C
+  directly; team-harness's own shutdown/cleanup paths handle their termination,
+  and a hard-killed parent's leftovers are covered by `th reap`.
 
 ## [0.2.10] - 2026-05-26
 

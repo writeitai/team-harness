@@ -45,7 +45,7 @@ def test_build_worker_sessions_manifest_shape_and_absolute_paths(tmp_path):
     )
 
     payload = manifest.model_dump(mode="json")
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["run_id"] == "run_1"
     assert payload["generated_at"] == "2026-04-09T12:05:00Z"
     assert payload["session_output_dir"] == str(
@@ -79,6 +79,9 @@ def test_build_worker_sessions_manifest_shape_and_absolute_paths(tmp_path):
                 "provider_session_path": None,
             },
             "resume": {"supported": True, "preferred_mode": "resume"},
+            "pid": None,
+            "pgid": None,
+            "starttime": None,
         }
     ]
 
@@ -103,7 +106,7 @@ def test_write_worker_sessions_manifest_handles_zero_workers_and_is_repeatable(
 
     assert first == second
     payload = json.loads(first.read_text())
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["workers"] == []
 
 

@@ -6,11 +6,13 @@ from dataclasses import replace
 from datetime import datetime
 from datetime import timezone
 from pathlib import Path
+import signal
 from typing import Any
 from typing import Literal
 import uuid
 
 from team_harness.agents.manager import AgentManager
+from team_harness.agents.process_identity import signal_group
 from team_harness.agents.registry import get_allowed_types
 from team_harness.agents.registry import resolve_template
 from team_harness.agents.registry import validate_templates
@@ -140,6 +142,7 @@ class TeamHarness:
                 provider=config.provider,
                 model=config.model,
                 api_base=client.api_base,
+                session_output_dir=str(session_output_dir),
             )
             model_limit = await resolve_model_limit(
                 model_id=config.model, client=client, config=config
@@ -491,10 +494,19 @@ async def _graceful_shutdown(
                 state = manager.get(agent_id)
                 if state.status != "running" or state.proc.returncode is not None:
                     continue
-                try:
-                    state.proc.terminate()
-                except ProcessLookupError:
-                    continue
+                # Workers run in their own process group (TH-D5), so terminate
+                # the whole group when we know its pgid — a leader-only SIGTERM
+                # can leave the CLI's own children running. Fall back to
+                # leader-only terminate for states without a trusted pgid
+                # (e.g. test doubles).
+                terminated = False
+                if state.pgid is not None:
+                    terminated = signal_group(state.pgid, signal.SIGTERM)
+                if not terminated:
+                    try:
+                        state.proc.terminate()
+                    except ProcessLookupError:
+                        continue
                 state.status = "killed"
                 stragglers.append(agent_id)
             if stragglers:
@@ -515,6 +527,18 @@ async def _graceful_shutdown(
                             state.finished_at = datetime.now(timezone.utc)
                         if ui is not None:
                             ui.agent_event(event="killed", state=state)
+    # Final sweep: a leader-only exit can leave helper processes alive in the
+    # worker's group (including a leader that exited *successfully* while a
+    # child it spawned keeps running), and a TERM-ignoring worker survives the
+    # phase above. Escalate to a verified group kill for every trusted pgid.
+    sweep_targets = [state.id for state in manager.list_all() if state.pgid is not None]
+    if sweep_targets:
+        await asyncio.gather(
+            *(
+                manager.ensure_group_dead(agent_id, term_wait_s=terminate_wait)
+                for agent_id in sweep_targets
+            )
+        )
     _sync_terminal_agents(manager, run_log)
 
 

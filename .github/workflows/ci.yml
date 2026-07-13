@@ -11,9 +11,12 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # macOS is included because the process-lifecycle code (TH-D5) has
+    # platform-specific identity paths: /proc on Linux, ps lstart on macOS.
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [ubuntu-latest, macos-latest]
         python-version: ["3.12", "3.13", "3.14"]
 
     steps:
