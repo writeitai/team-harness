@@ -1,0 +1,130 @@
+export const metadata = {
+  title: "Getting Started",
+  description:
+    "Install team-harness and its worker CLIs, scaffold a project config, authenticate a coordinator provider, and run your first multi-agent task.",
+};
+
+# Getting Started
+
+This page takes you from an empty terminal to a coordinated multi-agent run: install the CLI, install at least one worker, scaffold a config, authenticate, and start a run.
+
+## Install the CLI
+
+Install from the [PyPI package](https://pypi.org/project/team-harness/). With [`uv`](https://docs.astral.sh/uv/):
+
+```bash
+uv tool install team-harness
+```
+
+Or with `pip`:
+
+```bash
+pip install team-harness
+```
+
+To upgrade later:
+
+```bash
+uv tool install --upgrade team-harness
+# or
+pip install --upgrade team-harness
+```
+
+The CLI is `th`, with `team-harness` as a compatibility alias. This documentation uses `th` throughout.
+
+## Install worker CLIs
+
+Workers are external CLIs that team-harness spawns as subprocesses. **You do not need all of them** — install the ones you want to use, and restrict any run with `--agents codex,gemini`. Each worker authenticates separately, using its own native login.
+
+| Worker        | Install docs                                                          |
+| ------------- | -------------------------------------------------------------------- |
+| `codex`       | [Codex CLI](https://github.com/openai/codex)                         |
+| `gemini`      | [Gemini CLI](https://github.com/google-gemini/gemini-cli)            |
+| `claude`      | [Claude Code](https://docs.anthropic.com/en/docs/claude-code)        |
+| `antigravity` | [Antigravity CLI](https://antigravity.google/docs/cli-overview)      |
+| `openhands`   | [OpenHands CLI](https://github.com/OpenHands/OpenHands-CLI) (`pip install openhands`) |
+| `opencode`    | [opencode](https://github.com/opencode-ai/opencode)                  |
+| `pi`          | [pi](https://github.com/badlogic/pi-mono)                            |
+
+## Scaffold a config
+
+`th` works out of the box with built-in defaults, but a project-local config makes the coordinator and worker behavior reproducible. From your project root:
+
+```bash
+cd <your project>
+th init
+```
+
+This creates `./.team-harness/` with four files: `config.toml`, `coordinator_system_message.md`, `worker_suffix.md`, and `worker_footer.md`. See [Configuration](/docs/configuration) for what each one does. Commit them so prompt behavior is reproducible across contributors and CI.
+
+## Authenticate a coordinator provider
+
+The coordinator LLM needs a provider. Pick one.
+
+### ChatGPT Codex subscription
+
+If you are already logged in with `codex login`:
+
+```bash
+TEAM_HARNESS_PROVIDER=codex th repl
+```
+
+Or set `provider = "codex"` in `.team-harness/config.toml`.
+
+### OpenAI-compatible API key
+
+```bash
+OPENROUTER_API_KEY="sk-or-..." th repl
+```
+
+Or point at another OpenAI-compatible base URL:
+
+```bash
+OPENAI_API_KEY="sk-..." TEAM_HARNESS_API_BASE="https://api.openai.com/v1" th repl
+```
+
+See [Providers & Auth](/docs/providers) for the full authentication model, including how to route workers through OpenRouter.
+
+## Run your first task
+
+### Interactive (REPL)
+
+```bash
+th repl
+```
+
+The REPL keeps conversation history and supports slash commands like `/agents`, `/compact`, and `/clear`. See the [CLI Reference](/docs/cli-reference) for the full command and key-binding surface.
+
+### Headless (single-shot)
+
+```bash
+# Inline task
+th run "Write unit tests for src/utils.py using pytest"
+
+# From a file
+th run -f task.txt
+```
+
+Restrict which workers the coordinator may spawn with `--agents`:
+
+```bash
+th run --agents codex,gemini "Analyze the codebase and summarize gaps"
+```
+
+## View logs
+
+Every run is logged under `~/.team-harness/runs/<run-id>/`.
+
+```bash
+th logs            # list recent runs
+th logs <run-id>   # print one run's full log
+```
+
+See [Run Logs](/docs/run-logs) for the on-disk layout and the per-worker session manifest.
+
+## Next steps
+
+- [Concepts](/docs/concepts) — understand the coordinator/worker split before customizing anything.
+- [Configuration](/docs/configuration) — tune providers, models, prompts, and output directories.
+- [Workers](/docs/workers) — set per-worker models, reasoning effort, and add custom agent types.
+- [Python SDK](/docs/sdk) — drive team-harness programmatically.

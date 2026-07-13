@@ -1,0 +1,155 @@
+export const metadata = {
+  title: "Workers",
+  description:
+    "The structured agent-template schema: built-in workers, adding custom agent types, setting per-worker models via flags or env vars, and reasoning effort.",
+};
+
+# Workers
+
+A **worker** is an external CLI that the coordinator spawns as a subprocess. Each worker type is described by a structured **agent template**. This page covers the built-in templates, how to add your own, and how to control the model and reasoning effort per worker.
+
+## The agent-template schema
+
+A template is structured data — a base `command` list plus flag lists — not a string template. Any field you omit is inherited from the built-in default for that agent type, so it is fine to override only the piece you care about.
+
+```toml
+[agents.codex]
+command = ["codex", "exec"]
+shared_flags = [
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--skip-git-repo-check",
+    "--json",
+]
+resume_prefix = ["resume"]
+resume_flags = ["{session_id}"]
+model_flag = "--model"
+default_model = "gpt-5.6-sol"
+deduplicate_flags = [
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--skip-git-repo-check",
+    "--json",
+]
+reasoning_effort_flag = ["-c", "model_reasoning_effort={effort}"]
+
+[agents.codex.session_capture]
+strategy = "stream_json_event"
+match = { type = "thread.started" }
+field_path = ["thread_id"]
+```
+
+Key fields:
+
+- **`command`** — the base argv (required). Everything else has defaults.
+- **`shared_flags`** — flags always applied.
+- **`resume_prefix` / `resume_flags`** — argv used only when resuming a prior session; `{session_id}` is substituted at render time.
+- **`model_flag`** — the flag used to inject the model (e.g. `"--model"`), or `false` if the CLI has no model flag.
+- **`prompt_flag` / `prompt_position`** — the task prompt is appended at the tail of argv by default. Set `prompt_flag = "-p"` if the prompt is introduced by a flag (like `gemini -p`), or `prompt_position = "after_command"` if the CLI wants it earlier.
+- **`deduplicate_flags`** — standalone, idempotent flags that stay correct if the coordinator repeats them through `spawn_agent(flags=[...])`.
+- **`session_capture`** — a sub-table (`strategy`, `match`, `field_path`) describing how to pull the provider's session id from the worker's stream-json output. Workers are one-shot subprocesses and are never reattached: a later `resume` spawns a **fresh** worker process that continues that captured vendor session.
+
+Placeholders usable inside `shared_flags`, `resume_prefix`, or `resume_flags`:
+
+- `{session_id}` — the resume session id (resume mode only).
+- `{generated_uuid}` — a harness-generated UUID at spawn time, for CLIs like `claude` that accept `--session-id <uuid>` up front so the id is recorded deterministically.
+
+## Built-in workers
+
+team-harness ships templates for these agent types. Run `th init --force` to regenerate a complete, commented sample of all of them.
+
+| Worker        | Command                     | Model injection                       |
+| ------------- | --------------------------- | ------------------------------------- |
+| `codex`       | `codex exec`                | `--model`                             |
+| `gemini`      | `gemini`                    | `--model`                             |
+| `claude`      | `claude`                    | `--model` + `ANTHROPIC_*` env vars    |
+| `antigravity` | `agy`                       | none (no model flag in `agy --help`)  |
+| `openhands`   | `openhands`                 | `LLM_MODEL` env var                   |
+| `opencode`    | `opencode`                  | none (`model_flag = false`)           |
+| `pi`          | `pi --print --no-session`   | none (`model_flag = false`)           |
+| `harness`     | `th run`                    | `--model`                             |
+
+A few worker-specific notes:
+
+- **Antigravity** runs use `agy --print` so the worker runs as a non-interactive subprocess. `agy --help` exposes no model flag, so team-harness does not inject `--model`. Print mode does not emit stream-json, so automatic session capture is not configured — callers that already know a conversation id can still use resume mode (`--conversation <id>`).
+- **OpenHands** runs are not auto-resumable today (its `--json` output is not parseable as stream-json). `--override-with-envs` is required so `LLM_MODEL` injection works — a side effect is that any `LLM_MODEL`, `LLM_API_KEY`, or `LLM_BASE_URL` already set in your shell is picked up by the worker. Unset or override them for deterministic per-run behavior.
+
+## Adding a custom agent type
+
+Add a `[agents.<name>]` section. The only required field is `command`:
+
+```toml
+[agents.myagent]
+command = ["my-custom-cli"]
+shared_flags = ["--mode", "auto"]
+model_flag = "--model"   # set to false if the CLI has no model flag
+```
+
+The new type appears automatically in the coordinator's `spawn_agent` tool. Session ids can be captured via a `[agents.<name>.session_capture]` sub-table with `strategy`, `match`, and `field_path` (see the codex/gemini/claude examples).
+
+## Setting a worker's model
+
+Two fields control the model a worker runs with:
+
+- **`default_model`** — the model used when the coordinator does not pass an explicit `model=...` in its `spawn_agent` call. Absent means no default: the worker CLI uses its own internal default.
+- **`model_flag`** — the CLI flag used to inject the model, e.g. `"--model"`.
+
+Precedence:
+
+| Source                                          | Priority          |
+| ----------------------------------------------- | ----------------- |
+| Explicit `spawn_agent(model="…")` from the coordinator | 1 (highest) |
+| `[agents.<name>].default_model`                 | 2                 |
+| Worker CLI's own internal default               | 3 (fallback)      |
+
+```toml
+[agents.codex]
+command = ["codex", "exec"]
+default_model = "gpt-5.6-sol"   # every codex spawn gets --model gpt-5.6-sol
+```
+
+Clear a default with `default_model = false` (or an empty string) if the built-in default is wrong for your setup.
+
+> `[coordinator].model` controls the coordinator's own model, not the workers'. Per-worker defaults always come from `[agents.<name>].default_model`.
+
+### Env-var model injection
+
+Some CLIs don't rely solely on `--model`. Claude Code is the built-in example: internal code paths read `ANTHROPIC_DEFAULT_OPUS_MODEL` / `ANTHROPIC_DEFAULT_SONNET_MODEL` directly, so setting only `ANTHROPIC_MODEL` is not a deterministic override. Templates can declare `model_env_vars` — env var names the spawner sets to the effective model on every spawn:
+
+```toml
+[agents.claude]
+command = ["claude"]
+model_flag = "--model"
+model_env_vars = [
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+]
+default_model = "claude-sonnet-4-6"   # optional
+```
+
+The built-in `claude` default intentionally lists **only** those three vars and does **not** touch `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, or `CLAUDE_CODE_SUBAGENT_MODEL`, so cheap auxiliary helpers keep running on Haiku.
+
+Child-process env merge order, lowest to highest precedence: `os.environ`, then template `provider_env`, then template `model_env_vars`, then the caller's explicit per-spawn env. The coordinator's `spawn_agent` tool exposes that top layer as an `env` object, so a task can override any template env var for a single worker (e.g. `env={"ANTHROPIC_MODEL": "…"}`).
+
+## Reasoning effort
+
+Workers that expose a reasoning-effort knob use two fields:
+
+- **`reasoning_effort`** — the value (e.g. `"high"`). Absent = no injection.
+- **`reasoning_effort_flag`** — the argv token shape with a literal `{effort}` placeholder, substituted at render time. Ships with a sensible per-worker default, so you normally only set `reasoning_effort`.
+
+| Worker | `reasoning_effort_flag`                        | Allowed values             |
+| ------ | ---------------------------------------------- | -------------------------- |
+| codex  | `["-c", "model_reasoning_effort={effort}"]`    | `low`, `medium`, `high`, `xhigh` |
+| claude | `["--effort", "{effort}"]`                     | `low`, `medium`, `high`, `max`   |
+| gemini | (not supported upstream)                       | —                          |
+
+```toml
+[agents.codex]
+reasoning_effort = "high"
+```
+
+The harness does **not** validate the value against a per-CLI enum — pass what the worker CLI accepts; invalid levels are reported by the worker. Clear a default with `reasoning_effort = false`.
+
+## Nested harness depth
+
+The `harness` worker type runs `th run` recursively. `[coordinator].max_depth` (default `3`) bounds how deeply nested harness agents can spawn further harness agents.

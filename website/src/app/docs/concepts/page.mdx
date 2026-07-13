@@ -1,0 +1,72 @@
+export const metadata = {
+  title: "Concepts",
+  description:
+    "How team-harness is structured: the coordinator/worker split, the request flow through the tool registry, agent templates, context tracking, and skills.",
+};
+
+# Concepts
+
+team-harness is a multi-agent orchestration harness. This page explains the moving parts so the rest of the documentation makes sense.
+
+## Coordinator vs. workers
+
+There are two roles, and keeping them straight is the key to using team-harness well.
+
+- The **coordinator** is an LLM. It receives your task, plans, and delegates. It talks to an OpenAI-compatible API or a Codex subscription. **The coordinator never implements — it orchestrates.**
+- **Workers** are external CLI processes — `codex`, `gemini`, `claude`, `agy`, and the others — that do the actual work. The coordinator spawns them as subprocesses and reads their output.
+
+`[coordinator].model` controls the coordinator's **own** model. It does **not** flow through to workers; each worker's model comes from its own template (see [Workers](/docs/workers)).
+
+## The request flow
+
+A single run flows through these layers:
+
+```text
+Your task
+  → coordinator loop (run → run_one_turn)
+      → coordinator client (chat with the LLM)
+      → LLM returns tool calls → tool registry (dispatch by name)
+          → agent tools    (spawn_agent, wait_for_agents, ...)
+              → spawner    (subprocess.exec the worker CLI)
+              → manager    (track each worker's lifecycle)
+          → file-system tools (read_file, write_file, grep, ...)
+          → shell tool     (bash)
+          → todo tools      (todo_write, todo_read)
+  → loop continues until the LLM returns content with no tool calls
+```
+
+The coordinator loops: it calls the model, the model requests tool calls, the harness executes them and feeds results back, and this repeats until the model returns a final answer with no further tool calls.
+
+## The tool registry
+
+The registry maps each tool name to a schema and an async function. On every turn the coordinator sends all tool schemas to the model, then dispatches whatever the model calls by name. Tool bindings are built **per run** so they can capture run-specific state (the worker manager, the run log, the config) instead of relying on module-level globals.
+
+The coordinator's toolset spans agent management, file system, shell, and task tracking — see [Coordinator Tools](/docs/coordinator-tools) for the full list.
+
+## Agent templates
+
+Each worker type is described by a structured **agent template**: a base `command` list, `shared_flags`, `resume_flags`, how to inject a model, and how to capture the worker's session id from its stream-json output. Templates are structured data (lists of flags), not string templates. The built-in defaults are merged with any per-agent overrides from your `config.toml`, so you only specify the field you want to change.
+
+Because every worker type is just a template, adding a new CLI is a matter of adding one `[agents.<name>]` section — see [Workers](/docs/workers).
+
+## Console modes
+
+The harness drives a visual lifecycle (turn start → streaming tokens → tool calls → turn end) through a console. There are three implementations that degrade gracefully:
+
+- **Rich** — the full TUI with live panels, spinners, and markdown, used when stdout is a TTY.
+- **Plain** — static indicators for non-TTY output (pipes, CI).
+- **Silent** — no output, used by the Python SDK.
+
+See [Terminal features](/docs/cli-reference#terminal-features) for what the rich console adds.
+
+## Context tracking and compaction
+
+The harness tracks token usage from each API response and triggers **auto-compaction** before a new coordinator turn once a model-specific threshold is reached. Compaction rewrites earlier conversation history into a summary via a separate LLM call, so long runs don't overflow the context window. See [Context Management](/docs/context-management) for the details and the manual `/compact` escape hatch.
+
+## Skills
+
+**Agent Skills** are directories containing a `SKILL.md` file with YAML frontmatter (a name and description) plus markdown instructions. The coordinator sees skill metadata at startup and reads the full instructions on demand via its `read_file` tool when a task calls for it. Skills are instructions the coordinator reads — not executable code the harness runs on its own. See [Skills](/docs/skills).
+
+## Configuration resolution
+
+Settings resolve in a fixed order — CLI flags, then environment variables, then local `.team-harness/config.toml`, then the global `~/.team-harness/config.toml`, then built-in defaults. [Configuration](/docs/configuration) covers this in full.

@@ -1,0 +1,63 @@
+export const metadata = {
+  title: "Skills",
+  description:
+    "Agent Skills give the coordinator specialized knowledge: SKILL.md directories discovered from .agents/skills/, their naming rules, and optional subdirectories.",
+};
+
+# Skills
+
+team-harness supports the [Agent Skills](https://agentskills.io) standard — a cross-tool format for giving AI agents specialized knowledge and workflows.
+
+A skill is a directory containing a `SKILL.md` file with YAML frontmatter (a `name` and `description`) plus markdown instructions. The coordinator sees skill **metadata** at startup and reads the **full instructions** on demand via its `read_file` tool when a task calls for it. Skills are instructions the coordinator reads — not executable code the harness runs on its own.
+
+## Skill directories
+
+| Location                 | Scope                                                          |
+| ------------------------ | ------------------------------------------------------------- |
+| `<cwd>/.agents/skills/`  | Project-local (also searched in parent directories up to root) |
+| `~/.agents/skills/`      | User-global                                                    |
+
+Project skills override user-global skills of the same name. The `.agents/skills/` path matches the Codex CLI convention, so skills written for Codex work in team-harness unchanged.
+
+## Creating a skill
+
+```bash
+mkdir -p .agents/skills/my-skill
+cat > .agents/skills/my-skill/SKILL.md << 'EOF'
+---
+name: my-skill
+description: Summarize files and produce a brief report. Use when the user asks for a summary or overview.
+---
+
+# My Skill
+
+## Steps
+
+1. Read the target files using `read_file`
+2. Summarize the key points
+3. Write a brief report
+
+## Notes
+
+- Keep summaries under 500 words
+- Focus on actionable insights
+EOF
+```
+
+## Naming rules
+
+- 1–64 characters: lowercase letters, digits, and hyphens only.
+- Must not start or end with a hyphen, and no consecutive hyphens.
+- The directory name is the canonical skill name.
+
+## Optional subdirectories
+
+| Directory     | Purpose                                    |
+| ------------- | ------------------------------------------ |
+| `scripts/`    | Executable code the agent can run          |
+| `references/` | Additional documentation loaded on demand  |
+| `assets/`     | Templates, data files, schemas             |
+
+The agent reads these files on demand via its file tools — they are **not** loaded at startup.
+
+> **Trust:** the harness never executes a `SKILL.md` — it reads it. But a skill directory can ship a `scripts/` folder whose code an agent may run via the unsandboxed `bash` tool, with the harness process's full privileges. Treat skill directories as trusted, like your `PATH`. See [Troubleshooting → Trust model](/docs/troubleshooting#trust-model).

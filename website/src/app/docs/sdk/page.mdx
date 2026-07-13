@@ -1,0 +1,74 @@
+export const metadata = {
+  title: "Python SDK",
+  description:
+    "Drive team-harness programmatically: the TeamHarness class, every constructor parameter, and the TeamHarnessResult returned by run().",
+};
+
+# Python SDK
+
+team-harness can be driven programmatically from Python. The SDK uses the silent console by default, so it produces no terminal output.
+
+## Basic usage
+
+```python
+import asyncio
+from team_harness import TeamHarness, TeamHarnessResult
+
+async def main():
+    harness = TeamHarness(
+        api_key="sk-or-...",
+        model="anthropic/claude-sonnet-4",
+        agents=["codex", "gemini"],
+    )
+    result: TeamHarnessResult = await harness.run(
+        "Write unit tests for src/utils.py using pytest"
+    )
+    print(result.text)
+    for agent in result.agents:
+        print(f"  {agent.id} ({agent.agent_type}): {agent.status}")
+
+asyncio.run(main())
+```
+
+## Constructor parameters
+
+Every CLI option is available as a constructor parameter:
+
+```python
+harness = TeamHarness(
+    provider="codex",           # or "openai_compat" (default)
+    model="codex-mini-latest",
+    api_base="https://openrouter.ai/api/v1",
+    api_key="sk-or-...",
+    codex_auth_path="~/.codex/auth.json",
+    agents=["codex", "gemini"], # or "codex,gemini"
+    max_retries=5,
+    retry_base_delay_s=1.0,
+    retry_max_delay_s=30.0,
+    max_depth=3,
+    system_prompt="Extra instructions",
+    system_prompt_file="prompt.txt",
+    agent_models={"codex": "gpt-5.6-sol"},
+    agent_reasoning_efforts={"codex": "high"},
+    output_dir="./_outputs",
+    cwd="./project",
+    console_mode="silent",      # "silent" | "auto" | "plain" | "rich"
+)
+```
+
+- **`agent_models`** and **`agent_reasoning_efforts`** override the resolved worker template defaults for the named agent types. They do **not** change the coordinator model set by `model=...`, and a per-spawn `model` argument still wins for that one worker.
+- **`output_dir`** overrides `[coordinator].output_dir` for SDK runs. Each run still creates a child directory named by the team-harness run id.
+
+## The result
+
+`run()` returns a `TeamHarnessResult` with:
+
+- **`text`** — the final assistant response.
+- **`agents`** — a list of `AgentSummary` (`id`, `agent_type`, `status`, `exit_code`, `cwd`).
+- **`run_id`** — the unique run identifier.
+
+### A normal return does not mean every worker succeeded
+
+`run()` returns a `TeamHarnessResult` when the coordinator loop ends cleanly. A **failed worker does not by itself fail the run** — the coordinator may legitimately finish after a worker failed (synthesizing an answer, routing around it, or deciding it has enough). Failed workers survive as entries in `result.agents`. **Do not treat a normal return as task success:** inspect each `AgentSummary`'s `status` and `exit_code` and apply your own acceptance criteria.
+
+A **terminal** failure — coordinator API retry exhaustion or a recorded run-log error during the loop — raises `TeamHarnessError`, and the run log is finalized even in that case. Errors during setup (configuration resolution, client, or auth creation) happen before the run log exists and may surface as other exception types. See [Run Logs](/docs/run-logs).

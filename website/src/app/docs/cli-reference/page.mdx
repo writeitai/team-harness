@@ -1,0 +1,100 @@
+export const metadata = {
+  title: "CLI Reference",
+  description:
+    "The th command surface: run and repl flags, viewing logs, REPL slash commands, editing key bindings, and the rich terminal features.",
+};
+
+# CLI Reference
+
+The CLI is `th`, with `team-harness` as a compatibility alias.
+
+## Commands
+
+- **`th run [TASK]`** — a single-shot headless run.
+- **`th repl`** — an interactive loop with slash commands and history.
+- **`th init`** — scaffold config (see [Configuration](/docs/configuration)).
+- **`th logs [RUN-ID]`** — list recent runs, or print one run's log (see [Run Logs](/docs/run-logs)).
+- **`th reap RUN-REF`** — handle workers orphaned by a crashed run (see [`th reap`](#th-reap) below).
+
+## `th run` flags
+
+```text
+th run [OPTIONS] [TASK]
+
+Options:
+  -f, --file PATH             Read task from file instead of argument
+  --provider TEXT             Coordinator provider: "openai_compat" or "codex"
+  --model TEXT                Override coordinator model (e.g. "anthropic/claude-sonnet-4")
+  --api-base TEXT             Override coordinator base URL
+  --api-key TEXT              Override coordinator API key for openai_compat
+  --codex-auth-path TEXT      Override Codex auth.json location
+  --agents TEXT               Comma-separated allowlist (e.g. "codex,gemini")
+  --max-retries INT           API retry budget for 429/5xx errors (default: 5)
+  --max-depth INT             Nested harness depth limit (default: 3)
+  --system-prompt TEXT        Extra text appended to the system prompt
+  --system-prompt-file PATH   Read system prompt extension from file
+  --cwd PATH                  Working directory for the run (default: ".")
+```
+
+`th repl` accepts the same options **except** `-f`/`--file` and the `TASK` argument.
+
+## `th reap`
+
+Handle worker processes orphaned by a coordinator that crashed or was killed mid-run. Every action verifies process identity (process-group id + start time), so a recycled PID is never touched; `th reap` refuses to act on a run whose original parent is still alive unless `--force` is given.
+
+```text
+th reap [OPTIONS] RUN_REF
+
+RUN_REF   A run id (resolved under the runs dir), a run directory, or a path to its run.json.
+
+Options:
+  --policy [drain|reap|ignore]  drain: wait for orphans to finish (timeout → kill);
+                                reap: kill now; ignore: only record what is still
+                                running  [default: drain]
+  --drain-timeout-s FLOAT       Max seconds to wait, shared across all draining
+                                orphans, under --policy drain
+  --grace-s FLOAT               Seconds between SIGTERM and SIGKILL when killing a group
+  --force                       Act even if the run's original parent still appears alive
+  --dry-run                     Probe and report only: no signals sent, no files written
+  --json                        Print the report as JSON
+```
+
+## REPL commands
+
+| Command             | Description                                                             |
+| ------------------- | ---------------------------------------------------------------------- |
+| `/clear`            | Clear conversation history and context tracking; start fresh           |
+| `/reset`            | Alias for `/clear`                                                      |
+| `/compact [focus]`  | Manually compact earlier conversation into a summary for the next turn |
+| `/quit`             | Graceful shutdown: wait for running agents, then exit                  |
+| `/agents`           | Print the current agent status table inline                            |
+| `/log`              | Print the path to the current run log                                  |
+
+## REPL editing keys
+
+| Key            | Action                                          |
+| -------------- | ----------------------------------------------- |
+| `Enter`        | Submit the current input                        |
+| `Shift+Enter`  | Insert a newline (multi-line editing)           |
+| `Alt+Enter`    | Insert a newline (alternative)                  |
+| `Esc Esc`      | Clear the entire input buffer                   |
+| `Ctrl+C`       | Interrupt the prompt and exit the REPL          |
+| `Ctrl+D`       | Exit the REPL (when the input buffer is empty)  |
+| `Up` / `Down`  | Navigate input history within the session       |
+
+Standard cursor-movement keys (Left/Right, Home/End, Ctrl+A/E, Ctrl+W, Ctrl+K) work as expected.
+
+In terminals that support bracketed paste, long pasted blocks with at least 4 newline characters collapse to `[Pasted text #N +M lines]` while you edit, and the full text is restored when you submit. If Alt/Esc key sequences feel delayed in tmux, set `set -sg escape-time 0` in your tmux config.
+
+## Terminal features
+
+The rich console mode (the default when stdout is a TTY) adds several visual enhancements:
+
+- **Spinner animation** — an animated braille spinner in the status bar while the coordinator is thinking (before tokens stream).
+- **iTerm2 tab progress** — an indeterminate progress indicator in the terminal tab during processing (iTerm2 only, disabled inside tmux).
+- **User prompt styling** — submitted prompts render with a dark background and white text to distinguish them from assistant output.
+- **Agent emojis** — each agent type shows a per-type emoji (e.g. 🔷 codex, ♊ gemini, 🟣 claude) in the agent panel and event log.
+- **Path coloring** — file paths in tool arguments and results are highlighted in cyan.
+- **Bold consistency** — agent types, turn numbers, and running status use bold for emphasis.
+
+These degrade gracefully: the plain console shows static indicators, and the silent console (SDK mode) produces no output.
