@@ -1,0 +1,119 @@
+export const metadata = {
+  title: "Providers & Auth",
+  description:
+    "Coordinator providers (OpenAI-compatible vs. Codex subscription), the authentication model, and recipes for routing worker CLIs through OpenRouter.",
+};
+
+# Providers & Auth
+
+team-harness has two independent authentication surfaces: the **coordinator** (the planning LLM) and each **worker** (which uses its own native auth). This page covers both.
+
+## Coordinator providers
+
+`[coordinator].provider` selects the backend:
+
+- **`openai_compat`** (default) — any OpenAI-compatible API: OpenRouter, OpenAI, or a local proxy. Uses your API key.
+- **`codex`** (experimental) — the ChatGPT Codex subscription, using the auth file written by `codex login`.
+
+### OpenAI-compatible
+
+```toml
+[coordinator]
+provider = "openai_compat"
+model = "gpt-5.6-sol"
+api_base = "https://openrouter.ai/api/v1"
+```
+
+Provide the key via `OPENROUTER_API_KEY` or `OPENAI_API_KEY` (preferred over putting `api_key` in a committed config). Point `api_base` at any OpenAI-compatible endpoint:
+
+```bash
+OPENAI_API_KEY="sk-..." TEAM_HARNESS_API_BASE="https://api.openai.com/v1" th repl
+```
+
+### Codex subscription
+
+```toml
+[coordinator]
+provider = "codex"
+model = "codex-mini-latest"
+# api_base = "https://chatgpt.com/backend-api"   # optional override
+# codex_auth_path = "~/.codex/auth.json"          # optional explicit auth location
+```
+
+`provider = "codex"` is experimental. team-harness talks to the ChatGPT Codex Responses SSE endpoint through a shared `httpx` client, still using the same `model` field.
+
+Known built-in Codex model names (context tracking is accurate for these):
+
+- `codex-mini-latest` / `openai/codex-mini-latest`
+- `gpt-5.1-codex-mini` / `openai/gpt-5.1-codex-mini`
+- `gpt-5.1-codex-max` / `openai/gpt-5.1-codex-max`
+- `gpt-5.5`
+- The GPT-5.6 family: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
+
+Under the `codex` provider, use the **bare** names above: they carry the Codex-subscription context cap. The `openai/`-prefixed variants are still recognized (no warning) but resolve to the raw 1.5M context window rather than the subscription cap, so they are better suited to the `openai_compat` provider.
+
+Unknown Codex models still work, but startup prints a warning because context tracking may be inaccurate.
+
+## Authentication model
+
+- `provider = "openai_compat"` uses your OpenRouter or other OpenAI-compatible API key.
+- `provider = "codex"` uses the auth file written by `codex login`. Codex auth resolves in this order:
+  1. `codex_auth_path` from CLI or config
+  2. `TEAM_HARNESS_CODEX_AUTH_PATH`
+  3. `$CODEX_HOME/auth.json`
+  4. `~/.codex/auth.json`
+
+  Relative `codex_auth_path` values resolve against the effective harness `--cwd`.
+- Each **worker** CLI uses its own native auth and local config.
+- The harness does **not** forward the coordinator API key to workers unless you explicitly pass environment overrides at spawn time.
+
+## Routing workers through OpenRouter
+
+By default each worker authenticates natively. You can instead route a worker through OpenRouter so the same account fuels both the coordinator and the workers. This uses a template field, `provider_env` — env vars the spawner sets on the child process. Values may contain `{env:VARNAME}` placeholders resolved from the parent shell at spawn time, so API keys stay in your shell and never touch `config.toml`.
+
+Export your key once:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+```
+
+### Codex via OpenRouter
+
+Codex reads its provider config from `-c` overrides. Add them to the codex template's `shared_flags`:
+
+```toml
+[agents.codex]
+command = ["codex", "exec"]
+shared_flags = [
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--skip-git-repo-check",
+    "--json",
+    "-c", "model_provider=openrouter",
+    "-c", 'model_providers.openrouter.name="openrouter"',
+    "-c", 'model_providers.openrouter.base_url="https://openrouter.ai/api/v1"',
+    "-c", 'model_providers.openrouter.env_key="OPENROUTER_API_KEY"',
+]
+default_model = "openai/gpt-5.3-codex"   # OpenRouter-flavoured model name
+```
+
+No `provider_env` is needed — codex reads `OPENROUTER_API_KEY` itself via `env_key`.
+
+### Claude Code via OpenRouter
+
+Claude Code reads its provider config from env vars. Add a `provider_env` sub-table:
+
+```toml
+[agents.claude]
+default_model = "anthropic/claude-opus-4.6"   # OpenRouter-flavoured model name
+
+[agents.claude.provider_env]
+ANTHROPIC_BASE_URL = "https://openrouter.ai/api"
+ANTHROPIC_AUTH_TOKEN = "{env:OPENROUTER_API_KEY}"
+ANTHROPIC_API_KEY = ""   # must be empty — prevents fallback to native auth
+```
+
+The `{env:OPENROUTER_API_KEY}` placeholder is resolved from `os.environ` at spawn time. If the variable is missing, the harness warns once and substitutes an empty string (the child then fails its own auth with a clear message). The three `ANTHROPIC_DEFAULT_*_MODEL` env vars still layer on top — setting `default_model` above populates all three automatically.
+
+### Gemini via OpenRouter
+
+Not supported by the upstream `gemini` CLI — it authenticates directly against Google APIs with no OpenAI-compatible base-URL mode. The harness ships no recipe.

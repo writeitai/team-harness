@@ -897,4 +897,4 @@ uv run pytest src/tests/ -v    # test
 
 ## License
 
-MIT
+Apache-2.0 — see [LICENSE](LICENSE).

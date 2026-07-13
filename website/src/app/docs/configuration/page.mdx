@@ -1,0 +1,116 @@
+export const metadata = {
+  title: "Configuration",
+  description:
+    "How team-harness resolves configuration: config.toml, environment variables, the prompt files created by th init, output directories, and coordinator retries.",
+};
+
+# Configuration
+
+`th` works out of the box with built-in defaults. A config file makes coordinator and worker behavior explicit and reproducible.
+
+## Creating a config
+
+```bash
+# Project-local config for the current repo (./.team-harness/)
+th init
+
+# Global config under ~/.team-harness/config.toml
+th init --global
+
+# Overwrite an existing config file
+th init --force
+th init --global --force
+```
+
+Global config holds user-wide defaults. Project config holds repo-specific settings and **should not contain secrets** — keep API keys in environment variables.
+
+`th init --force` overwrites `config.toml` but **preserves** your existing `coordinator_system_message.md`, `worker_suffix.md`, and `worker_footer.md` so your prompt customizations survive; missing sidecar files are re-created.
+
+## Resolution order
+
+Settings are resolved from highest to lowest precedence:
+
+1. CLI flags
+2. Environment variables
+3. Local `.team-harness/config.toml`
+4. Global `~/.team-harness/config.toml`
+5. Built-in defaults
+
+Local config discovery walks **upward** from the effective `--cwd`, and the nearest ancestor config overrides the global file. Lists **replace** rather than extend — setting `[coordinator].allowed_agents` in a local config replaces the global list instead of appending to it.
+
+## Environment variables
+
+- `TEAM_HARNESS_PROVIDER`
+- `TEAM_HARNESS_MODEL`
+- `TEAM_HARNESS_API_BASE`
+- `TEAM_HARNESS_CODEX_AUTH_PATH`
+- `OPENROUTER_API_KEY` or `OPENAI_API_KEY`
+
+## The `[coordinator]` block
+
+```toml
+[coordinator]
+provider = "openai_compat"       # or "codex"
+model = "gpt-5.6-sol"
+api_base = "https://openrouter.ai/api/v1"
+coordinator_system_message_file = "coordinator_system_message.md"
+worker_suffix_file = "worker_suffix.md"
+worker_footer_file = "worker_footer.md"
+system_prompt = ""
+output_dir = "_outputs"
+max_retries = 5
+retry_base_delay_s = 1.0
+retry_max_delay_s = 30.0
+max_depth = 3
+```
+
+This shows the most common keys; the block also accepts `api_key`, `codex_auth_path`, `context_limit`, `shutdown_timeout_s`, `min_agent_lifetime_before_kill_s`, and `allowed_agents` (run `th init` for a fully commented file). `[coordinator].model` is the coordinator's own model — it does **not** set worker models. Worker models come from each `[agents.<name>].default_model` (see [Workers](/docs/workers)). For the provider options and authentication, see [Providers & Auth](/docs/providers).
+
+## The prompt files
+
+`th init` creates four files in the target `.team-harness/` directory:
+
+| File                              | Purpose                                                          |
+| --------------------------------- | ---------------------------------------------------------------- |
+| `config.toml`                     | All coordinator and agent settings                               |
+| `coordinator_system_message.md`   | Editable coordinator base prompt (seeded from the built-in)      |
+| `worker_suffix.md`                | Text appended to every spawned worker prompt (empty by default)  |
+| `worker_footer.md`                | Worker output-requirements template, editable per project        |
+
+The keys that point at them:
+
+- **`coordinator_system_message_file`** — the coordinator base prompt. Missing file → warning + built-in default; unset key → built-in default, silently.
+- **`worker_suffix_file`** — text appended to every worker prompt. The coordinator is told the suffix exists so it does not duplicate those instructions. Missing/empty → nothing appended.
+- **`worker_footer_file`** — the footer appended after the suffix. Keep the `{session_output_dir}` placeholder so workers know where to write artifacts. Missing/empty → built-in footer.
+- **`system_prompt`** — inline text appended **after** the base prompt (additive, not a replacement).
+- **CLI `--system-prompt-file`** — reads extra text from a file and appends it as a runtime extension (like `system_prompt`), resolved relative to the effective `--cwd`.
+
+Prompt-file paths in `config.toml` resolve relative to the directory containing the config that defined them; absolute paths are used as-is. Files are read as UTF-8 and limited to 100 KB — exceeding that, invalid UTF-8, or an unreadable file produces a clear error.
+
+Commit the project-level `.team-harness/` files so prompt behavior is reproducible across contributors and CI.
+
+## Output directory
+
+`[coordinator].output_dir` controls where per-run coordinator and worker artifacts are written. Each run creates `<output_dir>/<run_id>/`, and the coordinator may instruct workers to place notes, reports, or logs there. The harness also writes a compact `worker_sessions.json` manifest summarizing every spawned worker. Relative `output_dir` values resolve against the effective `--cwd`. See [Run Logs](/docs/run-logs).
+
+## Coordinator retries
+
+Transient coordinator API errors (429 / 5xx) are retried with exponential backoff:
+
+```toml
+max_retries = 5
+retry_base_delay_s = 1.0
+retry_max_delay_s = 30.0
+```
+
+Retry records are written to `run.json` under `coordinator_retries`, and the terminal run-level failure under `failure`.
+
+## Legacy single-string templates
+
+Earlier versions accepted a `template = "codex exec ... {prompt}"` single-string form. That form was **removed** — loading a config that still contains a `template = "..."` line raises a clear error naming the offending file. Migrate to the structured form; the fastest path is:
+
+```bash
+th init --force   # regenerates a complete, commented structured sample
+```
+
+This preserves your existing sidecar prompt files, so it regenerates just `config.toml`.

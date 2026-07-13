@@ -1,0 +1,42 @@
+export const metadata = {
+  title: "Run Logs",
+  description:
+    "What team-harness writes to disk for every run: the replayable run.json, the persistent todo list, the worker session manifest, and per-worker stdout/stderr.",
+};
+
+# Run Logs
+
+Every run is recorded on disk so it can be inspected and replayed. Logs are always finalized, even when a run fails.
+
+## Run directory
+
+Each run creates a directory under `~/.team-harness/runs/<run-id>/` containing:
+
+- **`run.json`** — the full delta-based run log, a losslessly replayable record of the conversation.
+- **`todo.json`** — the persistent task list (written once the coordinator first calls `todo_write`, so it may be absent for runs that never used a task list).
+
+View a run log from the CLI:
+
+```bash
+th logs            # list recent runs
+th logs <run-id>   # print one run's full log
+```
+
+## Worker session manifest
+
+Each run also writes `<output_dir>/<run-id>/worker_sessions.json` — a compact index of every spawned worker with its prompt, status, timestamps, log paths, and resume-related metadata. (`output_dir` comes from `[coordinator].output_dir`; see [Configuration](/docs/configuration#output-directory).)
+
+## Per-worker logs
+
+Each worker's stdout and stderr are written under the same session output directory:
+
+```text
+<output_dir>/<run-id>/workers/<worker-label>__<agent-id>/stdout.jsonl
+<output_dir>/<run-id>/workers/<worker-label>__<agent-id>/stderr.log
+```
+
+When the coordinator supplies a `worker_label`, it is treated as a filesystem-safe **label**, not a path — team-harness rejects labels containing path separators and keeps all worker logs inside the session output directory. Workers spawned without a label use their generated agent id as the directory name.
+
+## Retry and failure records
+
+Transient coordinator API failures (429 / 5xx) are recorded in `run.json` under `coordinator_retries`, and the terminal run-level failure under `failure`. Retry behavior is tuned with `max_retries`, `retry_base_delay_s`, and `retry_max_delay_s` — see [Configuration](/docs/configuration#coordinator-retries).

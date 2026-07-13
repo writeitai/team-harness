@@ -1,0 +1,55 @@
+export const metadata = {
+  title: "Troubleshooting",
+  description:
+    "Common team-harness failure modes and fixes — worker auth, model warnings, OpenHands env bleed, the removed legacy template form — plus the trust model and migration notes.",
+};
+
+# Troubleshooting
+
+## A worker fails to start or authenticate
+
+Workers are separate CLIs with their own installation and auth. Confirm the binary is installed and that you can run it standalone (e.g. `codex`, `gemini`, `claude`, `agy`). Each worker uses its **own native auth** — the harness does not forward the coordinator's API key to workers unless you explicitly configure `provider_env` (see [Providers & Auth](/docs/providers#routing-workers-through-openrouter)). Restrict a run to only the workers you have with `--agents codex,gemini`.
+
+## "Codex model … is not in the built-in known model list"
+
+Startup prints this warning when the coordinator model isn't one of the known Codex models. The run still works, but context tracking may be inaccurate. Use one of the known names or accept the estimate — see [Providers & Auth](/docs/providers#codex-subscription) for the list.
+
+## OpenHands picks up the wrong model or key
+
+OpenHands requires `--override-with-envs` for `LLM_MODEL` injection. As a side effect, any `LLM_MODEL`, `LLM_API_KEY`, or `LLM_BASE_URL` already set in your shell is also picked up by the worker. Unset or override them for deterministic per-run behavior. OpenHands runs are also **not auto-resumable** today, because its `--json` output is not parseable as stream-json.
+
+## `agents.<name>.template` is no longer supported
+
+The legacy `template = "codex exec ... {prompt}"` single-string form was **removed**. Loading a config that still contains a `template = "..."` line raises an error naming the file. Migrate to the structured form; the fastest path preserves your prompt sidecar files:
+
+```bash
+th init --force
+```
+
+See [Workers](/docs/workers#the-agent-template-schema) for the structured schema.
+
+## Antigravity has no model flag
+
+`agy --help` exposes no model flag, so team-harness does not inject `--model` for the `antigravity` worker. Print mode also emits no stream-json, so automatic session capture is off — but resume mode still works if you already know a conversation id (`--conversation <id>`).
+
+## Alt/Esc keys feel delayed in tmux
+
+Set `set -sg escape-time 0` in your tmux config.
+
+## Migration notes
+
+The preferred CLI command is `th`. If you are upgrading:
+
+- `team-harness` still works as a compatibility alias.
+- `pip install team-harness` and `python -m team_harness` are unchanged.
+- Config and runs remain under `~/.team-harness/`; skills live under `.agents/skills/` (project) and `~/.agents/skills/` (global).
+- Existing config files are not modified by upgrades.
+
+## Trust model
+
+team-harness is designed for **trusted local automation**. Do not run untrusted tasks or skills.
+
+- **Skills** are instructions the coordinator reads — the harness does not execute them. But a skill may ship a `scripts/` directory whose code an agent can run via the `bash` tool with full privileges, so treat skill directories as trusted, like your `PATH`.
+- The **`bash` tool** runs shell commands unsandboxed, with `stdin=/dev/null`.
+- **Worker CLIs** are separate local processes that may read and write files in their assigned working directories.
+- The harness sends the coordinator's full conversation — the base system prompt, prompt extensions, skill metadata, your task, conversation history, and tool-call arguments and outputs — to the configured API endpoint, and to no other destination. Worker CLIs contact their own providers separately.

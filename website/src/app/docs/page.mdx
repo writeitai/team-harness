@@ -1,0 +1,51 @@
+export const metadata = {
+  title: "Introduction",
+  description:
+    "team-harness is a multi-agent orchestration harness: a coordinator LLM that plans a task and delegates the work to real agent CLIs — Codex, Gemini, Claude Code, Antigravity, and more — running as subprocesses.",
+};
+
+# Introduction
+
+`team-harness` is a coordination layer for other coding-agent harnesses. A **coordinator LLM** receives your task, breaks it into work units, and delegates execution to **worker CLIs** — Codex, Gemini, Claude Code, Antigravity, OpenCode, pi, and OpenHands — that it spawns as subprocesses. The coordinator never implements; it orchestrates.
+
+It ships as a single command, `th` (with a `team-harness` compatibility alias), plus a Python SDK. Point it at an OpenAI-compatible API or a ChatGPT Codex subscription, tell it which workers you have installed, and describe the task.
+
+## What it does
+
+You give the coordinator a goal like this:
+
+```text
+Tell me what pieces are still missing for the MVP.
+
+Create an agent team to do it. They should be responsible for:
+- coming up with the analysis using CODEX, CLAUDE and GEMINI
+    - each writes its findings into a file in the dedicated directory
+- creating the final report
+    - read all the analyses and write the final SUMMARY.md
+```
+
+team-harness coordinates the work across Codex, Claude Code, and Gemini — spawning each worker, collecting its output, and driving the plan to completion.
+
+You could get a similar result from Claude Code's built-in agent teams. team-harness differs in two ways: you can plug in **any** model or provider, and you can tweak the underlying coordinator and worker prompts far more easily.
+
+## Why team-harness
+
+- **Any model, any provider.** The coordinator talks to any OpenAI-compatible endpoint (OpenRouter, OpenAI, local proxies) or a Codex subscription. Each worker keeps its own native auth, or you can route it through OpenRouter too.
+- **Real CLIs, not reimplementations.** Workers are the actual `codex`, `gemini`, `claude`, and `agy` binaries as subprocesses — you get their real capabilities, sandboxes, and session handling.
+- **Editable prompts.** The coordinator base prompt, a per-worker suffix, and a worker footer are all plain files you can version-control per project.
+- **Inspectable runs.** Every run writes a losslessly replayable log, a per-worker session manifest, and each worker's stdout/stderr under a session output directory.
+
+## Who it's for
+
+Developers who want to fan a substantial task out across several coding-agent CLIs and have one coordinator aggregate the results — while keeping control over the models, the prompts, and the audit trail.
+
+## Where to go next
+
+- [Getting Started](/docs/getting-started) — install the CLI and its worker prerequisites, then run your first team.
+- [Concepts](/docs/concepts) — the coordinator/worker split, the request flow, and the tool registry.
+- [Configuration](/docs/configuration) — `config.toml`, resolution order, and the prompt files.
+- [Workers](/docs/workers) — the structured agent-template schema and how to add your own agent type.
+- [Providers & Auth](/docs/providers) — OpenAI-compatible vs. Codex, and routing workers through OpenRouter.
+- Reference: [CLI Reference](/docs/cli-reference), [Coordinator Tools](/docs/coordinator-tools), and [Run Logs](/docs/run-logs).
+
+The source lives on [GitHub](https://github.com/writeitai/team-harness) and the package is published to [PyPI](https://pypi.org/project/team-harness/).

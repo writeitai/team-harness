@@ -1,0 +1,57 @@
+export const metadata = {
+  title: "Coordinator Tools",
+  description:
+    "The tools the coordinator LLM can call: agent management, file system, shell, and task tracking. These are dispatched by the per-run tool registry.",
+};
+
+# Coordinator Tools
+
+On every turn the coordinator sends its full toolset to the model and dispatches whatever the model calls by name through the [tool registry](/docs/concepts#the-tool-registry). The coordinator uses these tools to delegate and to inspect the workspace — it does not implement changes itself; that is the workers' job.
+
+## Agent management
+
+Spawn and manage worker subprocesses.
+
+| Tool                     | Purpose                                              |
+| ------------------------ | ---------------------------------------------------- |
+| `spawn_agent`            | Start a worker of a given agent type on a task       |
+| `kill_agent`             | Terminate a running worker                            |
+| `agent_status`           | Inspect one worker's state                            |
+| `list_agents`            | List all workers and their states                    |
+| `wait_for_agents`        | Block until specified workers finish                  |
+| `wait_for_any`           | Return as soon as any specified worker finishes       |
+| `read_agent_output`      | Read a worker's output so far                          |
+| `read_new_agent_output`  | Read only worker output produced since the last read   |
+
+`spawn_agent` accepts the agent `type`, the task `prompt`, and optional overrides such as `model`, `flags`, and a `worker_label`. Every configured agent type — built-in or custom — appears automatically as a spawnable type (see [Workers](/docs/workers)).
+
+## File system
+
+Read and edit files. Paths may be relative or absolute — the file tools are **not** sandboxed to the working directory; access is limited only by the harness process's own permissions (see the [trust model](/docs/troubleshooting#trust-model)).
+
+| Tool                     | Purpose                                          |
+| ------------------------ | ------------------------------------------------ |
+| `read_file`              | Read a file (also used to read skill instructions) |
+| `write_file`             | Write a new file or overwrite an existing one     |
+| `append_file`            | Append to a file                                  |
+| `edit_file`              | Replace a string in a file                        |
+| `multi_edit_file`        | Apply multiple edits to one file                  |
+| `ls`                     | List a directory                                  |
+| `glob`                   | Match files by glob pattern                       |
+| `grep`                   | Search file contents                              |
+| `read_new_file_content`  | Read content produced since a prior read          |
+
+## Shell
+
+| Tool   | Purpose                                    |
+| ------ | ------------------------------------------ |
+| `bash` | Run a shell command (unsandboxed, `stdin=/dev/null`) |
+
+## Task tracking
+
+| Tool          | Purpose                                     |
+| ------------- | ------------------------------------------- |
+| `todo_write`  | Write / update the persistent task list     |
+| `todo_read`   | Read the current task list                  |
+
+The task list is persisted per run as `todo.json` — see [Run Logs](/docs/run-logs).
