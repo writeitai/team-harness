@@ -65,7 +65,7 @@ def test_default_agent_templates_structured_shape():
         "--print-timeout",
         "60m",
     )
-    assert DEFAULT_AGENT_TEMPLATES["antigravity"].model_flag is None
+    assert DEFAULT_AGENT_TEMPLATES["antigravity"].model_flag == "--model"
 
 
 def test_find_local_config_in_cwd(tmp_path):
@@ -741,7 +741,7 @@ def test_default_config_text_contains_verified_flag_tokens():
     assert '"--print"' in text
     assert '"--print-timeout", "60m"' in text
     assert 'resume_flags = ["--conversation", "{session_id}"]' in text
-    assert "model_flag = false" in text
+    assert 'model_flag = "--model"' in text
     # Claude model_env_vars — the 3 'main model' ones, NOT the haiku ones.
     assert '"ANTHROPIC_MODEL"' in text
     assert '"ANTHROPIC_DEFAULT_SONNET_MODEL"' in text
