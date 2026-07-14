@@ -47,6 +47,15 @@ class AgentRecord(BaseModel):
     pid: int | None = None
     pgid: int | None = None
     starttime: str | None = None
+    # Model/effort audit trail: `requested_*` is what the coordinator passed
+    # to spawn_agent (None = it left the choice to the template default);
+    # `effective_*` is what was actually injected after resolution. Lets an
+    # outer reviewer verify a task ran on the intended model tier without
+    # parsing the argv.
+    requested_model: str | None = None
+    requested_effort: str | None = None
+    effective_model: str | None = None
+    effective_effort: str | None = None
 
 
 class WorkerResumeInfo(BaseModel):

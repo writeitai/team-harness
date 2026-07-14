@@ -62,6 +62,7 @@ def build_command_from_template(
     session_id: str | None = None,
     generated_uuid: str | None = None,
     model: str | None = None,
+    effort: str | None = None,
     extra_flags: list[str] | None = None,
     allowed_agents: list[str] | None = None,
 ) -> list[str]:
@@ -100,7 +101,8 @@ def build_command_from_template(
         command.extend([template.model_flag, effective_model])
     # Reasoning-effort tokens go between shared_flags/model and
     # resume_flags so they are present in both fresh and resume modes.
-    command.extend(render_reasoning_effort_flags(template))
+    # An explicit per-spawn effort wins over the template's default level.
+    command.extend(render_reasoning_effort_flags(template, effort=effort))
     if mode == "resume":
         command.extend(_substitute(template.resume_flags))
     if extra_flags:
@@ -122,6 +124,7 @@ def build_command(
     resume_session_id: str | None = None,
     generated_uuid: str | None = None,
     model: str | None = None,
+    effort: str | None = None,
     extra_flags: list[str] | None = None,
     allowed_agents: list[str] | None = None,
 ) -> list[str]:
@@ -133,6 +136,7 @@ def build_command(
         session_id=resume_session_id,
         generated_uuid=generated_uuid,
         model=model,
+        effort=effort,
         extra_flags=extra_flags,
         allowed_agents=allowed_agents if agent_type == "harness" else None,
     )

@@ -180,15 +180,32 @@ def build_template_env(
     return {name: effective_model for name in template.model_env_vars}
 
 
-def render_reasoning_effort_flags(template: AgentTemplate) -> list[str]:
-    """Return the argv tokens to append to the command for the template's
-    reasoning effort. Empty list when `reasoning_effort` is None or the
-    template has no `reasoning_effort_flag`. Each token's literal
-    `{effort}` substring is replaced once with the effective level."""
+def template_supports_effort(template: AgentTemplate) -> bool:
+    """True when the template can actually carry a reasoning-effort value
+    into the worker's argv: a non-empty `reasoning_effort_flag` with at least
+    one `{effort}` placeholder. A flag tuple without the placeholder (a
+    hand-written config mistake) renders no value, so treating it as
+    "supported" would record an effort the worker never received."""
 
-    if template.reasoning_effort is None or not template.reasoning_effort_flag:
+    return bool(template.reasoning_effort_flag) and any(
+        "{effort}" in token for token in template.reasoning_effort_flag
+    )
+
+
+def render_reasoning_effort_flags(
+    template: AgentTemplate, *, effort: str | None = None
+) -> list[str]:
+    """Return the argv tokens to append to the command for the effective
+    reasoning effort: an explicit `effort` argument wins over the template's
+    `reasoning_effort`. Empty list when the effective level is None or the
+    template cannot carry one (see `template_supports_effort` — a flag tuple
+    with no `{effort}` placeholder renders nothing rather than emitting a
+    valueless option). Each token's literal `{effort}` substring is replaced
+    once with the effective level."""
+
+    value = effort if effort is not None else template.reasoning_effort
+    if value is None or not template_supports_effort(template):
         return []
-    value = template.reasoning_effort
     return [
         token.replace("{effort}", value, 1) for token in template.reasoning_effort_flag
     ]

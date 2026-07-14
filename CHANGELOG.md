@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Per-spawn reasoning-effort override (TH-D6).** `spawn_agent` accepts an
+  optional `effort` argument, mirroring the per-spawn `model` override: an
+  explicit effort wins over the template's `reasoning_effort` default and
+  renders through the template's `reasoning_effort_flag`. The override fails
+  loudly instead of lying — a template that cannot carry the value (no
+  `{effort}` placeholder), a blank level, or a raw `flags` entry carrying the
+  same reasoning-effort option each return a coordinator-visible ERROR.
+- **Model/effort audit trail in `run.json`.** Each agent record now carries
+  `requested_model` / `requested_effort` (what the coordinator passed; `null`
+  = left to template default) and `effective_model` / `effective_effort`
+  (what was actually injected after resolution), so an outer reviewer — e.g.
+  loopy-loop's model-tier policy — can verify which tier a task ran on
+  without parsing argv. `effective_model` claims only what reached the
+  worker: `null` when the template has no model-injection surface, and for
+  env-only templates it reflects caller `env` overrides (`null` when
+  partial/conflicting).
+
+  Consumer impact: additive only. The `spawn_agent` schema gains one optional
+  property; the four new `run.json` agent fields default to `null`, and older
+  `run.json` files load unchanged. One behavior change: a template whose
+  `reasoning_effort_flag` lacks the `{effort}` placeholder previously
+  rendered a valueless option when `reasoning_effort` was set; it now renders
+  nothing (such a config was broken either way — the level never reached the
+  worker).
+
 ## [0.3.0] - 2026-07-13
 
 ### Added

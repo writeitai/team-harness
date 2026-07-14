@@ -271,3 +271,45 @@ def test_stream_json_capture_requires_match_and_field_path():
                 "session_capture": {"strategy": "stream_json_event"},
             },
         )
+
+
+def test_template_supports_effort_requires_flag_and_placeholder():
+    from team_harness.agents.template import AgentTemplate
+    from team_harness.agents.template import render_reasoning_effort_flags
+    from team_harness.agents.template import template_supports_effort
+
+    with_placeholder = AgentTemplate(
+        command=("x",), reasoning_effort_flag=("-c", "model_reasoning_effort={effort}")
+    )
+    without_flag = AgentTemplate(command=("x",))
+    without_placeholder = AgentTemplate(
+        command=("x",), reasoning_effort="high", reasoning_effort_flag=("--effort",)
+    )
+
+    assert template_supports_effort(with_placeholder)
+    assert not template_supports_effort(without_flag)
+    assert not template_supports_effort(without_placeholder)
+    # A placeholder-less flag renders nothing (never a valueless option),
+    # even when the template pins a default level.
+    assert render_reasoning_effort_flags(without_placeholder) == []
+    assert render_reasoning_effort_flags(without_placeholder, effort="low") == []
+
+
+def test_render_reasoning_effort_flags_explicit_override_wins():
+    from team_harness.agents.template import AgentTemplate
+    from team_harness.agents.template import render_reasoning_effort_flags
+
+    template = AgentTemplate(
+        command=("x",),
+        reasoning_effort="low",
+        reasoning_effort_flag=("-c", "model_reasoning_effort={effort}"),
+    )
+
+    assert render_reasoning_effort_flags(template) == [
+        "-c",
+        "model_reasoning_effort=low",
+    ]
+    assert render_reasoning_effort_flags(template, effort="xhigh") == [
+        "-c",
+        "model_reasoning_effort=xhigh",
+    ]

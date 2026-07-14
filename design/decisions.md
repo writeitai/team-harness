@@ -137,3 +137,41 @@ reap*: know what was launched, and be able to kill leftovers on restart.
   processes a dead parent left behind.
 
 Detailed design: `design/designs/process-lifecycle-and-reaping.md`.
+
+## TH-D6. Per-spawn model/effort overrides fail loudly and are audited; the harness never second-guesses the choice
+
+**Decision.** The coordinator may override a worker's model and reasoning effort per spawn
+(`spawn_agent(model=…, effort=…)`); the explicit argument always wins over the agent
+template's default. Two invariants govern the feature:
+
+1. **Fail loudly, never silently.** An override that cannot take effect as requested
+   returns a coordinator-visible ERROR from `spawn_agent` instead of being dropped or
+   double-applied: an agent type whose template cannot carry an effort value (no
+   `reasoning_effort_flag` with an `{effort}` placeholder — see
+   `template_supports_effort()` in `agents/template.py`), a blank level, or a raw
+   `flags` entry that carries the same reasoning-effort option the override would render.
+2. **The audit trail claims only what actually happened.** Each spawn records
+   `requested_model`/`requested_effort` (the coordinator's explicit arguments; null =
+   left to the template default) and `effective_model`/`effective_effort` (what was
+   actually injected after resolution) on its `run.json` agent record. `effective_model`
+   is null when the template has no model-injection surface (`model_flag` /
+   `model_env_vars`), and for env-only templates it accounts for caller `env` overrides
+   winning the spawn-env merge (null when the override is partial or conflicting) — see
+   `_recorded_model()` in `agents/spawner.py`.
+
+**Context.** Built for loopy-loop's model-tier policy (loopy D9): strong harness
+coordinators choose cheaper or stronger workers per task from named tiers, and an *outer
+reviewer* — not the engine — verifies that e.g. a review actually ran on the strong tier.
+That consumer makes honest audit fields the load-bearing part of the feature: a recorded
+effort the worker never received, or a model claim for a template that injects nothing,
+is worse than no record at all. The same reasoning rejects silent drops: a coordinator
+that believes it escalated when it didn't will happily mark the work reviewed.
+
+**Consequences.** The harness validates *renderability*, never *policy* — there is no
+model allowlist, no cost fence, no per-depth restriction; whether a choice was wise is
+the consumer's judgment call over the audit fields. A template whose
+`reasoning_effort_flag` lacks the `{effort}` placeholder now renders nothing rather than
+a valueless option (the level never reached the worker either way; the old behavior
+could make the CLI eat the next token as the option's value). Anyone adding a new
+injection surface to templates must extend `_recorded_model()`/`template_supports_effort()`
+so the audit fields keep telling the truth.

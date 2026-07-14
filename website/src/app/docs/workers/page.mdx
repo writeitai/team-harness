@@ -150,6 +150,10 @@ reasoning_effort = "high"
 
 The harness does **not** validate the value against a per-CLI enum — pass what the worker CLI accepts; invalid levels are reported by the worker. Clear a default with `reasoning_effort = false`.
 
+The coordinator can also override the level for a single worker with `spawn_agent(effort="…")`, mirroring `spawn_agent(model="…")`. Precedence, highest first: explicit `spawn_agent(effort=…)`, then `[agents.<name>].reasoning_effort`, then the worker CLI's own default. The override fails loudly instead of lying — an agent type whose template cannot carry the value (no `reasoning_effort_flag` with an `{effort}` placeholder), a blank level, or a raw `flags` entry carrying the same reasoning-effort option all return an ERROR result.
+
+Each spawn's requested and effective model/effort are recorded on the agent's `run.json` entry (`requested_model` / `requested_effort` / `effective_model` / `effective_effort`), so an outer reviewer can verify which model tier a task actually ran on. `effective_model` claims only what was actually injected — it is `null` for templates with no model-injection surface, and for env-only templates it accounts for caller `env` overrides.
+
 ## Nested harness depth
 
 The `harness` worker type runs `th run` recursively. `[coordinator].max_depth` (default `3`) bounds how deeply nested harness agents can spawn further harness agents.
