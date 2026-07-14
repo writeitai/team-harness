@@ -36,6 +36,15 @@ def test_spawn_agent_schema_exposes_resume_fields():
     assert schema["function"]["parameters"]["additionalProperties"] is False
 
 
+def test_spawn_agent_schema_exposes_effort_field():
+    schema = agent_tools.spawn_agent_schema(["codex", "claude"])
+    properties = schema["function"]["parameters"]["properties"]
+
+    assert properties["effort"]["type"] == "string"
+    assert "reasoning-effort" in properties["effort"]["description"]
+    assert "effort" not in schema["function"]["parameters"]["required"]
+
+
 def test_spawn_agent_schema_describes_template_default_flags(config):
     schema = agent_tools.spawn_agent_schema(["codex", "claude"], config=config)
     description = schema["function"]["description"]
@@ -110,6 +119,117 @@ async def test_spawn_agent_can_resume_provider_session(tmp_path, config, manager
 
     args = capture_file.read_text(encoding="utf-8").splitlines()
     assert args[:4] == ["exec", "resume", "--json", "sid-123"]
+
+
+@pytest.mark.asyncio
+async def test_spawn_agent_rejects_effort_for_unsupported_template(
+    tmp_path, config, manager, ui
+):
+    """An effort override on a template with no reasoning_effort_flag must
+    fail loudly, not silently drop the override."""
+    config.run_dir = tmp_path
+    config.agent_templates = {"codex": fake_agent_template()}
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+
+    result = await agent_tools.spawn_agent(
+        type="codex", prompt="hello", cwd=str(tmp_path), effort="high"
+    )
+
+    assert result.startswith("ERROR:")
+    assert "reasoning-effort" in result
+    assert manager.list_all() == []
+    assert run_log.snapshot_agents() == []
+
+
+@pytest.mark.asyncio
+async def test_spawn_agent_effort_override_injected_and_recorded(
+    tmp_path, config, manager, ui
+):
+    capture_file = tmp_path / "args.txt"
+    fake_codex = tmp_path / "fake-codex"
+    fake_codex.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$@" > "$CAPTURE_FILE"\n', encoding="utf-8"
+    )
+    fake_codex.chmod(0o755)
+    config.run_dir = tmp_path
+    config.worker_suffix = ""
+    config.agent_templates = {
+        "codex": AgentTemplate(
+            command=(str(fake_codex), "exec"),
+            model_flag=None,
+            reasoning_effort="low",
+            reasoning_effort_flag=("-c", "model_reasoning_effort={effort}"),
+        )
+    }
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+
+    agent_id = await agent_tools.spawn_agent(
+        type="codex",
+        prompt="hello",
+        cwd=str(tmp_path),
+        effort="xhigh",
+        env={"CAPTURE_FILE": str(capture_file)},
+    )
+    await asyncio.wait_for(manager.wait_one(agent_id), 2)
+
+    args = capture_file.read_text(encoding="utf-8").splitlines()
+    assert "model_reasoning_effort=xhigh" in args
+    assert "model_reasoning_effort=low" not in args
+    record = run_log.snapshot_agents()[0]
+    assert record.requested_effort == "xhigh"
+    assert record.effective_effort == "xhigh"
+    assert record.requested_model is None
+    assert record.effective_model is None
+
+
+@pytest.mark.asyncio
+async def test_spawn_agent_records_template_default_effort_as_effective(
+    tmp_path, config, manager, ui
+):
+    """Without a per-spawn override, effective_effort reflects the template
+    default while requested_effort stays None — the audit trail shows the
+    coordinator did not choose."""
+    config.run_dir = tmp_path
+    config.worker_suffix = ""
+    config.agent_templates = {
+        "codex": AgentTemplate(
+            command=("echo",),
+            model_flag=None,
+            reasoning_effort="medium",
+            reasoning_effort_flag=("-c", "model_reasoning_effort={effort}"),
+        )
+    }
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+
+    agent_id = await agent_tools.spawn_agent(
+        type="codex", prompt="hello", cwd=str(tmp_path)
+    )
+    await asyncio.wait_for(manager.wait_one(agent_id), 2)
+
+    record = run_log.snapshot_agents()[0]
+    assert record.requested_effort is None
+    assert record.effective_effort == "medium"
 
 
 @pytest.mark.asyncio

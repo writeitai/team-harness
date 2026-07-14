@@ -551,6 +551,23 @@ fields:
   This ships with a sensible default per built-in agent so users
   normally only set `reasoning_effort`.
 
+The coordinator can also override the level per spawn with
+`spawn_agent(effort="…")`, mirroring `spawn_agent(model="…")`:
+
+| Source | Priority |
+|---|---|
+| Explicit `spawn_agent(effort="…")` from the coordinator | 1 (highest) |
+| `[agents.<name>].reasoning_effort` | 2 |
+| Worker CLI's own internal default | 3 (fallback) |
+
+Passing `effort` for an agent type whose template has no
+`reasoning_effort_flag` returns an ERROR result instead of silently
+dropping the override. Each spawn's requested and effective model/effort
+are recorded on the agent's entry in `run.json`
+(`requested_model` / `requested_effort` / `effective_model` /
+`effective_effort`), so an outer reviewer can verify which tier a task
+actually ran on.
+
 Per-CLI shapes and allowed values:
 
 | Worker | `reasoning_effort_flag` | Allowed values |

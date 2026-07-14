@@ -47,6 +47,7 @@ SPAWN_AGENT_KEYS = {
     "prompt",
     "cwd",
     "model",
+    "effort",
     "mode",
     "resume_from_session_id",
     "flags",
@@ -123,6 +124,29 @@ def _validate_spawn_agent_kwargs(kwargs: Mapping[str, object]) -> None:
     if unknown:
         msg = f"unknown spawn_agent fields: {', '.join(unknown)}"
         raise ValueError(msg)
+
+
+def _check_effort_supported(
+    *, agent_type: str, effort: str | None, config: "Config"
+) -> str | None:
+    """Return a coordinator-visible ERROR string when an effort override is
+    requested for an agent type whose template cannot express it in argv.
+    Silently dropping the override would defeat the point of asking for it
+    (the coordinator believes it escalated when it didn't)."""
+    if effort is None:
+        return None
+    try:
+        template = resolve_template(agent_type=agent_type, config=config)
+    except ValueError:
+        # Unknown agent type: let the spawn path raise its usual error.
+        return None
+    if template.reasoning_effort_flag:
+        return None
+    return (
+        f"ERROR: agent type {agent_type!r} does not support a reasoning-effort "
+        "override (its template declares no reasoning_effort_flag); respawn "
+        "without effort"
+    )
 
 
 def _read_new_stdout_chunk(
@@ -509,6 +533,16 @@ def _format_spawn_agent_defaults(
                     f"model flag {template.model_flag!r} is applied only when "
                     "spawn_agent(model=...) is provided"
                 )
+        if template.reasoning_effort_flag:
+            if template.reasoning_effort is not None:
+                details.append(
+                    f"reasoning effort defaults to {template.reasoning_effort!r} "
+                    "unless spawn_agent(effort=...) overrides it"
+                )
+            else:
+                details.append(
+                    "reasoning-effort override supported via spawn_agent(effort=...)"
+                )
         if template.prompt_flag is not None:
             details.append(f"prompt flag {template.prompt_flag!r} is applied")
         if template.resume_prefix or template.resume_flags:
@@ -546,6 +580,17 @@ def spawn_agent_schema(
                     "prompt": {"type": "string"},
                     "cwd": {"type": "string"},
                     "model": {"type": "string"},
+                    "effort": {
+                        "type": "string",
+                        "description": (
+                            "Optional reasoning-effort override for this "
+                            "worker (e.g. low, medium, high). Overrides the "
+                            "agent template's default level. Only agent types "
+                            "whose template declares a reasoning-effort flag "
+                            "support it; the value is passed to the worker "
+                            "CLI unvalidated."
+                        ),
+                    },
                     "mode": {
                         "type": "string",
                         "enum": ["fresh", "resume"],
@@ -601,6 +646,7 @@ async def spawn_agent(**kwargs: object) -> str:
     prompt = str(kwargs["prompt"])
     cwd = str(Path(str(kwargs["cwd"])).expanduser().resolve())
     model = str(kwargs["model"]) if kwargs.get("model") is not None else None
+    effort = str(kwargs["effort"]) if kwargs.get("effort") is not None else None
     flags = (
         [str(item) for item in kwargs.get("flags", [])]
         if kwargs.get("flags") is not None
@@ -623,6 +669,11 @@ async def spawn_agent(**kwargs: object) -> str:
             check_harness_depth(config)
         except ValueError:
             return f"ERROR: max harness depth ({config.max_depth}) reached"
+    effort_error = _check_effort_supported(
+        agent_type=agent_type, effort=effort, config=config
+    )
+    if effort_error is not None:
+        return effort_error
 
     parts = [prompt.rstrip()]
     if config.worker_suffix:
@@ -650,6 +701,7 @@ async def spawn_agent(**kwargs: object) -> str:
         log_dir=run_dir,
         extra_env=extra_env,
         model=model,
+        effort=effort,
         extra_flags=flags,
         allowed_agents=agents if agent_type == "harness" else None,
         stdout_path=stdout_log,
@@ -689,6 +741,10 @@ async def spawn_agent(**kwargs: object) -> str:
         pid=spawn_result.pid,
         pgid=spawn_result.pgid,
         starttime=spawn_result.starttime,
+        requested_model=model,
+        requested_effort=effort,
+        effective_model=spawn_result.effective_model,
+        effective_effort=spawn_result.effective_effort,
     )
     run_log.record_agent_spawn(record)
     ui.agent_event(event="spawned", state=state)
@@ -996,6 +1052,7 @@ def build_agent_tool_bindings(
         prompt = str(kwargs["prompt"])
         cwd = str(Path(str(kwargs["cwd"])).expanduser().resolve())
         model_val = str(kwargs["model"]) if kwargs.get("model") is not None else None
+        effort_val = str(kwargs["effort"]) if kwargs.get("effort") is not None else None
         flags = (
             [str(item) for item in kwargs.get("flags", [])]
             if kwargs.get("flags") is not None
@@ -1020,6 +1077,11 @@ def build_agent_tool_bindings(
                 check_harness_depth(config)
             except ValueError:
                 return f"ERROR: max harness depth ({config.max_depth}) reached"
+        effort_error = _check_effort_supported(
+            agent_type=agent_type, effort=effort_val, config=config
+        )
+        if effort_error is not None:
+            return effort_error
 
         _parts = [prompt.rstrip()]
         if config.worker_suffix:
@@ -1047,6 +1109,7 @@ def build_agent_tool_bindings(
             log_dir=run_dir,
             extra_env=extra_env,
             model=model_val,
+            effort=effort_val,
             extra_flags=flags,
             allowed_agents=agents_arg if agent_type == "harness" else None,
             stdout_path=stdout_log,
@@ -1088,6 +1151,10 @@ def build_agent_tool_bindings(
             pid=spawn_result.pid,
             pgid=spawn_result.pgid,
             starttime=spawn_result.starttime,
+            requested_model=model_val,
+            requested_effort=effort_val,
+            effective_model=spawn_result.effective_model,
+            effective_effort=spawn_result.effective_effort,
         )
         run_log.record_agent_spawn(record)
         ui.agent_event(event="spawned", state=state)

@@ -151,6 +151,39 @@ def test_build_command_codex_no_reasoning_effort_by_default():
     assert "-c" not in command
 
 
+def test_build_command_effort_override_beats_template_level():
+    from team_harness.agents.template import AgentTemplate
+    from team_harness.agents.template import DEFAULT_AGENT_TEMPLATES
+
+    base = DEFAULT_AGENT_TEMPLATES["codex"]
+    override = AgentTemplate(
+        command=base.command,
+        shared_flags=base.shared_flags,
+        model_flag=base.model_flag,
+        default_model=base.default_model,
+        reasoning_effort="low",
+        reasoning_effort_flag=base.reasoning_effort_flag,
+        session_capture=base.session_capture,
+    )
+    config = Config(agent_templates={"codex": override})
+    command = build_command(
+        agent_type="codex", prompt="do thing", config=config, effort="xhigh"
+    )
+
+    assert "model_reasoning_effort=xhigh" in command
+    assert "model_reasoning_effort=low" not in command
+
+
+def test_build_command_effort_override_without_template_level():
+    """A per-spawn effort injects tokens even when the template pins no
+    default reasoning_effort of its own (built-in codex shape)."""
+
+    command = build_command(
+        agent_type="codex", prompt="do thing", config=Config(), effort="high"
+    )
+    assert "model_reasoning_effort=high" in command
+
+
 def test_build_command_dedupes_duplicate_extra_boolean_flag():
     command = build_command(
         agent_type="codex",

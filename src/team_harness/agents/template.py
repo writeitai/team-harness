@@ -180,15 +180,18 @@ def build_template_env(
     return {name: effective_model for name in template.model_env_vars}
 
 
-def render_reasoning_effort_flags(template: AgentTemplate) -> list[str]:
-    """Return the argv tokens to append to the command for the template's
-    reasoning effort. Empty list when `reasoning_effort` is None or the
+def render_reasoning_effort_flags(
+    template: AgentTemplate, *, effort: str | None = None
+) -> list[str]:
+    """Return the argv tokens to append to the command for the effective
+    reasoning effort: an explicit `effort` argument wins over the template's
+    `reasoning_effort`. Empty list when the effective level is None or the
     template has no `reasoning_effort_flag`. Each token's literal
     `{effort}` substring is replaced once with the effective level."""
 
-    if template.reasoning_effort is None or not template.reasoning_effort_flag:
+    value = effort if effort is not None else template.reasoning_effort
+    if value is None or not template.reasoning_effort_flag:
         return []
-    value = template.reasoning_effort
     return [
         token.replace("{effort}", value, 1) for token in template.reasoning_effort_flag
     ]

@@ -27,6 +27,11 @@ class SpawnResult:
     pid: int | None = None
     pgid: int | None = None
     starttime: str | None = None
+    # Post-resolution model/effort audit: what was actually injected into the
+    # worker after "explicit spawn argument ∨ template default". None means
+    # nothing was injected and the worker CLI used its own internal default.
+    effective_model: str | None = None
+    effective_effort: str | None = None
 
 
 async def spawn(
@@ -38,6 +43,7 @@ async def spawn(
     log_dir: Path,
     extra_env: dict[str, str] | None = None,
     model: str | None = None,
+    effort: str | None = None,
     extra_flags: list[str] | None = None,
     allowed_agents: list[str] | None = None,
     stdout_path: Path | None = None,
@@ -55,6 +61,11 @@ async def spawn(
     # any env-var injection declared by the template (e.g. claude's
     # ANTHROPIC_* vars).
     effective_model = model if model is not None else template.default_model
+    # Effective effort mirrors the model rule, but is only real when the
+    # template can express it in argv; otherwise nothing is injected.
+    effective_effort = effort if effort is not None else template.reasoning_effort
+    if not template.reasoning_effort_flag:
+        effective_effort = None
 
     command = build_command(
         agent_type=agent_type,
@@ -64,6 +75,7 @@ async def spawn(
         resume_session_id=resume_session_id,
         generated_uuid=generated_uuid,
         model=effective_model,
+        effort=effort,
         extra_flags=extra_flags,
         allowed_agents=allowed_agents,
     )
@@ -120,4 +132,6 @@ async def spawn(
         pid=proc.pid,
         pgid=proc.pid,
         starttime=starttime,
+        effective_model=effective_model,
+        effective_effort=effective_effort,
     )
