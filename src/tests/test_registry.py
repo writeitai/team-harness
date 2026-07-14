@@ -365,7 +365,7 @@ def test_build_command_default_antigravity_resume_and_model_override():
         config=Config(),
         mode="resume",
         resume_session_id="conversation-123",
-        model="ignored",
+        model="Gemini 3.5 Flash (High)",
     )
 
     assert command == [
@@ -374,12 +374,22 @@ def test_build_command_default_antigravity_resume_and_model_override():
         "--print",
         "--print-timeout",
         "60m",
+        "--model",
+        "Gemini 3.5 Flash (High)",
         "--conversation",
         "conversation-123",
         "continue",
     ]
+
+
+def test_build_command_antigravity_without_model_has_no_flag():
+    # No default pin: the account-default model applies unless a model is
+    # passed explicitly (or pinned via agent_models -> template default).
+    command = build_command(
+        agent_type="antigravity", prompt="do thing", config=Config()
+    )
+
     assert "--model" not in command
-    assert "ignored" not in command
 
 
 def test_build_command_default_openhands_fresh():

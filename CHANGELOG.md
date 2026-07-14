@@ -34,6 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing (such a config was broken either way — the level never reached the
   worker).
 
+## [0.3.1] - 2026-07-14
+
+### Added
+
+- The `antigravity` agent template now injects a model via `--model` (the agy
+  CLI accepts its models list's display names verbatim, e.g.
+  `--model "Gemini 3.5 Flash (High)"`; run `agy models` for the list).
+  Previously `model_flag` was unset, so SDK `agent_models` pins and
+  `spawn_agent(model=...)` overrides for antigravity were silently ignored.
+  No default pin is set: without an explicit model the account default
+  applies.
+
 ## [0.3.0] - 2026-07-13
 
 ### Added

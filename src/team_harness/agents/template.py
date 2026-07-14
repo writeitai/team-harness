@@ -145,7 +145,10 @@ DEFAULT_AGENT_TEMPLATES: dict[str, AgentTemplate] = {
             "60m",
         ),
         resume_flags=("--conversation", "{session_id}"),
-        model_flag=None,
+        # agy accepts its models list's display names verbatim, e.g.
+        # --model "Gemini 3.5 Flash (High)". No default pin: without an
+        # explicit model the account default applies.
+        model_flag="--model",
         deduplicate_flags=("--dangerously-skip-permissions", "--print"),
         session_capture=None,
     ),

@@ -215,10 +215,12 @@ field_path = ["session_id"]
 
 # Antigravity CLI worker. `--print` runs a single prompt non-interactively,
 # which is the mode team-harness needs for worker subprocesses. Antigravity
-# does not expose a model flag in its CLI help, so model overrides are not
-# injected by default. `--conversation <id>` is available for explicit resume
-# when a caller already knows the Antigravity conversation id, but automatic
-# session capture is not wired up because print mode does not emit stream-json.
+# accepts its models list's display names verbatim via --model (e.g.
+# --model "Gemini 3.5 Flash (High)"; run `agy models` for the list). No
+# default pin: without an explicit model the account default applies.
+# `--conversation <id>` is available for explicit resume when a caller
+# already knows the Antigravity conversation id, but automatic session
+# capture is not wired up because print mode does not emit stream-json.
 [agents.antigravity]
 command = ["agy"]
 shared_flags = [
@@ -227,7 +229,7 @@ shared_flags = [
     "--print-timeout", "60m",
 ]
 resume_flags = ["--conversation", "{session_id}"]
-model_flag = false
+model_flag = "--model"
 deduplicate_flags = [
     "--dangerously-skip-permissions",
     "--print",
