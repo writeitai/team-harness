@@ -184,6 +184,17 @@ def test_build_command_effort_override_without_template_level():
     assert "model_reasoning_effort=high" in command
 
 
+def test_build_command_claude_effort_override_shape():
+    """The claude template renders effort as a standalone `--effort <level>`
+    option pair; a per-spawn override must produce exactly that shape."""
+
+    command = build_command(
+        agent_type="claude", prompt="review", config=Config(), effort="max"
+    )
+    i = command.index("--effort")
+    assert command[i + 1] == "max"
+
+
 def test_build_command_dedupes_duplicate_extra_boolean_flag():
     command = build_command(
         agent_type="codex",

@@ -18,6 +18,7 @@ from team_harness.agents.registry import check_harness_depth
 from team_harness.agents.registry import resolve_template
 from team_harness.agents.session_capture import capture_session_id_from_path
 from team_harness.agents.template import AgentTemplate
+from team_harness.agents.template import template_supports_effort
 from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
 from team_harness.tracking.models import AgentRecord
 from team_harness.tracking.worker_sessions import resume_info_for_agent_type
@@ -127,26 +128,63 @@ def _validate_spawn_agent_kwargs(kwargs: Mapping[str, object]) -> None:
 
 
 def _check_effort_supported(
-    *, agent_type: str, effort: str | None, config: "Config"
+    *, agent_type: str, effort: str | None, flags: list[str] | None, config: "Config"
 ) -> str | None:
-    """Return a coordinator-visible ERROR string when an effort override is
-    requested for an agent type whose template cannot express it in argv.
-    Silently dropping the override would defeat the point of asking for it
-    (the coordinator believes it escalated when it didn't)."""
+    """Return a coordinator-visible ERROR string when an effort override
+    cannot take effect as requested. Silently dropping or double-rendering
+    the override would defeat the point of asking for it (the coordinator
+    believes it escalated when it didn't, and the audit trail would lie)."""
     if effort is None:
         return None
+    if not effort.strip():
+        return (
+            "ERROR: effort must be a non-empty level (e.g. low, medium, "
+            "high); omit the argument to use the template default"
+        )
     try:
         template = resolve_template(agent_type=agent_type, config=config)
     except ValueError:
         # Unknown agent type: let the spawn path raise its usual error.
         return None
-    if template.reasoning_effort_flag:
+    if not template_supports_effort(template):
+        return (
+            f"ERROR: agent type {agent_type!r} does not support a "
+            "reasoning-effort override (its template declares no "
+            "reasoning_effort_flag with an {effort} placeholder); respawn "
+            "without effort"
+        )
+    conflict = _conflicting_effort_flag(template=template, flags=flags)
+    if conflict is not None:
+        return (
+            f"ERROR: flags entry {conflict!r} would collide with the rendered "
+            f"effort={effort!r} tokens; pass the level through effort only"
+        )
+    return None
+
+
+def _conflicting_effort_flag(
+    *, template: AgentTemplate, flags: list[str] | None
+) -> str | None:
+    """Find a caller flag that carries the same reasoning-effort option the
+    explicit effort argument renders — the command would then contain the
+    option twice, and whichever the CLI honors, the audit record would be
+    wrong for the other."""
+    if not flags:
         return None
-    return (
-        f"ERROR: agent type {agent_type!r} does not support a reasoning-effort "
-        "override (its template declares no reasoning_effort_flag); respawn "
-        "without effort"
-    )
+    tokens = template.reasoning_effort_flag
+    for index, token in enumerate(tokens):
+        if "{effort}" not in token:
+            continue
+        prefix = token.split("{effort}", 1)[0]
+        if prefix:
+            for flag in flags:
+                if flag.startswith(prefix):
+                    return flag
+        elif index > 0:
+            option = tokens[index - 1]
+            if option in flags:
+                return option
+    return None
 
 
 def _read_new_stdout_chunk(
@@ -582,6 +620,7 @@ def spawn_agent_schema(
                     "model": {"type": "string"},
                     "effort": {
                         "type": "string",
+                        "minLength": 1,
                         "description": (
                             "Optional reasoning-effort override for this "
                             "worker (e.g. low, medium, high). Overrides the "
@@ -670,7 +709,7 @@ async def spawn_agent(**kwargs: object) -> str:
         except ValueError:
             return f"ERROR: max harness depth ({config.max_depth}) reached"
     effort_error = _check_effort_supported(
-        agent_type=agent_type, effort=effort, config=config
+        agent_type=agent_type, effort=effort, flags=flags, config=config
     )
     if effort_error is not None:
         return effort_error
@@ -1078,7 +1117,7 @@ def build_agent_tool_bindings(
             except ValueError:
                 return f"ERROR: max harness depth ({config.max_depth}) reached"
         effort_error = _check_effort_supported(
-            agent_type=agent_type, effort=effort_val, config=config
+            agent_type=agent_type, effort=effort_val, flags=flags, config=config
         )
         if effort_error is not None:
             return effort_error

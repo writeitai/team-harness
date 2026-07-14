@@ -12,6 +12,7 @@ from team_harness.agents.registry import resolve_template
 from team_harness.agents.template import AgentTemplate
 from team_harness.agents.template import build_provider_env
 from team_harness.agents.template import build_template_env
+from team_harness.agents.template import template_supports_effort
 from team_harness.agents.template import template_uses_generated_uuid
 from team_harness.config import Config
 
@@ -64,7 +65,7 @@ async def spawn(
     # Effective effort mirrors the model rule, but is only real when the
     # template can express it in argv; otherwise nothing is injected.
     effective_effort = effort if effort is not None else template.reasoning_effort
-    if not template.reasoning_effort_flag:
+    if not template_supports_effort(template):
         effective_effort = None
 
     command = build_command(
@@ -132,6 +133,41 @@ async def spawn(
         pid=proc.pid,
         pgid=proc.pid,
         starttime=starttime,
-        effective_model=effective_model,
+        effective_model=_recorded_model(
+            template=template, effective_model=effective_model, extra_env=extra_env
+        ),
         effective_effort=effective_effort,
     )
+
+
+def _recorded_model(
+    *,
+    template: AgentTemplate,
+    effective_model: str | None,
+    extra_env: dict[str, str] | None,
+) -> str | None:
+    """The model value the audit trail may honestly claim reached the worker.
+
+    The resolved model only reaches the worker through the template's
+    injection surfaces (`model_flag` argv or `model_env_vars`). With no
+    surface, nothing was injected — record None, not the requested value.
+    For env-only templates the caller's per-spawn env wins the merge
+    (spawner env precedence), so record the caller's value when it cleanly
+    replaces the whole surface, and None (ambiguous) when it overrides only
+    part of it or with conflicting values."""
+
+    if template.model_flag is not None:
+        return effective_model
+    if not template.model_env_vars:
+        return None
+    overridden = {
+        name: extra_env[name]
+        for name in template.model_env_vars
+        if extra_env is not None and name in extra_env
+    }
+    if not overridden:
+        return effective_model
+    values = set(overridden.values())
+    if len(overridden) == len(template.model_env_vars) and len(values) == 1:
+        return values.pop()
+    return None

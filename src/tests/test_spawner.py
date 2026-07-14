@@ -511,3 +511,73 @@ async def test_spawn_openhands_sets_llm_model_env_without_model_flag(
 
     dumped = _parse_env_dump(env_dump)
     assert dumped.get("LLM_MODEL") == "anthropic/claude-sonnet-4-6"
+
+
+def test_recorded_model_none_without_injection_surface():
+    from team_harness.agents.spawner import _recorded_model
+    from team_harness.agents.template import AgentTemplate
+
+    no_surface = AgentTemplate(command=("x",), model_flag=None)
+
+    assert (
+        _recorded_model(template=no_surface, effective_model="premium", extra_env=None)
+        is None
+    )
+
+
+def test_recorded_model_env_only_caller_override_wins():
+    from team_harness.agents.spawner import _recorded_model
+    from team_harness.agents.template import AgentTemplate
+
+    env_only = AgentTemplate(
+        command=("x",), model_flag=None, model_env_vars=("LLM_MODEL",)
+    )
+
+    # Caller env replaces the whole surface: record what actually launched.
+    assert (
+        _recorded_model(
+            template=env_only,
+            effective_model="premium",
+            extra_env={"LLM_MODEL": "cheap"},
+        )
+        == "cheap"
+    )
+    # No caller override: the resolved model really was injected.
+    assert (
+        _recorded_model(
+            template=env_only, effective_model="premium", extra_env={"OTHER": "x"}
+        )
+        == "premium"
+    )
+
+
+def test_recorded_model_env_only_partial_override_is_ambiguous():
+    from team_harness.agents.spawner import _recorded_model
+    from team_harness.agents.template import AgentTemplate
+
+    multi_env = AgentTemplate(
+        command=("x",), model_flag=None, model_env_vars=("MODEL_A", "MODEL_B")
+    )
+
+    assert (
+        _recorded_model(
+            template=multi_env,
+            effective_model="premium",
+            extra_env={"MODEL_A": "cheap"},
+        )
+        is None
+    )
+
+
+def test_recorded_model_argv_flag_templates_keep_resolved_value():
+    from team_harness.agents.spawner import _recorded_model
+    from team_harness.agents.template import AgentTemplate
+
+    argv_template = AgentTemplate(command=("x",), model_flag="--model")
+
+    assert (
+        _recorded_model(
+            template=argv_template, effective_model="premium", extra_env=None
+        )
+        == "premium"
+    )

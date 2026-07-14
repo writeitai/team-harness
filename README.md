@@ -560,13 +560,21 @@ The coordinator can also override the level per spawn with
 | `[agents.<name>].reasoning_effort` | 2 |
 | Worker CLI's own internal default | 3 (fallback) |
 
-Passing `effort` for an agent type whose template has no
-`reasoning_effort_flag` returns an ERROR result instead of silently
-dropping the override. Each spawn's requested and effective model/effort
-are recorded on the agent's entry in `run.json`
-(`requested_model` / `requested_effort` / `effective_model` /
-`effective_effort`), so an outer reviewer can verify which tier a task
-actually ran on.
+`spawn_agent(effort=…)` fails loudly instead of lying: passing it for an
+agent type whose template cannot carry the value (no
+`reasoning_effort_flag` with an `{effort}` placeholder), passing a
+blank level, or combining it with a raw `flags` entry that carries the
+same reasoning-effort option all return an ERROR result rather than
+silently dropping or double-rendering the override.
+
+Each spawn's requested and effective model/effort are recorded on the
+agent's entry in `run.json` (`requested_model` / `requested_effort` /
+`effective_model` / `effective_effort`), so an outer reviewer can verify
+which tier a task actually ran on. `effective_model` only claims what
+was actually injected: it is `null` for templates with no model
+injection surface, and for env-only templates it reflects a caller
+`env` override of the model variable (or `null` when the override is
+partial/conflicting).
 
 Per-CLI shapes and allowed values:
 
