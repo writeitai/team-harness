@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-07-14
 
 ### Added
 
@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `spawn_agent(model=...)` overrides for antigravity were silently ignored.
   No default pin is set: without an explicit model the account default
   applies.
+- Public documentation site (team-harness.writeit.ai).
 
 ## [0.3.0] - 2026-07-13
 
