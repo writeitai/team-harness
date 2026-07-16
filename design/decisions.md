@@ -149,11 +149,7 @@ template's default. Two invariants govern the feature:
    double-applied: an agent type whose template cannot carry an effort value (no
    `reasoning_effort_flag` with an `{effort}` placeholder — see
    `template_supports_effort()` in `agents/template.py`), a blank level, or a raw
-   `flags` entry that carries the same model or reasoning-effort option the structured
-   override would render. Both `--option value` and `--option=value` spellings are
-   conflicts. This is an option-shape check, not model policy: only the template's
-   declared option is matched, and prefix lookalikes such as `--model-context` remain
-   valid.
+   `flags` entry that carries the same reasoning-effort option the override would render.
 2. **The audit trail claims only what actually happened.** Each spawn records
    `requested_model`/`requested_effort` (the coordinator's explicit arguments; null =
    left to the template default) and `effective_model`/`effective_effort` (what was

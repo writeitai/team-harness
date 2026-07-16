@@ -14,11 +14,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a safe terminal error, writes `run.json` and `worker_sessions.json`, and then
   exposes the failure through the normal structured `TeamHarnessError` with
   canonical caller-owned artifact paths (TH-D7).
-- `spawn_agent(model=...)` now rejects a raw `flags` entry carrying the
-  template's model option, so the command cannot select a different model from
-  the requested/effective model recorded in `run.json`. Model and effort
-  collision checks recognize both `--option value` and `--option=value` while
-  leaving unrelated prefix lookalikes unchanged (TH-D6).
 
 ## [0.5.0] - 2026-07-16
 

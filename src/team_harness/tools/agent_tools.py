@@ -379,57 +379,6 @@ def _check_effort_supported(
     return None
 
 
-def _check_model_override_flags(
-    *, agent_type: str, model: str | None, flags: list[str] | None, config: "Config"
-) -> str | None:
-    """Reject a raw model option alongside the structured model override.
-
-    Rendering both would leave CLI precedence to the worker and make the
-    structured requested/effective model audit fields potentially false.
-    This is an argv-shape check only: model policy and allowed values remain
-    the caller's responsibility under TH-D6.
-    """
-    if model is None:
-        return None
-    try:
-        template = resolve_template(agent_type=agent_type, config=config)
-    except ValueError:
-        # Unknown agent type: let the spawn path raise its usual error.
-        return None
-    conflict = _conflicting_model_flag(template=template, flags=flags)
-    if conflict is not None:
-        return (
-            f"ERROR: flags entry {conflict!r} would collide with the rendered "
-            f"model={model!r} option; pass the model through model only"
-        )
-    return None
-
-
-def _conflicting_model_flag(
-    *, template: AgentTemplate, flags: list[str] | None
-) -> str | None:
-    """Find a raw copy of the template's declared model option."""
-    if template.model_flag is None:
-        return None
-    return _conflicting_option_flag(option=template.model_flag, flags=flags)
-
-
-def _conflicting_option_flag(*, option: str, flags: list[str] | None) -> str | None:
-    """Find an exact ``--option`` or ``--option=value`` argv token.
-
-    Prefix lookalikes such as ``--model-context`` are intentionally not a
-    match. The harness only reasons about the option name declared by the
-    template; it does not guess undocumented CLI aliases.
-    """
-    if not flags:
-        return None
-    equals_prefix = f"{option}="
-    return next(
-        (flag for flag in flags if flag == option or flag.startswith(equals_prefix)),
-        None,
-    )
-
-
 def _conflicting_effort_flag(
     *, template: AgentTemplate, flags: list[str] | None
 ) -> str | None:
@@ -450,9 +399,8 @@ def _conflicting_effort_flag(
                     return flag
         elif index > 0:
             option = tokens[index - 1]
-            conflict = _conflicting_option_flag(option=option, flags=flags)
-            if conflict is not None:
-                return conflict
+            if option in flags:
+                return option
     return None
 
 
@@ -1020,11 +968,6 @@ async def spawn_agent(**kwargs: object) -> str:
             check_harness_depth(config=config)
         except ValueError:
             return f"ERROR: max harness depth ({config.max_depth}) reached"
-    model_error = _check_model_override_flags(
-        agent_type=agent_type, model=model, flags=flags, config=config
-    )
-    if model_error is not None:
-        return model_error
     effort_error = _check_effort_supported(
         agent_type=agent_type, effort=effort, flags=flags, config=config
     )
@@ -1470,11 +1413,6 @@ def build_agent_tool_bindings(
                 check_harness_depth(config=config)
             except ValueError:
                 return f"ERROR: max harness depth ({config.max_depth}) reached"
-        model_error = _check_model_override_flags(
-            agent_type=agent_type, model=model_val, flags=flags, config=config
-        )
-        if model_error is not None:
-            return model_error
         effort_error = _check_effort_supported(
             agent_type=agent_type, effort=effort_val, flags=flags, config=config
         )

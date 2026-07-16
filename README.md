@@ -606,14 +606,12 @@ The coordinator can also override the level per spawn with
 | `[agents.<name>].reasoning_effort` | 2 |
 | Worker CLI's own internal default | 3 (fallback) |
 
-Structured `spawn_agent(model=…)` and `spawn_agent(effort=…)` overrides fail
-loudly instead of lying. A model override combined with the template's model
-option in raw `flags`, or an effort override combined with the template's
-reasoning-effort option, returns an ERROR rather than rendering two competing
-values. Both `--option value` and `--option=value` spellings are detected;
-unrelated prefix lookalikes remain valid. Effort also fails when the template
-cannot carry the value (no `reasoning_effort_flag` with an `{effort}`
-placeholder) or when the requested level is blank.
+`spawn_agent(effort=…)` fails loudly instead of lying: passing it for an
+agent type whose template cannot carry the value (no
+`reasoning_effort_flag` with an `{effort}` placeholder), passing a
+blank level, or combining it with a raw `flags` entry that carries the
+same reasoning-effort option all return an ERROR result rather than
+silently dropping or double-rendering the override.
 
 Each spawn's requested and effective model/effort are recorded on the
 agent's entry in `run.json` (`requested_model` / `requested_effort` /
