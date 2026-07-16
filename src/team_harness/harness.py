@@ -14,6 +14,7 @@ from typing import Never
 import uuid
 
 from team_harness.agents.manager import AgentManager
+from team_harness.agents.manager import FinalizationTimeoutError
 from team_harness.agents.process_identity import signal_group
 from team_harness.agents.registry import get_allowed_types
 from team_harness.agents.registry import resolve_template
@@ -697,14 +698,16 @@ async def _graceful_shutdown(
     if running:
         try:
             await asyncio.wait_for(
-                asyncio.gather(*(manager.wait_one(agent_id) for agent_id in running)),
+                asyncio.gather(
+                    *(manager.wait_one(agent_id=agent_id) for agent_id in running)
+                ),
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
             manager.poll_exit_codes()
             stragglers: list[str] = []
             for agent_id in running:
-                state = manager.get(agent_id)
+                state = manager.get(agent_id=agent_id)
                 if state.status != "running" or state.proc.returncode is not None:
                     continue
                 # Workers run in their own process group (TH-D5), so terminate
@@ -726,7 +729,10 @@ async def _graceful_shutdown(
                 try:
                     await asyncio.wait_for(
                         asyncio.gather(
-                            *(manager.wait_one(agent_id) for agent_id in stragglers)
+                            *(
+                                manager.wait_one(agent_id=agent_id)
+                                for agent_id in stragglers
+                            )
                         ),
                         timeout=terminate_wait,
                     )
@@ -734,7 +740,7 @@ async def _graceful_shutdown(
                     pass
                 finally:
                     for agent_id in stragglers:
-                        state = manager.get(agent_id)
+                        state = manager.get(agent_id=agent_id)
                         state.status = "killed"
                         if state.finished_at is None:
                             state.finished_at = datetime.now(timezone.utc)
@@ -746,13 +752,53 @@ async def _graceful_shutdown(
     # phase above. Escalate to a verified group kill for every trusted pgid.
     sweep_targets = [state.id for state in manager.list_all() if state.pgid is not None]
     if sweep_targets:
-        await asyncio.gather(
+        sweep_results = await asyncio.gather(
             *(
-                manager.ensure_group_dead(agent_id, term_wait_s=terminate_wait)
+                manager.ensure_group_dead(agent_id=agent_id, term_wait_s=terminate_wait)
                 for agent_id in sweep_targets
             )
         )
+        unverified = [
+            agent_id
+            for agent_id, verified_dead in zip(
+                sweep_targets, sweep_results, strict=True
+            )
+            if not verified_dead
+        ]
+        if unverified:
+            raise RuntimeError(
+                "Worker process-group cleanup could not verify termination for: "
+                + ", ".join(unverified)
+            )
     _sync_terminal_agents(manager=manager, run_log=run_log)
+
+
+def _force_kill_unreaped_workers(*, manager: AgentManager) -> tuple[BaseException, ...]:
+    """SIGKILL trusted in-run worker groups without relying on process probing."""
+
+    failures: list[BaseException] = []
+    for state in manager.list_all():
+        group_signalled = False
+        if state.pgid is not None:
+            group_signalled = signal_group(pgid=state.pgid, sig=signal.SIGKILL)
+        if state.proc.returncode is not None:
+            # The leader can exit while helpers keep its process group alive.
+            # Signal the trusted group above, but preserve the completed
+            # leader's semantic status and never call kill() on it.
+            continue
+        leader_signalled = False
+        try:
+            state.proc.kill()
+            leader_signalled = True
+        except ProcessLookupError:
+            leader_signalled = True
+        except Exception as exc:
+            failures.append(exc)
+        if group_signalled or leader_signalled:
+            state.status = "killed"
+            if state.finished_at is None:
+                state.finished_at = datetime.now(timezone.utc)
+    return tuple(failures)
 
 
 async def _finalize_run(
@@ -766,24 +812,59 @@ async def _finalize_run(
 ) -> None:
     """Finish workers and persist both run snapshots before returning.
 
-    Lifecycle-task failures become a recorded terminal error instead of
-    escaping early and depriving embedded callers of their artifact paths.
+    Each lifecycle phase uses the configured shutdown timeout. Failures and
+    timeouts become a recorded terminal error instead of escaping early or
+    depriving embedded callers of their artifact paths. An overdue shutdown is
+    cancelled only after trusted worker groups receive SIGKILL; all
+    harness-owned lifecycle tasks are then settled so ``asyncio.run()`` cannot
+    inherit pending process waiters.
     """
 
     finalization_failures: list[BaseException] = []
-    try:
-        await _graceful_shutdown(
+    shutdown_task = asyncio.create_task(
+        _graceful_shutdown(
             manager=manager, run_log=run_log, ui=ui, timeout=shutdown_timeout_s
+        ),
+        name="team-harness-worker-shutdown",
+    )
+    shutdown_done, _ = await asyncio.wait((shutdown_task,), timeout=shutdown_timeout_s)
+    shutdown_timed_out = shutdown_task not in shutdown_done
+    if not shutdown_timed_out:
+        try:
+            shutdown_task.result()
+        except BaseException as exc:
+            # A process-wait or probe failure must not bypass the two durable
+            # snapshots. Retained watcher/capture tasks still get a bounded
+            # chance to finish before the SDK exposes the recorded failure.
+            finalization_failures.append(exc)
+    else:
+        shutdown_task.cancel(msg="worker shutdown deadline expired")
+        finalization_failures.append(
+            FinalizationTimeoutError(
+                phase="worker shutdown phase",
+                timeout_s=shutdown_timeout_s,
+                unfinished_task_count=1,
+            )
         )
-    except Exception as exc:
-        # A process-wait failure must not bypass the two durable snapshots.
-        # The retained watcher/capture tasks still get a chance to finish and
-        # the SDK will raise the recorded error after paths are available.
-        finalization_failures.append(exc)
+    # A failed process-table probe cannot prove a group is dead. These pgids
+    # were created by this live harness, so force-killing any unreaped group is
+    # safe and lets retained proc.wait watchers reach a terminal result.
+    finalization_failures.extend(_force_kill_unreaped_workers(manager=manager))
+    if shutdown_timed_out:
+        shutdown_results = await asyncio.gather(shutdown_task, return_exceptions=True)
+        finalization_failures.extend(
+            result
+            for result in shutdown_results
+            if isinstance(result, BaseException)
+            and not isinstance(result, asyncio.CancelledError)
+        )
     # Worker watchers set the stop events consumed by provider-session capture.
     # Awaiting both tasks guarantees the capture task performs its final
-    # prefix/tail scan before either durable final snapshot is written.
-    finalization_failures.extend(await manager.await_finalization_tasks())
+    # prefix/tail scan before either durable final snapshot is written, unless
+    # the configured bound expires and incomplete capture is recorded.
+    finalization_failures.extend(
+        await manager.await_finalization_tasks(timeout_s=shutdown_timeout_s)
+    )
     _sync_terminal_agents(manager=manager, run_log=run_log)
     finalization_error = _finalization_error_summary(failures=finalization_failures)
     effective_error = error
@@ -802,17 +883,17 @@ async def _finalize_run(
 
 
 def _finalization_error_summary(failures: list[BaseException]) -> str | None:
-    """Return a safe terminal summary without persisting exception messages.
-
-    Watch/process exceptions can contain provider output or command arguments.
-    The exception classes are enough to diagnose the failing lifecycle stage;
-    detailed worker evidence remains in the captured run artifacts.
-    """
+    """Return a terminal summary with exact lifecycle failure messages."""
 
     if not failures:
         return None
-    error_types = ", ".join(sorted({type(failure).__name__ for failure in failures}))
-    return f"Worker finalization failed ({error_types}); capture may be incomplete"
+    details = "; ".join(
+        f"{type(failure).__name__}: {failure}"
+        if str(failure)
+        else type(failure).__name__
+        for failure in failures
+    )
+    return f"Worker finalization failed ({details}); capture may be incomplete"
 
 
 def _emit_provider_warning(message: str, ui: ConsoleBase | None = None) -> None:

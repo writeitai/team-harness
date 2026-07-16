@@ -1,8 +1,12 @@
 # pyright: reportMissingParameterType=false, reportArgumentType=false
 
 import asyncio
+from datetime import datetime
+from datetime import timezone
 import json
+import os
 from pathlib import Path
+import signal
 import sys
 
 from pydantic import ValidationError
@@ -15,6 +19,8 @@ from team_harness import TEAM_HARNESS_CAPABILITIES
 from team_harness import TeamHarness
 from team_harness import TeamHarnessError
 from team_harness.agents.manager import AgentManager
+from team_harness.agents.manager import AgentState
+from team_harness.agents.process_identity import ProcessProbeError
 from team_harness.agents.session_capture import extract_session_id
 from team_harness.agents.spawner import spawn
 from team_harness.agents.template import AgentTemplate
@@ -23,8 +29,10 @@ from team_harness.caller_contract import build_coordinator_context_footer
 from team_harness.caller_contract import INHERITED_CALLER_CONTEXT_ENV
 from team_harness.config import Config
 from team_harness.harness import _finalize_run
+from team_harness.harness import _force_kill_unreaped_workers
 from team_harness.tools.agent_tools import build_agent_tool_bindings
 from team_harness.tools.agent_tools import spawn_agent_schema
+from team_harness.tracking.models import AgentRecord
 from team_harness.tracking.run_log import RunLogWriter
 from team_harness.tracking.worker_sessions import build_worker_failure_detail
 from team_harness.tracking.worker_sessions import write_worker_sessions_manifest
@@ -199,30 +207,42 @@ async def test_failure_detail_returns_canonical_caller_paths(monkeypatch, tmp_pa
 async def test_watcher_failure_is_finalized_before_structured_caller_error(
     monkeypatch, tmp_path
 ):
+    """Preserve watcher diagnostics through the structured SDK failure path."""
+
     context = _caller_context(tmp_path)
 
     class FakeClient:
         api_base = "http://localhost:11434/v1"
 
         async def aclose(self):
+            """Close the synthetic coordinator client."""
+
             return None
 
     class ManagerWithFailingWatcher(AgentManager):
         def __init__(self) -> None:
+            """Register one lifecycle task that fails after startup."""
+
             super().__init__()
 
             async def fail_after_coordinator_starts() -> None:
+                """Emit the exact diagnostic expected in caller-owned traces."""
+
                 await asyncio.sleep(0)
-                raise OSError("raw watcher diagnostic must not escape")
+                raise OSError("raw watcher diagnostic is retained")
 
             self.track_finalization_task(
-                asyncio.create_task(fail_after_coordinator_starts())
+                task=asyncio.create_task(fail_after_coordinator_starts())
             )
 
     async def fake_resolve_model_limit(*, model_id, client, config):
+        """Return a stable context size without provider discovery."""
+
         return 128_000
 
     async def fake_run(messages, **kwargs):
+        """Complete a coordinator turn without starting real workers."""
+
         messages.append({"role": "assistant", "content": "done"})
 
     monkeypatch.setattr("team_harness.harness.AgentManager", ManagerWithFailingWatcher)
@@ -255,9 +275,279 @@ async def test_watcher_failure_is_finalized_before_structured_caller_error(
     assert run_json_path.parent == session_output_dir
     run_payload = json.loads(run_json_path.read_text(encoding="utf-8"))
     assert run_payload["end"] is not None
-    assert "Worker finalization failed (OSError)" in run_payload["error"]
-    assert "raw watcher diagnostic" not in run_payload["error"]
+    assert (
+        "Worker finalization failed (OSError: raw watcher diagnostic is retained)"
+        in run_payload["error"]
+    )
+    assert "raw watcher diagnostic is retained" in str(detail["summary"])
     assert json.loads(worker_sessions_path.read_text(encoding="utf-8"))["workers"] == []
+
+
+@pytest.mark.asyncio
+async def test_finalize_cancels_and_settles_overdue_capture_task(tmp_path):
+    """Persist final artifacts without leaving an overdue harness task pending."""
+
+    run_dir = tmp_path / "overdue-capture-run"
+    run_dir.mkdir()
+    manager = AgentManager()
+    run_log = RunLogWriter(
+        run_id="run_overdue_capture",
+        run_dir=run_dir,
+        provider="test",
+        model="test",
+        api_base="http://localhost",
+        session_output_dir=str(run_dir),
+    )
+
+    async def never_finishing_capture() -> None:
+        """Model provider-session capture that exceeds its finalization bound."""
+
+        await asyncio.Event().wait()
+
+    capture_task = asyncio.create_task(never_finishing_capture())
+    manager.track_finalization_task(task=capture_task)
+
+    await asyncio.wait_for(
+        _finalize_run(
+            manager=manager,
+            run_log=run_log,
+            session_output_dir=run_dir,
+            shutdown_timeout_s=0.01,
+            ui=SilentConsole(),
+        ),
+        timeout=0.5,
+    )
+
+    run_payload = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    assert "worker watcher/session-capture phase" in str(run_payload["error"])
+    assert "FinalizationTimeoutError" in str(run_payload["error"])
+    assert (run_dir / "worker_sessions.json").is_file()
+    assert capture_task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_finalize_records_bounded_shutdown_phase(monkeypatch, tmp_path):
+    """Record and settle a shutdown task that exceeds the configured bound."""
+
+    run_dir = tmp_path / "hung-shutdown-run"
+    run_dir.mkdir()
+    manager = AgentManager()
+    run_log = RunLogWriter(
+        run_id="run_hung_shutdown",
+        run_dir=run_dir,
+        provider="test",
+        model="test",
+        api_base="http://localhost",
+        session_output_dir=str(run_dir),
+    )
+
+    async def never_finishing_shutdown(**kwargs) -> None:
+        """Model a shutdown phase that remains pending until cancellation."""
+
+        del kwargs
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        "team_harness.harness._graceful_shutdown", never_finishing_shutdown
+    )
+
+    await asyncio.wait_for(
+        _finalize_run(
+            manager=manager,
+            run_log=run_log,
+            session_output_dir=run_dir,
+            shutdown_timeout_s=0.01,
+            ui=SilentConsole(),
+        ),
+        timeout=0.5,
+    )
+
+    run_payload = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    assert "FinalizationTimeoutError" in str(run_payload["error"])
+    assert "worker shutdown phase" in str(run_payload["error"])
+    assert (run_dir / "worker_sessions.json").is_file()
+
+
+def test_force_kill_signals_helper_group_after_leader_completed(monkeypatch, tmp_path):
+    """Kill surviving helpers without changing their completed leader's status."""
+
+    class CompletedProcess:
+        returncode = 0
+
+        def kill(self) -> None:
+            """Fail if finalization tries to kill an already-completed leader."""
+
+            raise AssertionError("completed leader must not be killed")
+
+    signalled: list[tuple[int, signal.Signals]] = []
+
+    def record_group_signal(*, pgid: int, sig: signal.Signals) -> bool:
+        """Record the trusted helper-group signal without touching the OS."""
+
+        signalled.append((pgid, sig))
+        return True
+
+    completed_at = datetime.now(timezone.utc)
+    manager = AgentManager()
+    manager.register(
+        state=AgentState(
+            id="agent_completed_leader",
+            agent_type="codex",
+            prompt="completed leader",
+            cwd=str(tmp_path),
+            proc=CompletedProcess(),
+            spawn_time=completed_at,
+            stdout_log=tmp_path / "stdout.log",
+            stderr_log=tmp_path / "stderr.log",
+            status="done",
+            exit_code=0,
+            finished_at=completed_at,
+            pgid=4321,
+        )
+    )
+    monkeypatch.setattr("team_harness.harness.signal_group", record_group_signal)
+
+    failures = _force_kill_unreaped_workers(manager=manager)
+
+    state = manager.get(agent_id="agent_completed_leader")
+    assert failures == ()
+    assert signalled == [(4321, signal.SIGKILL)]
+    assert state.status == "done"
+    assert state.exit_code == 0
+    assert state.finished_at == completed_at
+
+
+def test_asyncio_run_returns_after_probe_failure_for_sigterm_ignoring_worker(
+    monkeypatch, tmp_path
+):
+    """Force-kill an unreaped worker so asyncio.run has no pending proc waiter."""
+
+    def fail_process_probe(*, pgid: int):
+        """Model process-table failure while checking the trusted worker group."""
+
+        raise ProcessProbeError(f"process table unavailable for pgid {pgid}")
+
+    async def scenario() -> None:
+        """Run finalization around a real worker that deliberately ignores SIGTERM."""
+
+        run_dir = tmp_path / "real-process-probe-failure-run"
+        run_dir.mkdir()
+        stdout_log = run_dir / "worker.stdout.log"
+        stderr_log = run_dir / "worker.stderr.log"
+        stdout_log.touch()
+        stderr_log.touch()
+        worker_code = (
+            "import signal\n"
+            "import time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "print('ready', flush=True)\n"
+            "while True:\n"
+            "    time.sleep(1)\n"
+        )
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            worker_code,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            assert proc.stdout is not None
+            assert (
+                await asyncio.wait_for(proc.stdout.readline(), timeout=2) == b"ready\n"
+            )
+            manager = AgentManager()
+            spawned_at = datetime.now(timezone.utc)
+            state = AgentState(
+                id="agent_probe_failure",
+                agent_type="codex",
+                prompt="ignore SIGTERM",
+                cwd=str(tmp_path),
+                proc=proc,
+                spawn_time=spawned_at,
+                stdout_log=stdout_log,
+                stderr_log=stderr_log,
+                status="killed",
+                pgid=proc.pid,
+            )
+            manager.register(state=state)
+            run_log = RunLogWriter(
+                run_id="run_real_probe_failure",
+                run_dir=run_dir,
+                provider="test",
+                model="test",
+                api_base="http://localhost",
+                session_output_dir=str(run_dir),
+            )
+            run_log.record_agent_spawn(
+                record=AgentRecord(
+                    id=state.id,
+                    agent_type=state.agent_type,
+                    status=state.status,
+                    cwd=state.cwd,
+                    prompt=state.prompt,
+                    full_prompt=state.prompt,
+                    command=[sys.executable, "-c", worker_code],
+                    spawned_at=spawned_at,
+                    stdout_log=str(stdout_log),
+                    stderr_log=str(stderr_log),
+                    pid=proc.pid,
+                    pgid=proc.pid,
+                )
+            )
+            worker_done = asyncio.Event()
+
+            async def watch_worker() -> None:
+                """Mirror the production watcher and always release capture."""
+
+                try:
+                    await manager.wait_one(agent_id=state.id)
+                finally:
+                    worker_done.set()
+
+            async def capture_after_worker() -> None:
+                """Mirror capture waiting for the watcher final-tail signal."""
+
+                await worker_done.wait()
+
+            watch_task = asyncio.create_task(watch_worker(), name="test-worker-watch")
+            capture_task = asyncio.create_task(
+                capture_after_worker(), name="test-worker-capture"
+            )
+            manager.track_finalization_task(task=watch_task)
+            manager.track_finalization_task(task=capture_task)
+            os.killpg(proc.pid, signal.SIGTERM)
+            await asyncio.sleep(0.02)
+            assert proc.returncode is None
+
+            await asyncio.wait_for(
+                _finalize_run(
+                    manager=manager,
+                    run_log=run_log,
+                    session_output_dir=run_dir,
+                    shutdown_timeout_s=0.2,
+                    ui=SilentConsole(),
+                ),
+                timeout=2,
+            )
+
+            assert proc.returncode is not None
+            assert watch_task.done()
+            assert capture_task.done()
+            run_payload = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+            assert "could not verify termination" in str(run_payload["error"])
+            assert (run_dir / "worker_sessions.json").is_file()
+        finally:
+            if proc.returncode is None:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(proc.wait(), timeout=2)
+
+    monkeypatch.setattr("team_harness.agents.manager.group_members", fail_process_probe)
+    asyncio.run(scenario())
 
 
 @pytest.mark.asyncio
@@ -409,7 +699,7 @@ async def test_caller_spawn_captures_streams_session_and_failure_artifacts(tmp_p
     )
     exit_code = await asyncio.wait_for(manager.wait_one(agent_id), 10)
     assert exit_code == 7
-    await manager.await_finalization_tasks()
+    await manager.await_finalization_tasks(timeout_s=config.shutdown_timeout_s)
 
     state = manager.get(agent_id)
     stdout_text = state.stdout_log.read_text(encoding="utf-8")
@@ -547,7 +837,7 @@ async def test_nested_harness_inherits_outer_identity_and_parent_run(
         cwd=str(tmp_path),
         env={INHERITED_CALLER_CONTEXT_ENV: '{"spoofed": true}'},
     )
-    await manager.await_finalization_tasks()
+    await manager.await_finalization_tasks(timeout_s=config.shutdown_timeout_s)
 
     record = run_log.snapshot_agents()[0]
     inherited = CallerContext.model_validate_json(

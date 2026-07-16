@@ -194,10 +194,18 @@ worker prompts, commands, stdout/stderr paths, and provider session identifiers.
 JSON artifacts are replaced atomically, and worker streams go directly to the
 canonical caller-owned log files. The final run snapshot awaits the worker
 watcher and provider session-id capture task, including its last stdout
-prefix/tail scan. An exception in either retained task is a terminal harness
-finalization error, but it is collected rather than allowed to bypass cleanup:
-`run.json` and `worker_sessions.json` are written first, then the SDK raises a
-structured `TeamHarnessError` containing their canonical caller-owned paths.
+prefix/tail scan. Both worker shutdown and the retained watcher/capture phase
+are bounded by the caller's configured shutdown timeout. On timeout the harness
+uses the process-group id it created to SIGKILL any unreaped worker without
+depending on a process-table probe. That releases watchers blocked in
+`proc.wait()`; the harness then cancels and settles its own
+cancellation-cooperative watcher/capture tasks so `asyncio.run()` teardown does
+not inherit pending work. Exceptions and phase-specific timeouts are collected
+rather than allowed to bypass cleanup; their classes and exact messages are
+persisted because these are raw caller-owned traces, not sanitized export
+artifacts. `run.json` and `worker_sessions.json` are written first, then the SDK
+raises a structured `TeamHarnessError` containing their canonical caller-owned
+paths.
 
 The generated coordinator and worker footers name the harness run lineage. For
 the built-in `type=harness`, team-harness propagates a validated

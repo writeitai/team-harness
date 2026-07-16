@@ -10,6 +10,23 @@ from team_harness.agents.process_identity import ProcessProbeError
 from team_harness.agents.process_identity import signal_group
 
 
+class FinalizationTimeoutError(TimeoutError):
+    """Describe a bounded lifecycle phase that did not finish in time."""
+
+    def __init__(
+        self, *, phase: str, timeout_s: float, unfinished_task_count: int
+    ) -> None:
+        """Record the phase, configured bound, and unfinished task count."""
+
+        self.phase = phase
+        self.timeout_s = timeout_s
+        self.unfinished_task_count = unfinished_task_count
+        super().__init__(
+            f"{phase} exceeded the configured {timeout_s:g}s shutdown timeout "
+            f"with {unfinished_task_count} unfinished task(s)"
+        )
+
+
 @dataclass
 class AgentState:
     id: str
@@ -55,23 +72,70 @@ class AgentManager:
 
         self._finalization_tasks.add(task)
 
-    async def await_finalization_tasks(self) -> tuple[BaseException, ...]:
-        """Await watcher/session-capture tasks without losing durable finalization.
+    async def await_finalization_tasks(
+        self, *, timeout_s: float
+    ) -> tuple[BaseException, ...]:
+        """Await watcher/session-capture tasks within a shared time bound.
 
         A task failure is returned to the run finalizer instead of escaping from
-        ``asyncio.gather``.  The finalizer can then record a terminal harness
-        error and persist both final snapshots before the SDK raises its
-        structured ``TeamHarnessError``.
+        this method. If the shared deadline expires, unfinished tasks are
+        cancelled and settled, and a phase-specific ``FinalizationTimeoutError``
+        is returned. Only harness-owned watcher and capture tasks enter this
+        registry; both are cancellation-cooperative once worker processes have
+        been force-terminated by the run finalizer. The finalizer can therefore
+        persist both final snapshots without leaving tasks for
+        ``asyncio.run()`` teardown.
         """
 
+        if timeout_s < 0:
+            raise ValueError("timeout_s must be greater than or equal to zero")
+
         failures: list[BaseException] = []
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
         while self._finalization_tasks:
             tasks = tuple(self._finalization_tasks)
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            self._finalization_tasks.difference_update(tasks)
+            remaining_s = max(0.0, deadline - loop.time())
+            done, pending = await asyncio.wait(tasks, timeout=remaining_s)
+            self._finalization_tasks.difference_update(done)
+            for task in done:
+                try:
+                    failure = task.exception()
+                except asyncio.CancelledError as exc:
+                    failures.append(exc)
+                else:
+                    if failure is not None:
+                        failures.append(failure)
+            if not pending:
+                continue
+
+            # The run finalizer force-terminates unreaped worker groups before
+            # entering this phase, so proc.wait() can complete. Cancel any
+            # other overdue harness-owned capture work and fully settle it;
+            # leaving tasks pending would merely move the wedge to
+            # asyncio.run() teardown.
+            overdue = set(pending)
+            overdue.update(self._finalization_tasks)
+            self._finalization_tasks.clear()
+            unfinished_task_count = sum(not task.done() for task in overdue)
+            for task in overdue:
+                if not task.done():
+                    task.cancel(msg="worker finalization deadline expired")
+            results = await asyncio.gather(*overdue, return_exceptions=True)
             failures.extend(
-                result for result in results if isinstance(result, BaseException)
+                result
+                for result in results
+                if isinstance(result, BaseException)
+                and not isinstance(result, asyncio.CancelledError)
             )
+            failures.append(
+                FinalizationTimeoutError(
+                    phase="worker watcher/session-capture phase",
+                    timeout_s=timeout_s,
+                    unfinished_task_count=unfinished_task_count,
+                )
+            )
+            break
         return tuple(failures)
 
     def poll_exit_codes(self) -> None:

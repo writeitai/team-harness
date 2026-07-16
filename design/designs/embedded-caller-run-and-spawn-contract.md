@@ -159,13 +159,27 @@ finalize `run.json` and write `worker_sessions.json`. A caller can consequently
 use either final artifact without racing a late provider session id.
 
 A watcher or final session-scan coroutine can itself fail (for example, an OS
-error while waiting on the worker). `AgentManager.await_finalization_tasks()`
-collects such failures instead of letting `asyncio.gather()` raise before the
-durable snapshots exist. `harness._finalize_run()` records a safe terminal
-finalization error, writes both snapshots, and then the SDK's normal error path
-raises `TeamHarnessError` with the canonical `run.json`, session-output, and
-coordinator-input paths. The raw exception message is not persisted because it
-could contain a provider event or command argument.
+error while waiting on the worker), and a process waiter can remain pending
+after process-table probing fails. `harness._finalize_run()` therefore gives
+the shutdown phase at most the configured `shutdown_timeout_s`. It then gives
+the retained watcher/session-capture tasks the same configured bound through
+`AgentManager.await_finalization_tasks(timeout_s=...)`. When either deadline
+expires, team-harness sends SIGKILL to any still-unreaped worker group using the
+process-group id created by this live harness. This does not depend on the
+failed process-table probe: the group identity remains trustworthy for the
+lifetime of the harness that created it. Killing the worker releases any
+watcher blocked in `proc.wait()`. The harness then cancels and settles its own
+cancellation-cooperative watcher/capture tasks instead of leaving pending tasks
+for `asyncio.run()` to gather during teardown, and continues to write both
+durable snapshots.
+
+Lifecycle failures are preserved as a terminal finalization error containing
+the exception class and exact exception message. Timeouts additionally name
+the phase, configured bound, and unfinished task count. This is intentionally
+consistent with the caller-owned trace contract, which captures exact prompts,
+commands, and worker output rather than treating trace artifacts as sanitized
+export data. After `run.json` and `worker_sessions.json` exist, the SDK's normal
+error path raises `TeamHarnessError` with their canonical caller-owned paths.
 
 ## Nested harness context propagation
 
