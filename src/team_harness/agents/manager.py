@@ -16,13 +16,13 @@ class FinalizationTimeoutError(TimeoutError):
     def __init__(
         self, *, phase: str, timeout_s: float, unfinished_task_count: int
     ) -> None:
-        """Record the phase, configured bound, and unfinished task count."""
+        """Record the phase, effective bound, and unfinished task count."""
 
         self.phase = phase
         self.timeout_s = timeout_s
         self.unfinished_task_count = unfinished_task_count
         super().__init__(
-            f"{phase} exceeded the configured {timeout_s:g}s shutdown timeout "
+            f"{phase} exceeded its {timeout_s:g}s finalization bound "
             f"with {unfinished_task_count} unfinished task(s)"
         )
 

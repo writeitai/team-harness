@@ -118,9 +118,11 @@ assignment paths, the agent output directory, relevant state paths, the four
 dynamic metadata fields, and both prompt forms:
 
 `assignment_path` always names the spawned agent's own envelope, matching the
-same field in `run.json`; `parent_assignment_path` names the outer loopy
-assignment. The distinct names prevent a nested coordinator from confusing
-its own responsibility with its parent's.
+same field in `run.json`; `parent_assignment_path` names the enclosing
+assignment that directly delegated this agent. For a top-level harness run
+that is the outer loopy assignment; at deeper harness nesting it is the parent
+coordinator's own agent assignment. The distinct names prevent a nested
+coordinator from confusing its own responsibility with its parent's.
 
 1. `authored_prompt` — exactly what the coordinator delegated; and
 2. `effective_prompt` — the authored prompt plus configured suffixes and the
@@ -161,10 +163,15 @@ use either final artifact without racing a late provider session id.
 A watcher or final session-scan coroutine can itself fail (for example, an OS
 error while waiting on the worker), and a process waiter can remain pending
 after process-table probing fails. `harness._finalize_run()` therefore gives
-the shutdown phase at most the configured `shutdown_timeout_s`. It then gives
-the retained watcher/session-capture tasks the same configured bound through
-`AgentManager.await_finalization_tasks(timeout_s=...)`. When either deadline
-expires, team-harness sends SIGKILL to any still-unreaped worker group using the
+workers the configured `shutdown_timeout_s` to exit naturally, followed by the
+named one-second `_WORKER_SIGTERM_GRACE_S` period after SIGTERM. The outer
+shutdown bound is the sum of those two periods, so it cannot race and replace
+the intended SIGTERM grace with immediate SIGKILL. It then gives the retained
+watcher/session-capture tasks the configured `shutdown_timeout_s` through
+`AgentManager.await_finalization_tasks(timeout_s=...)`.
+
+When the shutdown deadline expires or process-group verification fails,
+team-harness sends SIGKILL to any still-unreaped worker group using the
 process-group id created by this live harness. This does not depend on the
 failed process-table probe: the group identity remains trustworthy for the
 lifetime of the harness that created it. Killing the worker releases any
@@ -175,7 +182,7 @@ durable snapshots.
 
 Lifecycle failures are preserved as a terminal finalization error containing
 the exception class and exact exception message. Timeouts additionally name
-the phase, configured bound, and unfinished task count. This is intentionally
+the phase, effective bound, and unfinished task count. This is intentionally
 consistent with the caller-owned trace contract, which captures exact prompts,
 commands, and worker output rather than treating trace artifacts as sanitized
 export data. After `run.json` and `worker_sessions.json` exist, the SDK's normal

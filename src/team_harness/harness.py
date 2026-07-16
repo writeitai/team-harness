@@ -51,6 +51,8 @@ from team_harness.tracking.worker_sessions import write_worker_sessions_manifest
 from team_harness.ui.console import ConsoleBase
 from team_harness.ui.console import make_console
 
+_WORKER_SIGTERM_GRACE_S = 1.0
+
 
 class TeamHarness:
     """Python SDK entry point for team-harness orchestration runs.
@@ -689,7 +691,7 @@ async def _graceful_shutdown(
     run_log: RunLogWriter,
     ui: ConsoleBase | None,
     timeout: float = 10.0,
-    terminate_wait: float = 1.0,
+    terminate_wait: float = _WORKER_SIGTERM_GRACE_S,
 ) -> None:
     """Wait for workers, terminate stragglers, and persist terminal states."""
 
@@ -812,12 +814,13 @@ async def _finalize_run(
 ) -> None:
     """Finish workers and persist both run snapshots before returning.
 
-    Each lifecycle phase uses the configured shutdown timeout. Failures and
-    timeouts become a recorded terminal error instead of escaping early or
-    depriving embedded callers of their artifact paths. An overdue shutdown is
-    cancelled only after trusted worker groups receive SIGKILL; all
-    harness-owned lifecycle tasks are then settled so ``asyncio.run()`` cannot
-    inherit pending process waiters.
+    Worker shutdown gets the configured natural-exit timeout followed by the
+    named SIGTERM grace period. Retained watcher/capture work then gets the
+    configured timeout. Failures and timeouts become a recorded terminal error
+    instead of escaping early or depriving embedded callers of their artifact
+    paths. An overdue shutdown is cancelled only after trusted worker groups
+    receive SIGKILL; all harness-owned lifecycle tasks are then settled so
+    ``asyncio.run()`` cannot inherit pending process waiters.
     """
 
     finalization_failures: list[BaseException] = []
@@ -827,7 +830,10 @@ async def _finalize_run(
         ),
         name="team-harness-worker-shutdown",
     )
-    shutdown_done, _ = await asyncio.wait((shutdown_task,), timeout=shutdown_timeout_s)
+    shutdown_phase_timeout_s = shutdown_timeout_s + _WORKER_SIGTERM_GRACE_S
+    shutdown_done, _ = await asyncio.wait(
+        (shutdown_task,), timeout=shutdown_phase_timeout_s
+    )
     shutdown_timed_out = shutdown_task not in shutdown_done
     if not shutdown_timed_out:
         try:
@@ -842,7 +848,7 @@ async def _finalize_run(
         finalization_failures.append(
             FinalizationTimeoutError(
                 phase="worker shutdown phase",
-                timeout_s=shutdown_timeout_s,
+                timeout_s=shutdown_phase_timeout_s,
                 unfinished_task_count=1,
             )
         )

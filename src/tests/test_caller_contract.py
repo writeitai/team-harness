@@ -350,6 +350,7 @@ async def test_finalize_records_bounded_shutdown_phase(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "team_harness.harness._graceful_shutdown", never_finishing_shutdown
     )
+    monkeypatch.setattr("team_harness.harness._WORKER_SIGTERM_GRACE_S", 0.01)
 
     await asyncio.wait_for(
         _finalize_run(
@@ -365,7 +366,107 @@ async def test_finalize_records_bounded_shutdown_phase(monkeypatch, tmp_path):
     run_payload = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     assert "FinalizationTimeoutError" in str(run_payload["error"])
     assert "worker shutdown phase" in str(run_payload["error"])
+    assert "0.02s finalization bound" in str(run_payload["error"])
     assert (run_dir / "worker_sessions.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_finalize_allows_sigterm_responsive_worker_to_exit_gracefully(tmp_path):
+    """Keep the inner SIGTERM grace inside the bounded outer shutdown phase."""
+
+    run_dir = tmp_path / "sigterm-responsive-run"
+    run_dir.mkdir()
+    stdout_log = run_dir / "worker.stdout.log"
+    stderr_log = run_dir / "worker.stderr.log"
+    term_marker = run_dir / "received-sigterm.txt"
+    stdout_log.touch()
+    stderr_log.touch()
+    worker_code = (
+        "from pathlib import Path\n"
+        "import signal\n"
+        "import sys\n"
+        "import time\n"
+        "def stop(_signum, _frame):\n"
+        "    Path(sys.argv[1]).write_text('SIGTERM', encoding='utf-8')\n"
+        "    raise SystemExit(0)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        "print('ready', flush=True)\n"
+        "while True:\n"
+        "    time.sleep(1)\n"
+    )
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        worker_code,
+        str(term_marker),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        assert proc.stdout is not None
+        assert await asyncio.wait_for(proc.stdout.readline(), timeout=2) == b"ready\n"
+        manager = AgentManager()
+        spawned_at = datetime.now(timezone.utc)
+        state = AgentState(
+            id="agent_sigterm_responsive",
+            agent_type="codex",
+            prompt="exit on SIGTERM",
+            cwd=str(tmp_path),
+            proc=proc,
+            spawn_time=spawned_at,
+            stdout_log=stdout_log,
+            stderr_log=stderr_log,
+            pgid=proc.pid,
+        )
+        manager.register(state=state)
+        run_log = RunLogWriter(
+            run_id="run_sigterm_responsive",
+            run_dir=run_dir,
+            provider="test",
+            model="test",
+            api_base="http://localhost",
+            session_output_dir=str(run_dir),
+        )
+        run_log.record_agent_spawn(
+            record=AgentRecord(
+                id=state.id,
+                agent_type=state.agent_type,
+                cwd=state.cwd,
+                prompt=state.prompt,
+                full_prompt=state.prompt,
+                command=[sys.executable, "-c", worker_code, str(term_marker)],
+                spawned_at=spawned_at,
+                stdout_log=str(stdout_log),
+                stderr_log=str(stderr_log),
+                pid=proc.pid,
+                pgid=proc.pid,
+            )
+        )
+
+        await asyncio.wait_for(
+            _finalize_run(
+                manager=manager,
+                run_log=run_log,
+                session_output_dir=run_dir,
+                shutdown_timeout_s=0.02,
+                ui=SilentConsole(),
+            ),
+            timeout=2,
+        )
+
+        run_payload = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        assert proc.returncode == 0
+        assert term_marker.read_text(encoding="utf-8") == "SIGTERM"
+        assert run_payload["error"] is None
+        assert (run_dir / "worker_sessions.json").is_file()
+    finally:
+        if proc.returncode is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            await asyncio.wait_for(proc.wait(), timeout=2)
 
 
 def test_force_kill_signals_helper_group_after_leader_completed(monkeypatch, tmp_path):

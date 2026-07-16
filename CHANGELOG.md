@@ -10,15 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Retained worker watcher or provider-session final-scan task failures no
-  longer escape before run finalization. Worker shutdown and retained
-  watcher/capture phases now use the configured shutdown timeout; overdue tasks
-  trigger SIGKILL for any unreaped trusted worker group before harness-owned
-  lifecycle tasks are cancelled and settled. A failed process-table probe can
-  therefore no longer leave `proc.wait()` pending into `asyncio.run()` teardown.
-  The harness records phase-specific timeouts and exact lifecycle exception
-  messages, writes `run.json` and `worker_sessions.json`, and then exposes the
-  failure through the normal structured `TeamHarnessError` with canonical
-  caller-owned artifact paths (TH-D7).
+  longer escape before run finalization. Worker shutdown now uses the configured
+  natural-exit timeout plus a named one-second SIGTERM grace; retained
+  watcher/capture work separately uses the configured timeout. The outer bound
+  includes the grace, so responsive workers do not lose it to an outer timeout.
+  Overdue work triggers SIGKILL for any unreaped trusted worker group before
+  harness-owned lifecycle tasks are cancelled and settled. A failed
+  process-table probe can therefore no longer leave `proc.wait()` pending into
+  `asyncio.run()` teardown. The harness records phase-specific timeouts and
+  exact lifecycle exception messages, writes `run.json` and
+  `worker_sessions.json`, and then exposes the failure through the normal
+  structured `TeamHarnessError` with canonical caller-owned artifact paths
+  (TH-D7).
 
 ## [0.5.0] - 2026-07-16
 

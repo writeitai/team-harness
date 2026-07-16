@@ -194,11 +194,13 @@ worker prompts, commands, stdout/stderr paths, and provider session identifiers.
 JSON artifacts are replaced atomically, and worker streams go directly to the
 canonical caller-owned log files. The final run snapshot awaits the worker
 watcher and provider session-id capture task, including its last stdout
-prefix/tail scan. Both worker shutdown and the retained watcher/capture phase
-are bounded by the caller's configured shutdown timeout. On timeout the harness
-uses the process-group id it created to SIGKILL any unreaped worker without
-depending on a process-table probe. That releases watchers blocked in
-`proc.wait()`; the harness then cancels and settles its own
+prefix/tail scan. Worker shutdown is bounded by the caller's configured natural
+exit timeout plus a named one-second SIGTERM grace period; the outer bound
+includes both so it does not preempt graceful termination. The retained
+watcher/capture phase separately uses the configured shutdown timeout. On
+timeout the harness uses the process-group id it created to SIGKILL any unreaped
+worker without depending on a process-table probe. That releases watchers
+blocked in `proc.wait()`; the harness then cancels and settles its own
 cancellation-cooperative watcher/capture tasks so `asyncio.run()` teardown does
 not inherit pending work. Exceptions and phase-specific timeouts are collected
 rather than allowed to bypass cleanup; their classes and exact messages are
