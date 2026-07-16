@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import replace
 from datetime import datetime
@@ -9,6 +10,7 @@ from pathlib import Path
 import signal
 from typing import Any
 from typing import Literal
+from typing import Never
 import uuid
 
 from team_harness.agents.manager import AgentManager
@@ -16,6 +18,10 @@ from team_harness.agents.process_identity import signal_group
 from team_harness.agents.registry import get_allowed_types
 from team_harness.agents.registry import resolve_template
 from team_harness.agents.registry import validate_templates
+from team_harness.caller_contract import build_coordinator_context_footer
+from team_harness.caller_contract import CallerContext
+from team_harness.caller_contract import inherited_caller_context
+from team_harness.caller_contract import TEAM_HARNESS_CAPABILITIES
 from team_harness.config import Config
 from team_harness.config import load_config
 from team_harness.config import RUNS_DIR
@@ -37,6 +43,7 @@ from team_harness.tracking.context import ContextTracker
 from team_harness.tracking.context import KNOWN_CODEX_MODELS
 from team_harness.tracking.context import resolve_model_limit
 from team_harness.tracking.models import AgentRecord
+from team_harness.tracking.persistence import write_json_atomic
 from team_harness.tracking.run_log import RunLogWriter
 from team_harness.tracking.worker_sessions import build_worker_failure_detail
 from team_harness.tracking.worker_sessions import write_worker_sessions_manifest
@@ -74,7 +81,14 @@ class TeamHarness:
         output_dir: str | None = None,
         cwd: str | None = None,
         console_mode: Literal["silent", "auto", "plain", "rich"] = "silent",
+        caller_context: CallerContext | Mapping[str, object] | None = None,
     ) -> None:
+        """Configure a reusable SDK runner without starting a provider call.
+
+        An explicit or inherited caller context selects the caller-owned run
+        layout; all other options mirror the command-line configuration.
+        """
+
         self._provider = provider
         self._model = model
         self._api_base = api_base
@@ -92,6 +106,13 @@ class TeamHarness:
         self._output_dir = output_dir
         self._cwd = cwd
         self._console_mode = console_mode
+        self._caller_context = (
+            caller_context
+            if isinstance(caller_context, CallerContext)
+            else CallerContext.model_validate(obj=caller_context)
+            if caller_context is not None
+            else inherited_caller_context()
+        )
 
     async def run(self, task: str) -> TeamHarnessResult:
         """Execute a single orchestration run and return structured results.
@@ -99,51 +120,106 @@ class TeamHarness:
         Raises TeamHarnessError on terminal failures (API errors, retries
         exhausted, etc.). The run log is always finalized in a finally block.
         """
-        allowed_agents_str = _normalize_agents(self._agents)
-        config = load_config(
-            provider=self._provider,
-            model=self._model,
-            api_base=self._api_base,
-            api_key=self._api_key,
-            codex_auth_path=self._codex_auth_path,
-            max_retries=self._max_retries,
-            retry_base_delay_s=self._retry_base_delay_s,
-            retry_max_delay_s=self._retry_max_delay_s,
-            max_depth=self._max_depth,
-            system_prompt=self._system_prompt,
-            cli_system_prompt_file=self._system_prompt_file,
-            allowed_agents=allowed_agents_str,
-            output_dir=self._output_dir,
-            cwd=self._cwd,
-        )
-        _apply_agent_template_overrides(
-            config=config,
-            agent_models=self._agent_models,
-            agent_reasoning_efforts=self._agent_reasoning_efforts,
-        )
         run_id = _make_run_id()
-        run_dir = RUNS_DIR / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        session_output_dir = _prepare_session_output_dir(
-            config=config, session_id=run_id
+        allowed_agents_str = _normalize_agents(agents=self._agents)
+        try:
+            config = load_config(
+                provider=self._provider,
+                model=self._model,
+                api_base=self._api_base,
+                api_key=self._api_key,
+                codex_auth_path=self._codex_auth_path,
+                max_retries=self._max_retries,
+                retry_base_delay_s=self._retry_base_delay_s,
+                retry_max_delay_s=self._retry_max_delay_s,
+                max_depth=self._max_depth,
+                system_prompt=self._system_prompt,
+                cli_system_prompt_file=self._system_prompt_file,
+                allowed_agents=allowed_agents_str,
+                output_dir=self._output_dir,
+                cwd=self._cwd,
+            )
+            _apply_agent_template_overrides(
+                config=config,
+                agent_models=self._agent_models,
+                agent_reasoning_efforts=self._agent_reasoning_efforts,
+            )
+        except (Exception, SystemExit) as exc:
+            if self._caller_context is None:
+                raise
+            _raise_caller_preflight_error(
+                run_id=run_id,
+                task=task,
+                caller_context=self._caller_context,
+                provider=self._provider or Config.provider,
+                model=self._model or Config.model,
+                api_base=self._api_base or Config.api_base,
+                exc=exc,
+            )
+        run_dir, session_output_dir = _prepare_run_paths(
+            config=config, run_id=run_id, caller_context=self._caller_context
         )
         config.run_dir = run_dir
         manager = AgentManager()
-        client = _make_client(config)
+        client: CoordinatorLike | None = None
         run_log: RunLogWriter | None = None
         ui: ConsoleBase | None = None
         messages: list[dict[str, Any]] = []
         terminal_error: str | None = None
         terminal_cause: Exception | None = None
+        coordinator_input_path = (run_dir / "coordinator_input.json").resolve()
         try:
             run_log = RunLogWriter(
                 run_id=run_id,
                 run_dir=run_dir,
                 provider=config.provider,
                 model=config.model,
-                api_base=client.api_base,
+                api_base=config.api_base,
+                session_output_dir=str(session_output_dir),
+                caller_context=(
+                    self._caller_context.model_dump(mode="json")
+                    if self._caller_context is not None
+                    else None
+                ),
+                capabilities=sorted(TEAM_HARNESS_CAPABILITIES),
+                coordinator_input_path=str(coordinator_input_path),
+            )
+            skills = load_skill_metadata(cwd=config.cwd)
+            allowed_types = get_allowed_types(config=config)
+            validate_templates(config=config, allowed_types=allowed_types)
+            system_prompt = build_system_prompt(
+                config=config,
+                allowed_types=allowed_types,
+                skills=skills,
                 session_output_dir=str(session_output_dir),
             )
+            if self._caller_context is not None:
+                system_prompt = "\n\n".join(
+                    (
+                        system_prompt,
+                        build_coordinator_context_footer(
+                            context=self._caller_context,
+                            harness_run_id=run_id,
+                            harness_run_dir=run_dir,
+                        ),
+                    )
+                )
+            messages: list[dict[str, Any]] = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": task},
+            ]
+            _write_coordinator_input(
+                path=coordinator_input_path,
+                run_id=run_id,
+                messages=messages,
+                caller_context=self._caller_context,
+            )
+
+            # Input is durable before client construction or model discovery,
+            # so even an auth/model preflight failure leaves the exact logical
+            # coordinator envelope.
+            client = _make_client(config=config)
+            run_log.update_api_base(api_base=client.api_base)
             model_limit = await resolve_model_limit(
                 model_id=config.model, client=client, config=config
             )
@@ -151,11 +227,8 @@ class TeamHarness:
             ui = make_console(
                 ctx=ctx, manager=manager, run_dir=run_dir, mode=self._console_mode
             )
-            _show_no_config_hint(config, ui=ui)
-            _warn_provider_startup(config, ui=ui)
-            skills = load_skill_metadata(cwd=config.cwd)
-            allowed_types = get_allowed_types(config)
-            validate_templates(config=config, allowed_types=allowed_types)
+            _show_no_config_hint(config=config, ui=ui)
+            _warn_provider_startup(config=config, ui=ui)
             registry = _build_registry(
                 allowed_types=allowed_types,
                 manager=manager,
@@ -164,17 +237,8 @@ class TeamHarness:
                 ui=ui,
                 run_dir=run_dir,
                 session_output_dir=str(session_output_dir),
+                caller_context=self._caller_context,
             )
-            system_prompt = build_system_prompt(
-                config=config,
-                allowed_types=allowed_types,
-                skills=skills,
-                session_output_dir=str(session_output_dir),
-            )
-            messages: list[dict[str, Any]] = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": task},
-            ]
             ui.start()
             await run(
                 messages=messages,
@@ -186,6 +250,14 @@ class TeamHarness:
                 ctx=ctx,
             )
         except Exception as exc:
+            if run_log is not None and not coordinator_input_path.exists():
+                _write_incomplete_coordinator_input(
+                    path=coordinator_input_path,
+                    run_id=run_id,
+                    task=task,
+                    caller_context=self._caller_context,
+                    failure=str(exc),
+                )
             terminal_error = str(exc)
             terminal_cause = exc
         finally:
@@ -200,24 +272,34 @@ class TeamHarness:
                 )
             if ui is not None:
                 ui.stop()
-            await client.aclose()
+            if client is not None:
+                await client.aclose()
         if terminal_error:
             detail = _build_error_detail(
                 summary=terminal_error,
                 run_log=run_log,
                 session_output_dir=session_output_dir,
             )
-            raise TeamHarnessError(terminal_error, detail=detail) from terminal_cause
+            raise TeamHarnessError(
+                message=terminal_error, detail=detail
+            ) from terminal_cause
         if run_log.error:
             detail = _build_error_detail(
                 summary=run_log.error,
                 run_log=run_log,
                 session_output_dir=session_output_dir,
             )
-            raise TeamHarnessError(run_log.error, detail=detail)
-        text = _extract_final_text(messages)
-        agent_summaries = _build_agent_summaries(manager)
-        return TeamHarnessResult(text=text, agents=agent_summaries, run_id=run_id)
+            raise TeamHarnessError(message=run_log.error, detail=detail)
+        text = _extract_final_text(messages=messages)
+        agent_summaries = _build_agent_summaries(manager=manager)
+        return TeamHarnessResult(
+            text=text,
+            agents=agent_summaries,
+            run_id=run_id,
+            run_json_path=str(run_log.path.resolve()),
+            session_output_dir=str(session_output_dir.resolve()),
+            coordinator_input_path=str(coordinator_input_path),
+        )
 
 
 @dataclass
@@ -227,6 +309,9 @@ class TeamHarnessResult:
     text: str
     agents: list[AgentSummary]
     run_id: str
+    run_json_path: str = ""
+    session_output_dir: str = ""
+    coordinator_input_path: str = ""
 
 
 @dataclass
@@ -307,7 +392,7 @@ def _apply_agent_template_overrides(
             template = resolve_template(agent_type=agent_type, config=config)
         except ValueError as exc:
             raise TeamHarnessError(
-                f"Cannot override unknown agent type {agent_type!r}"
+                message=f"Cannot override unknown agent type {agent_type!r}"
             ) from exc
         config.agent_templates[agent_type] = replace(
             template,
@@ -331,21 +416,33 @@ def _extract_final_text(messages: list[dict[str, Any]]) -> str:
 def _build_error_detail(
     *, summary: str, run_log: RunLogWriter | None, session_output_dir: str | Path
 ) -> dict[str, Any] | None:
+    """Build caller-facing failure evidence with canonical artifact paths."""
+
     if run_log is None:
         return None
     failure = run_log.snapshot_failure()
     if failure is not None and failure.kind.startswith("coordinator_"):
-        return _build_coordinator_failure_detail(
+        detail = _build_coordinator_failure_detail(
             failure=failure,
             run_log=run_log,
             agents=run_log.snapshot_agents(),
             session_output_dir=session_output_dir,
         )
-    return build_worker_failure_detail(
-        summary=summary,
-        agents=run_log.snapshot_agents(),
-        session_output_dir=session_output_dir,
+    else:
+        detail = build_worker_failure_detail(
+            summary=summary,
+            agents=run_log.snapshot_agents(),
+            session_output_dir=session_output_dir,
+        ) or {"summary": summary}
+    detail.setdefault("run_id", run_log.run_id)
+    detail.setdefault("run_json_path", str(run_log.path.resolve()))
+    detail.setdefault("session_output_dir", str(Path(session_output_dir).resolve()))
+    detail.setdefault(
+        "coordinator_input_path",
+        str((run_log.path.parent / "coordinator_input.json").resolve()),
     )
+    detail.setdefault("capabilities", sorted(TEAM_HARNESS_CAPABILITIES))
+    return detail
 
 
 def _build_coordinator_failure_detail(
@@ -449,6 +546,120 @@ def _prepare_session_output_dir(config: Config, session_id: str) -> Path:
     return session_output_dir
 
 
+def _prepare_run_paths(
+    *, config: Config, run_id: str, caller_context: CallerContext | None
+) -> tuple[Path, Path]:
+    """Create canonical run and artifact paths for SDK and legacy callers."""
+
+    if caller_context is None:
+        run_dir = (RUNS_DIR / run_id).expanduser().resolve()
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return run_dir, _prepare_session_output_dir(config=config, session_id=run_id)
+
+    # The caller owns the root and discovers the exact run-id child from the
+    # structured success/error path. Keeping each invocation in its own child
+    # avoids destructive collisions if a caller retries an attempt.
+    run_dir = (caller_context.trace_root / run_id).resolve()
+    run_dir.mkdir(parents=True, exist_ok=False)
+    return run_dir, run_dir
+
+
+def _raise_caller_preflight_error(
+    *,
+    run_id: str,
+    task: str,
+    caller_context: CallerContext,
+    provider: str,
+    model: str,
+    api_base: str,
+    exc: Exception | SystemExit,
+) -> Never:
+    """Turn pre-config failures into the selected structured caller contract."""
+
+    run_dir = (caller_context.trace_root / run_id).resolve()
+    run_dir.mkdir(parents=True, exist_ok=False)
+    coordinator_input_path = (run_dir / "coordinator_input.json").resolve()
+    run_log = RunLogWriter(
+        run_id=run_id,
+        run_dir=run_dir,
+        provider=provider,
+        model=model,
+        api_base=api_base,
+        session_output_dir=str(run_dir),
+        caller_context=caller_context.model_dump(mode="json"),
+        capabilities=sorted(TEAM_HARNESS_CAPABILITIES),
+        coordinator_input_path=str(coordinator_input_path),
+    )
+    summary = f"team-harness preflight failed: {exc}"
+    _write_incomplete_coordinator_input(
+        path=coordinator_input_path,
+        run_id=run_id,
+        task=task,
+        caller_context=caller_context,
+        failure=summary,
+    )
+    run_log.finalize(error=summary)
+    write_worker_sessions_manifest(run_id=run_id, session_output_dir=run_dir, agents=[])
+    detail = _build_error_detail(
+        summary=summary, run_log=run_log, session_output_dir=run_dir
+    )
+    raise TeamHarnessError(message=summary, detail=detail) from exc
+
+
+def _write_coordinator_input(
+    *,
+    path: Path,
+    run_id: str,
+    messages: list[dict[str, Any]],
+    caller_context: CallerContext | None,
+) -> None:
+    """Persist the generated system/user envelope before any provider call."""
+
+    write_json_atomic(
+        path=path,
+        payload={
+            "schema_version": 1,
+            "status": "complete",
+            "harness_run_id": run_id,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "messages": messages,
+            "caller_context": (
+                caller_context.model_dump(mode="json")
+                if caller_context is not None
+                else None
+            ),
+        },
+    )
+
+
+def _write_incomplete_coordinator_input(
+    *,
+    path: Path,
+    run_id: str,
+    task: str,
+    caller_context: CallerContext | None,
+    failure: str,
+) -> None:
+    """Record why an exact system/user envelope could not be generated."""
+
+    write_json_atomic(
+        path=path,
+        payload={
+            "schema_version": 1,
+            "status": "incomplete",
+            "harness_run_id": run_id,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "messages": [{"role": "user", "content": task}],
+            "caller_context": (
+                caller_context.model_dump(mode="json")
+                if caller_context is not None
+                else None
+            ),
+            "failure": failure,
+        },
+    )
+
+
 def _sync_terminal_agents(manager: AgentManager, run_log: RunLogWriter) -> None:
     manager.poll_exit_codes()
     for state in manager.list_all():
@@ -479,6 +690,8 @@ async def _graceful_shutdown(
     timeout: float = 10.0,
     terminate_wait: float = 1.0,
 ) -> None:
+    """Wait for workers, terminate stragglers, and persist terminal states."""
+
     manager.poll_exit_codes()
     running = [state.id for state in manager.list_all() if state.status == "running"]
     if running:
@@ -501,7 +714,7 @@ async def _graceful_shutdown(
                 # (e.g. test doubles).
                 terminated = False
                 if state.pgid is not None:
-                    terminated = signal_group(state.pgid, signal.SIGTERM)
+                    terminated = signal_group(pgid=state.pgid, sig=signal.SIGTERM)
                 if not terminated:
                     try:
                         state.proc.terminate()
@@ -539,7 +752,7 @@ async def _graceful_shutdown(
                 for agent_id in sweep_targets
             )
         )
-    _sync_terminal_agents(manager, run_log)
+    _sync_terminal_agents(manager=manager, run_log=run_log)
 
 
 async def _finalize_run(
@@ -551,15 +764,55 @@ async def _finalize_run(
     ui: ConsoleBase | None,
     error: str | None = None,
 ) -> None:
-    await _graceful_shutdown(
-        manager=manager, run_log=run_log, ui=ui, timeout=shutdown_timeout_s
-    )
-    run_log.finalize(error=error)
+    """Finish workers and persist both run snapshots before returning.
+
+    Lifecycle-task failures become a recorded terminal error instead of
+    escaping early and depriving embedded callers of their artifact paths.
+    """
+
+    finalization_failures: list[BaseException] = []
+    try:
+        await _graceful_shutdown(
+            manager=manager, run_log=run_log, ui=ui, timeout=shutdown_timeout_s
+        )
+    except Exception as exc:
+        # A process-wait failure must not bypass the two durable snapshots.
+        # The retained watcher/capture tasks still get a chance to finish and
+        # the SDK will raise the recorded error after paths are available.
+        finalization_failures.append(exc)
+    # Worker watchers set the stop events consumed by provider-session capture.
+    # Awaiting both tasks guarantees the capture task performs its final
+    # prefix/tail scan before either durable final snapshot is written.
+    finalization_failures.extend(await manager.await_finalization_tasks())
+    _sync_terminal_agents(manager=manager, run_log=run_log)
+    finalization_error = _finalization_error_summary(failures=finalization_failures)
+    effective_error = error
+    if finalization_error is not None:
+        effective_error = (
+            f"{error}; {finalization_error}"
+            if error is not None
+            else finalization_error
+        )
+    run_log.finalize(error=effective_error)
     write_worker_sessions_manifest(
         run_id=run_log.run_id,
         session_output_dir=session_output_dir,
         agents=run_log.snapshot_agents(),
     )
+
+
+def _finalization_error_summary(failures: list[BaseException]) -> str | None:
+    """Return a safe terminal summary without persisting exception messages.
+
+    Watch/process exceptions can contain provider output or command arguments.
+    The exception classes are enough to diagnose the failing lifecycle stage;
+    detailed worker evidence remains in the captured run artifacts.
+    """
+
+    if not failures:
+        return None
+    error_types = ", ".join(sorted({type(failure).__name__ for failure in failures}))
+    return f"Worker finalization failed ({error_types}); capture may be incomplete"
 
 
 def _emit_provider_warning(message: str, ui: ConsoleBase | None = None) -> None:
@@ -608,16 +861,18 @@ def _make_client(config: Config) -> CoordinatorLike:
         )
     if config.provider == "codex":
         try:
-            auth = load_codex_auth(config.codex_auth_path or None, cwd=config.cwd)
+            auth = load_codex_auth(
+                configured_path=config.codex_auth_path or None, cwd=config.cwd
+            )
         except CodexAuthError as exc:
-            raise CoordinatorAPIError(str(exc)) from exc
+            raise CoordinatorAPIError(message=str(exc)) from exc
         # Only pass api_base if the user explicitly overrode it; the default
         # OpenRouter URL is not valid for the Codex provider.
         codex_api_base = config.api_base if config.api_base != Config.api_base else ""
         return CodexCoordinatorClient(
             model=config.model, auth=auth, api_base=codex_api_base
         )
-    raise CoordinatorAPIError(f"Unsupported provider: {config.provider}")
+    raise CoordinatorAPIError(message=f"Unsupported provider: {config.provider}")
 
 
 def _make_run_id() -> str:
@@ -638,6 +893,7 @@ def _build_registry(
     ui: ConsoleBase,
     run_dir: Path,
     session_output_dir: str = "",
+    caller_context: CallerContext | None = None,
 ) -> ToolRegistry:
     """Build a ToolRegistry with per-run tool closures for concurrent safety."""
     registry = ToolRegistry()
@@ -650,6 +906,7 @@ def _build_registry(
         ui=ui,
         allowed_types=allowed_types,
         session_output_dir=session_output_dir,
+        caller_context=caller_context,
     )
     for schema, fn in agent_bindings:
         registry.register(schema=schema, fn=fn)

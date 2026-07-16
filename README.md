@@ -115,13 +115,25 @@ Use team-harness programmatically from Python:
 
 ```python
 import asyncio
-from team_harness import TeamHarness, TeamHarnessResult
+from pathlib import Path
+from team_harness import CallerContext, TeamHarness, TeamHarnessResult
 
 async def main():
     harness = TeamHarness(
         api_key="sk-or-...",
         model="anthropic/claude-sonnet-4",
         agents=["codex", "gemini"],
+        # Optional embedding contract: keeps the complete run beneath a
+        # caller-owned root and supplies outer-session identity to agents.
+        caller_context=CallerContext(
+            trace_root=Path("/abs/session/traces/attempt-42"),
+            parent_assignment_path=Path("/abs/session/attempt-42/assignment.json"),
+            parent_attempt_id="attempt-42",
+            root_session_id="session-root",
+            session_id="session-leaf",
+            session_depth=1,
+            workflow_role="inner",
+        ),
     )
     result: TeamHarnessResult = await harness.run(
         "Write unit tests for src/utils.py using pytest"
@@ -170,8 +182,42 @@ The `run()` method returns a `TeamHarnessResult` with:
 - `text` -- final assistant response
 - `agents` -- list of `AgentSummary` (id, agent_type, status, exit_code, cwd)
 - `run_id` -- unique run identifier
+- `run_json_path` -- explicit canonical coordinator run record
+- `session_output_dir` -- worker/session artifact directory
+- `coordinator_input_path` -- generated system/user input captured before the
+  first provider operation
 
-Errors raise `TeamHarnessError`. Run logs are always finalized, even on failure.
+Errors raise `TeamHarnessError`. Structured failures expose the same three paths
+in `error.detail`. Embedding callers can inspect `get_capabilities()` for the
+named caller contract before selecting it. Run logs are always finalized, even
+on failure. For caller-context runs, generated coordinator input, direct-agent
+assignments, and worker stdout/stderr stay under the returned run directory.
+
+Capability names, rather than the package version, are the compatibility
+boundary. Caller-contract v1 advertises `caller_run_record_v1`,
+`coordinator_input_v1`, `spawn_assignment_v1`, and
+`nested_caller_context_v1`:
+
+```python
+from team_harness import get_capabilities
+
+required = {
+    "caller_run_record_v1",
+    "coordinator_input_v1",
+    "spawn_assignment_v1",
+    "nested_caller_context_v1",
+}
+capabilities = get_capabilities()
+if not capabilities.supports(*required):
+    raise RuntimeError("installed team-harness lacks the required caller contract")
+```
+
+`nested_caller_context_v1` applies specifically when a coordinator dynamically
+chooses the built-in `type="harness"`. That child coordinator retains the same
+outer loop session, depth, attempt, role, and absolute relevant-state paths; it
+receives its own direct assignment and harness artifact subtree and records the
+parent harness run id. It is delegation inside the current loop assignment,
+not a newly created loop layer.
 
 ## Configuration
 
@@ -560,12 +606,14 @@ The coordinator can also override the level per spawn with
 | `[agents.<name>].reasoning_effort` | 2 |
 | Worker CLI's own internal default | 3 (fallback) |
 
-`spawn_agent(effort=…)` fails loudly instead of lying: passing it for an
-agent type whose template cannot carry the value (no
-`reasoning_effort_flag` with an `{effort}` placeholder), passing a
-blank level, or combining it with a raw `flags` entry that carries the
-same reasoning-effort option all return an ERROR result rather than
-silently dropping or double-rendering the override.
+Structured `spawn_agent(model=…)` and `spawn_agent(effort=…)` overrides fail
+loudly instead of lying. A model override combined with the template's model
+option in raw `flags`, or an effort override combined with the template's
+reasoning-effort option, returns an ERROR rather than rendering two competing
+values. Both `--option value` and `--option=value` spellings are detected;
+unrelated prefix lookalikes remain valid. Effort also fails when the template
+cannot carry the value (no `reasoning_effort_flag` with an `{effort}`
+placeholder) or when the requested level is blank.
 
 Each spawn's requested and effective model/effort are recorded on the
 agent's entry in `run.json` (`requested_model` / `requested_effort` /
@@ -876,6 +924,23 @@ Each run creates a directory under `~/.team-harness/runs/<run-id>/` containing:
 - `run.json` — full delta-based run log (losslessly replayable conversation)
 - `todo.json` — persistent task list
 
+SDK runs with `caller_context` instead keep the canonical run record and all
+session artifacts together under `<caller trace_root>/<run-id>/`; callers should
+use the explicit paths returned by `TeamHarnessResult` / `TeamHarnessError.detail`.
+Worker stdout and stderr are captured directly at the canonical paths. These
+artifacts contain the exact operational inputs and outputs; the caller owns
+their access controls, retention, and any transformation before external
+export.
+
+The coordinator footer and each direct-worker footer name their current/parent
+harness run id. When the coordinator dynamically spawns the built-in
+`type="harness"`, team-harness also propagates the validated outer caller context
+through `TEAM_HARNESS_CALLER_CONTEXT`. The nested coordinator keeps the same
+outer session depth and workflow role (it is not a new loopy-loop layer), gets
+its own direct assignment and nested trace root, and records the parent harness
+run id. This applies to built-in nested harness spawns; team-harness does not try
+to detect an arbitrary worker independently launching another `th` process.
+
 Each run also creates `<output_dir>/<run-id>/worker_sessions.json`, a compact
 worker index with per-agent prompt, status, timestamps, log paths, and
 resume-related metadata. Worker stdout/stderr logs are written under the same
@@ -884,6 +949,7 @@ session output directory:
 ```text
 <output_dir>/<run-id>/workers/<worker-label>__<agent-id>/stdout.jsonl
 <output_dir>/<run-id>/workers/<worker-label>__<agent-id>/stderr.log
+<output_dir>/<run-id>/agents/<agent-id>/agent_assignment.json
 ```
 
 When a coordinator supplies `worker_label`, it is treated as a filesystem-safe

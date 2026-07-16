@@ -298,16 +298,106 @@ async def test_spawn_agent_rejects_effort_colliding_with_raw_flags(
         effort="high",
         flags=["--effort", "low"],
     )
+    claude_equals_result = await agent_tools.spawn_agent(
+        type="claude",
+        prompt="hello",
+        cwd=str(tmp_path),
+        effort="high",
+        flags=["--effort=low"],
+    )
 
     assert codex_result.startswith("ERROR:")
     assert "model_reasoning_effort=low" in codex_result
     assert claude_result.startswith("ERROR:")
     assert "--effort" in claude_result
+    assert claude_equals_result.startswith("ERROR:")
+    assert "--effort=low" in claude_equals_result
     assert manager.list_all() == []
 
 
 @pytest.mark.asyncio
-async def test_bound_spawn_agent_closure_applies_and_records_effort(tmp_path, ui):
+async def test_spawn_agent_rejects_model_colliding_with_raw_flags(
+    tmp_path, config, manager, ui
+):
+    """A structured model choice must remain the single argv model source.
+
+    Codex and Claude share the built-in ``--model`` template option; cover
+    both accepted CLI spellings so neither can contradict the audit record.
+    """
+    config.run_dir = tmp_path
+    config.agent_templates = {
+        "codex": AgentTemplate(command=("echo",), model_flag="--model"),
+        "claude": AgentTemplate(command=("echo",), model_flag="--model"),
+    }
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+
+    codex_result = await agent_tools.spawn_agent(
+        type="codex",
+        prompt="hello",
+        cwd=str(tmp_path),
+        model="gpt-5.6-sol",
+        flags=["--model", "gpt-5.6-mini"],
+    )
+    claude_result = await agent_tools.spawn_agent(
+        type="claude",
+        prompt="hello",
+        cwd=str(tmp_path),
+        model="claude-opus-4-8",
+        flags=["--model=claude-haiku-4-5"],
+    )
+
+    assert codex_result.startswith("ERROR:")
+    assert "--model" in codex_result
+    assert claude_result.startswith("ERROR:")
+    assert "--model=claude-haiku-4-5" in claude_result
+    assert manager.list_all() == []
+    assert run_log.snapshot_agents() == []
+
+
+@pytest.mark.asyncio
+async def test_spawn_agent_allows_nonconflicting_flags_with_model_override(
+    tmp_path, config, manager, ui
+):
+    """An unrelated option, including a model-prefix lookalike, stays valid."""
+    config.run_dir = tmp_path
+    config.worker_suffix = ""
+    config.agent_templates = {
+        "codex": AgentTemplate(command=("echo",), model_flag="--model")
+    }
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+
+    agent_id = await agent_tools.spawn_agent(
+        type="codex",
+        prompt="hello",
+        cwd=str(tmp_path),
+        model="gpt-5.6-sol",
+        flags=["--model-context", "review"],
+    )
+    await asyncio.wait_for(manager.wait_one(agent_id), 2)
+
+    record = run_log.snapshot_agents()[0]
+    assert record.requested_model == "gpt-5.6-sol"
+    assert record.effective_model == "gpt-5.6-sol"
+    assert record.command.count("--model") == 1
+    assert "--model-context" in record.command
+
+
+@pytest.mark.asyncio
+async def test_bound_spawn_agent_closure_validates_and_records_overrides(tmp_path, ui):
     """The production path spawns through build_agent_tool_bindings'
     closure, not the module-level function — it must behave identically."""
     from team_harness.agents.manager import AgentManager
@@ -332,7 +422,7 @@ async def test_bound_spawn_agent_closure_applies_and_records_effort(tmp_path, ui
         agent_templates={
             "codex": AgentTemplate(
                 command=(str(fake_codex),),
-                model_flag=None,
+                model_flag="--model",
                 reasoning_effort="low",
                 reasoning_effort_flag=("-c", "model_reasoning_effort={effort}"),
             )
@@ -361,6 +451,15 @@ async def test_bound_spawn_agent_closure_applies_and_records_effort(tmp_path, ui
         flags=["-c", "model_reasoning_effort=low"],
     )
     assert unsupported.startswith("ERROR:")
+
+    model_conflict = await spawn_fn(
+        type="codex",
+        prompt="hello",
+        cwd=str(tmp_path),
+        model="gpt-5.6-sol",
+        flags=["--model=other-model"],
+    )
+    assert model_conflict.startswith("ERROR:")
 
     agent_id = await spawn_fn(
         type="codex",

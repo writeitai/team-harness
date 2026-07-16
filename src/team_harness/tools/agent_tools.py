@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Mapping
+from collections.abc import Sequence
 from datetime import datetime
 from datetime import timezone
 import json
@@ -19,8 +20,12 @@ from team_harness.agents.registry import resolve_template
 from team_harness.agents.session_capture import capture_session_id_from_path
 from team_harness.agents.template import AgentTemplate
 from team_harness.agents.template import template_supports_effort
+from team_harness.caller_contract import build_nested_caller_context
+from team_harness.caller_contract import CallerContext
+from team_harness.caller_contract import INHERITED_CALLER_CONTEXT_ENV
 from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
 from team_harness.tracking.models import AgentRecord
+from team_harness.tracking.persistence import write_json_atomic
 from team_harness.tracking.worker_sessions import resume_info_for_agent_type
 
 if TYPE_CHECKING:
@@ -34,6 +39,7 @@ _run_log: "RunLogWriter | None" = None
 _config: "Config | None" = None
 _ui: "ConsoleBase | None" = None
 _session_output_dir: str = ""
+_caller_context: CallerContext | None = None
 
 _output_cursors: dict[str, int] = {}
 _output_locks: dict[str, asyncio.Lock] = {}
@@ -55,6 +61,10 @@ SPAWN_AGENT_KEYS = {
     "env",
     "agents",
     "worker_label",
+    "delegated_role",
+    "delegated_task_id",
+    "expected_outputs",
+    "state_responsibility",
 }
 
 _READ_NEW_TRUNCATION_TEMPLATE = (
@@ -120,11 +130,218 @@ def _worker_log_label(*, agent_id: str, worker_label: str | None) -> str:
     return f"{label}__{agent_id}"
 
 
+def _agent_output_paths(
+    *, run_dir: Path, agent_id: str, session_output_dir: str
+) -> tuple[Path, Path]:
+    """Return the canonical per-agent output and assignment paths."""
+
+    output_root = (
+        Path(session_output_dir).expanduser().resolve()
+        if session_output_dir
+        else run_dir.expanduser().resolve()
+    )
+    output_dir = (output_root / "agents" / agent_id).resolve()
+    if not output_dir.is_relative_to(output_root):
+        msg = f"agent output directory escaped session output directory: {output_dir}"
+        raise ValueError(msg)
+    return output_dir, output_dir / "agent_assignment.json"
+
+
+def _optional_spawn_string(kwargs: Mapping[str, object], name: str) -> str | None:
+    """Read one optional non-blank delegation metadata string."""
+
+    value = kwargs.get(name)
+    if value is None:
+        return None
+    text = str(value)
+    if not text.strip():
+        raise ValueError(f"{name} must not be blank when provided")
+    return text
+
+
+def _expected_outputs(kwargs: Mapping[str, object]) -> list[str]:
+    """Validate and normalize the coordinator's expected-output labels."""
+
+    value = kwargs.get("expected_outputs")
+    if value is None:
+        return []
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        raise ValueError("expected_outputs must be an array of strings")
+    outputs = [str(item) for item in value]
+    if any(not output.strip() for output in outputs):
+        raise ValueError("expected_outputs entries must not be blank")
+    return outputs
+
+
+def _build_direct_spawn_footer(
+    *,
+    assignment_path: Path,
+    output_dir: Path,
+    caller_context: CallerContext | None,
+    delegated_role: str | None,
+    delegated_task_id: str | None,
+    expected_outputs: list[str],
+    state_responsibility: str | None,
+    parent_harness_run_id: str,
+) -> str:
+    """Render the automatic absolute-path and lineage context for a worker."""
+
+    context_lines = [
+        "# Automatic direct-spawn assignment context",
+        "",
+        f"Your assignment envelope (absolute): {assignment_path}",
+        f"Your output directory (absolute): {output_dir}",
+        f"Parent harness run id: {parent_harness_run_id}",
+        "Read the assignment envelope before working and use the absolute paths it declares.",
+        "You are an ephemeral delegate. Report your result to the harness coordinator; ",
+        "the coordinator owns integration and the loop-layer decision.",
+    ]
+    if caller_context is not None:
+        context_lines.extend(
+            [
+                f"Parent loop assignment (absolute): {caller_context.parent_assignment_path}",
+                f"Parent attempt id: {caller_context.parent_attempt_id}",
+                f"Root/current session: {caller_context.root_session_id} / {caller_context.session_id}",
+                f"Session depth and workflow role: {caller_context.session_depth} / {caller_context.workflow_role}",
+            ]
+        )
+    if delegated_role is not None:
+        context_lines.append(f"Delegated role: {delegated_role}")
+    if delegated_task_id is not None:
+        context_lines.append(f"Delegated task id: {delegated_task_id}")
+    if state_responsibility is not None:
+        context_lines.append(f"State responsibility: {state_responsibility}")
+    if expected_outputs:
+        context_lines.append("Expected outputs:")
+        context_lines.extend(f"- {output}" for output in expected_outputs)
+    return "\n".join(context_lines)
+
+
+def _prepare_agent_assignment(
+    *,
+    agent_id: str,
+    prompt: str,
+    run_log: "RunLogWriter",
+    config: "Config",
+    run_dir: Path,
+    session_output_dir: str,
+    caller_context: CallerContext | None,
+    kwargs: Mapping[str, object],
+) -> tuple[str, Path, str | None, str | None, list[str], str | None]:
+    """Persist one direct assignment and return its effective spawn metadata."""
+
+    delegated_role = _optional_spawn_string(kwargs=kwargs, name="delegated_role")
+    delegated_task_id = _optional_spawn_string(kwargs=kwargs, name="delegated_task_id")
+    expected_outputs = _expected_outputs(kwargs=kwargs)
+    state_responsibility = _optional_spawn_string(
+        kwargs=kwargs, name="state_responsibility"
+    )
+    output_dir, assignment_path = _agent_output_paths(
+        run_dir=run_dir, agent_id=agent_id, session_output_dir=session_output_dir
+    )
+    automatic_footer = _build_direct_spawn_footer(
+        assignment_path=assignment_path,
+        output_dir=output_dir,
+        caller_context=caller_context,
+        delegated_role=delegated_role,
+        delegated_task_id=delegated_task_id,
+        expected_outputs=expected_outputs,
+        state_responsibility=state_responsibility,
+        parent_harness_run_id=run_log.run_id,
+    )
+    parts = [prompt.rstrip()]
+    if config.worker_suffix:
+        parts.append(config.worker_suffix)
+    parts.append(automatic_footer)
+    # Keep the established output footer last: existing coordinator prompts
+    # and tests rely on its final-position emphasis.
+    parts.append(
+        _build_worker_output_footer(output_dir=session_output_dir, config=config)
+    )
+    full_prompt = "\n\n".join(part for part in parts if part)
+    write_json_atomic(
+        path=assignment_path,
+        payload={
+            "schema_version": 1,
+            "actor_kind": "spawned_agent",
+            "agent_id": agent_id,
+            "parent_harness_run_id": run_log.run_id,
+            "parent_attempt_id": (
+                caller_context.parent_attempt_id if caller_context is not None else None
+            ),
+            "root_session_id": (
+                caller_context.root_session_id if caller_context is not None else None
+            ),
+            "session_id": (
+                caller_context.session_id if caller_context is not None else None
+            ),
+            "session_depth": (
+                caller_context.session_depth if caller_context is not None else None
+            ),
+            "workflow_role": (
+                caller_context.workflow_role if caller_context is not None else None
+            ),
+            "delegated_role": delegated_role,
+            "delegated_task_id": delegated_task_id,
+            "delegated_objective": prompt,
+            "assignment_path": (
+                str(caller_context.parent_assignment_path)
+                if caller_context is not None
+                else None
+            ),
+            "agent_assignment_path": str(assignment_path),
+            "output_dir": str(output_dir),
+            "relevant_state_paths": (
+                [str(path) for path in caller_context.relevant_state_paths]
+                if caller_context is not None
+                else []
+            ),
+            "expected_outputs": expected_outputs,
+            "state_responsibility": state_responsibility,
+            "authored_prompt": prompt,
+            "effective_prompt": full_prompt,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return (
+        full_prompt,
+        assignment_path,
+        delegated_role,
+        delegated_task_id,
+        expected_outputs,
+        state_responsibility,
+    )
+
+
 def _validate_spawn_agent_kwargs(kwargs: Mapping[str, object]) -> None:
     unknown = sorted(set(kwargs) - SPAWN_AGENT_KEYS)
     if unknown:
         msg = f"unknown spawn_agent fields: {', '.join(unknown)}"
         raise ValueError(msg)
+
+
+def _inherit_nested_caller_context(
+    *,
+    extra_env: dict[str, str],
+    agent_type: str,
+    caller_context: CallerContext | None,
+    parent_harness_run_id: str,
+    assignment_path: Path,
+) -> None:
+    """Propagate outer identity only to a nested team-harness coordinator."""
+
+    if agent_type != "harness" or caller_context is None:
+        return
+    nested = build_nested_caller_context(
+        context=caller_context,
+        parent_harness_run_id=parent_harness_run_id,
+        agent_assignment_path=assignment_path,
+        agent_output_dir=assignment_path.parent,
+    )
+    # Generated identity wins over a free-form coordinator-provided env
+    # mapping. This records context; it does not constrain the nested
+    # coordinator's delegation choices.
+    extra_env[INHERITED_CALLER_CONTEXT_ENV] = nested.model_dump_json()
 
 
 def _check_effort_supported(
@@ -146,7 +363,7 @@ def _check_effort_supported(
     except ValueError:
         # Unknown agent type: let the spawn path raise its usual error.
         return None
-    if not template_supports_effort(template):
+    if not template_supports_effort(template=template):
         return (
             f"ERROR: agent type {agent_type!r} does not support a "
             "reasoning-effort override (its template declares no "
@@ -160,6 +377,57 @@ def _check_effort_supported(
             f"effort={effort!r} tokens; pass the level through effort only"
         )
     return None
+
+
+def _check_model_override_flags(
+    *, agent_type: str, model: str | None, flags: list[str] | None, config: "Config"
+) -> str | None:
+    """Reject a raw model option alongside the structured model override.
+
+    Rendering both would leave CLI precedence to the worker and make the
+    structured requested/effective model audit fields potentially false.
+    This is an argv-shape check only: model policy and allowed values remain
+    the caller's responsibility under TH-D6.
+    """
+    if model is None:
+        return None
+    try:
+        template = resolve_template(agent_type=agent_type, config=config)
+    except ValueError:
+        # Unknown agent type: let the spawn path raise its usual error.
+        return None
+    conflict = _conflicting_model_flag(template=template, flags=flags)
+    if conflict is not None:
+        return (
+            f"ERROR: flags entry {conflict!r} would collide with the rendered "
+            f"model={model!r} option; pass the model through model only"
+        )
+    return None
+
+
+def _conflicting_model_flag(
+    *, template: AgentTemplate, flags: list[str] | None
+) -> str | None:
+    """Find a raw copy of the template's declared model option."""
+    if template.model_flag is None:
+        return None
+    return _conflicting_option_flag(option=template.model_flag, flags=flags)
+
+
+def _conflicting_option_flag(*, option: str, flags: list[str] | None) -> str | None:
+    """Find an exact ``--option`` or ``--option=value`` argv token.
+
+    Prefix lookalikes such as ``--model-context`` are intentionally not a
+    match. The harness only reasons about the option name declared by the
+    template; it does not guess undocumented CLI aliases.
+    """
+    if not flags:
+        return None
+    equals_prefix = f"{option}="
+    return next(
+        (flag for flag in flags if flag == option or flag.startswith(equals_prefix)),
+        None,
+    )
 
 
 def _conflicting_effort_flag(
@@ -182,8 +450,9 @@ def _conflicting_effort_flag(
                     return flag
         elif index > 0:
             option = tokens[index - 1]
-            if option in flags:
-                return option
+            conflict = _conflicting_option_flag(option=option, flags=flags)
+            if conflict is not None:
+                return conflict
     return None
 
 
@@ -248,7 +517,7 @@ def _classify_if_failed(state: AgentState) -> dict | None:
         return state.failure_classification
     stderr_text = _tail_text(state.stderr_log, 4000)
     stdout_text = _tail_text(state.stdout_log, 4000)
-    result = classify_agent_failure(stderr_text, stdout_text)
+    result = classify_agent_failure(stderr_text=stderr_text, stdout_text=stdout_text)
     if result is not None:
         state.failure_classification = {
             "is_api_error": result.is_api_error,
@@ -511,17 +780,22 @@ def setup(
     config: "Config",
     ui: "ConsoleBase",
     session_output_dir: str = "",
+    caller_context: CallerContext | None = None,
 ) -> None:
+    """Bind legacy module-level agent tools to one active harness run."""
+
     global _manager
     global _run_log
     global _config
     global _ui
     global _session_output_dir
+    global _caller_context
     _manager = manager
     _run_log = run_log
     _config = config
     _ui = ui
     _session_output_dir = session_output_dir
+    _caller_context = caller_context
     _output_cursors.clear()
     _output_locks.clear()
     _wait_stdout_cursors.clear()
@@ -601,6 +875,8 @@ def _format_spawn_agent_defaults(
 def spawn_agent_schema(
     allowed_types: list[str], config: "Config | None" = None
 ) -> dict:
+    """Build the coordinator tool schema for dynamic direct worker spawns."""
+
     default_flags_description = _format_spawn_agent_defaults(
         allowed_types=allowed_types, config=config
     )
@@ -670,6 +946,40 @@ def spawn_agent_schema(
                             "contain path separators."
                         ),
                     },
+                    "delegated_role": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": (
+                            "Dynamic audit label for this delegate's role "
+                            "(for example implementation, research, or review). "
+                            "This is not an enum or scheduling constraint."
+                        ),
+                    },
+                    "delegated_task_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": (
+                            "Coordinator-chosen task identifier used to join the "
+                            "spawn with its result and expected outputs."
+                        ),
+                    },
+                    "expected_outputs": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                        "description": (
+                            "Dynamic list of concrete outputs this delegate should "
+                            "return. Team-harness records it but does not enforce it."
+                        ),
+                    },
+                    "state_responsibility": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": (
+                            "Plain-language statement of which state this delegate "
+                            "may update or must only report back about. This is "
+                            "accountability metadata, not a filesystem ACL."
+                        ),
+                    },
                 },
                 "required": ["type", "prompt", "cwd"],
                 "additionalProperties": False,
@@ -679,7 +989,9 @@ def spawn_agent_schema(
 
 
 async def spawn_agent(**kwargs: object) -> str:
-    _validate_spawn_agent_kwargs(kwargs)
+    """Validate, record, and launch one worker for the active legacy binding."""
+
+    _validate_spawn_agent_kwargs(kwargs=kwargs)
     manager, run_log, config, ui = _require_setup()
     agent_type = str(kwargs["type"])
     prompt = str(kwargs["prompt"])
@@ -705,26 +1017,51 @@ async def spawn_agent(**kwargs: object) -> str:
     )
     if agent_type == "harness":
         try:
-            check_harness_depth(config)
+            check_harness_depth(config=config)
         except ValueError:
             return f"ERROR: max harness depth ({config.max_depth}) reached"
+    model_error = _check_model_override_flags(
+        agent_type=agent_type, model=model, flags=flags, config=config
+    )
+    if model_error is not None:
+        return model_error
     effort_error = _check_effort_supported(
         agent_type=agent_type, effort=effort, flags=flags, config=config
     )
     if effort_error is not None:
         return effort_error
 
-    parts = [prompt.rstrip()]
-    if config.worker_suffix:
-        parts.append(config.worker_suffix)
-    parts.append(_build_worker_output_footer(_session_output_dir, config))
-    full_prompt = "\n\n".join(part for part in parts if part)
     current_depth = int(os.environ.get("TEAM_HARNESS_DEPTH", "0"))
     extra_env = {**(env or {}), "TEAM_HARNESS_DEPTH": str(current_depth + 1)}
+    extra_env.pop(INHERITED_CALLER_CONTEXT_ENV, None)
     agent_id = "agent_" + uuid.uuid4().hex[:12]
     run_dir = config.run_dir
     if run_dir is None:
         raise RuntimeError("config.run_dir must be set before spawning agents")
+    (
+        full_prompt,
+        assignment_path,
+        delegated_role,
+        delegated_task_id,
+        expected_outputs,
+        state_responsibility,
+    ) = _prepare_agent_assignment(
+        agent_id=agent_id,
+        prompt=prompt,
+        run_log=run_log,
+        config=config,
+        run_dir=run_dir,
+        session_output_dir=_session_output_dir,
+        caller_context=_caller_context,
+        kwargs=kwargs,
+    )
+    _inherit_nested_caller_context(
+        extra_env=extra_env,
+        agent_type=agent_type,
+        caller_context=_caller_context,
+        parent_harness_run_id=run_log.run_id,
+        assignment_path=assignment_path,
+    )
     stdout_log, stderr_log = _worker_log_paths(
         run_dir=run_dir,
         agent_id=agent_id,
@@ -764,7 +1101,7 @@ async def spawn_agent(**kwargs: object) -> str:
         session_id=spawn_result.generated_uuid,
         pgid=spawn_result.pgid,
     )
-    manager.register(state)
+    manager.register(state=state)
     record = AgentRecord(
         id=agent_id,
         agent_type=agent_type,
@@ -784,12 +1121,19 @@ async def spawn_agent(**kwargs: object) -> str:
         requested_effort=effort,
         effective_model=spawn_result.effective_model,
         effective_effort=spawn_result.effective_effort,
+        assignment_path=str(assignment_path),
+        delegated_role=delegated_role,
+        delegated_task_id=delegated_task_id,
+        expected_outputs=expected_outputs,
+        state_responsibility=state_responsibility,
     )
-    run_log.record_agent_spawn(record)
+    run_log.record_agent_spawn(record=record)
     ui.agent_event(event="spawned", state=state)
     done_event = asyncio.Event()
-    asyncio.ensure_future(_watch_agent(agent_id, done_event))
-    asyncio.ensure_future(
+    watch_task = asyncio.create_task(
+        _watch_agent(agent_id=agent_id, done_event=done_event)
+    )
+    capture_task = asyncio.create_task(
         _capture_session_id_task(
             agent_id=agent_id,
             template=spawn_result.template,
@@ -797,6 +1141,8 @@ async def spawn_agent(**kwargs: object) -> str:
             stop_event=done_event,
         )
     )
+    manager.track_finalization_task(task=watch_task)
+    manager.track_finalization_task(task=capture_task)
     return agent_id
 
 
@@ -827,15 +1173,20 @@ async def _capture_session_id_task(
     pre_generated_uuid: str | None,
     stop_event: asyncio.Event,
 ) -> None:
+    """Capture and persist a provider session id through the worker's final tail."""
+
     manager, run_log, _, _ = _require_setup()
     state = manager.get(agent_id)
-    session_id = await capture_session_id_from_path(
-        stdout_path=state.stdout_log,
-        template=template,
-        pre_generated_uuid=pre_generated_uuid,
-        stop_event=stop_event,
-        max_wait_s=24 * 60 * 60,
-    )
+    try:
+        session_id = await capture_session_id_from_path(
+            stdout_path=state.stdout_log,
+            template=template,
+            pre_generated_uuid=pre_generated_uuid,
+            stop_event=stop_event,
+            max_wait_s=24 * 60 * 60,
+        )
+    except (OSError, UnicodeError):
+        session_id = None
     if session_id is not None:
         state.session_id = session_id
         run_log.update_agent(agent_id, session_id=session_id)
@@ -1073,6 +1424,7 @@ def build_agent_tool_bindings(
     ui: "ConsoleBase",
     allowed_types: list[str],
     session_output_dir: str = "",
+    caller_context: CallerContext | None = None,
 ) -> list[tuple[dict, Callable[..., Awaitable[str]]]]:
     """Build per-run agent tool closures for concurrent safety.
 
@@ -1086,7 +1438,9 @@ def build_agent_tool_bindings(
     wait_stderr_cursors: dict[str, int] = {}
 
     async def _spawn_agent(**kwargs: object) -> str:
-        _validate_spawn_agent_kwargs(kwargs)
+        """Validate, record, and launch one worker for this run-local binding."""
+
+        _validate_spawn_agent_kwargs(kwargs=kwargs)
         agent_type = str(kwargs["type"])
         prompt = str(kwargs["prompt"])
         cwd = str(Path(str(kwargs["cwd"])).expanduser().resolve())
@@ -1113,26 +1467,51 @@ def build_agent_tool_bindings(
         )
         if agent_type == "harness":
             try:
-                check_harness_depth(config)
+                check_harness_depth(config=config)
             except ValueError:
                 return f"ERROR: max harness depth ({config.max_depth}) reached"
+        model_error = _check_model_override_flags(
+            agent_type=agent_type, model=model_val, flags=flags, config=config
+        )
+        if model_error is not None:
+            return model_error
         effort_error = _check_effort_supported(
             agent_type=agent_type, effort=effort_val, flags=flags, config=config
         )
         if effort_error is not None:
             return effort_error
 
-        _parts = [prompt.rstrip()]
-        if config.worker_suffix:
-            _parts.append(config.worker_suffix)
-        _parts.append(_build_worker_output_footer(session_output_dir, config))
-        full_prompt = "\n\n".join(p for p in _parts if p)
         current_depth = int(os.environ.get("TEAM_HARNESS_DEPTH", "0"))
         extra_env = {**(env or {}), "TEAM_HARNESS_DEPTH": str(current_depth + 1)}
+        extra_env.pop(INHERITED_CALLER_CONTEXT_ENV, None)
         agent_id = "agent_" + uuid.uuid4().hex[:12]
         run_dir = config.run_dir
         if run_dir is None:
             raise RuntimeError("config.run_dir must be set before spawning agents")
+        (
+            full_prompt,
+            assignment_path,
+            delegated_role,
+            delegated_task_id,
+            expected_outputs,
+            state_responsibility,
+        ) = _prepare_agent_assignment(
+            agent_id=agent_id,
+            prompt=prompt,
+            run_log=run_log,
+            config=config,
+            run_dir=run_dir,
+            session_output_dir=session_output_dir,
+            caller_context=caller_context,
+            kwargs=kwargs,
+        )
+        _inherit_nested_caller_context(
+            extra_env=extra_env,
+            agent_type=agent_type,
+            caller_context=caller_context,
+            parent_harness_run_id=run_log.run_id,
+            assignment_path=assignment_path,
+        )
         stdout_log, stderr_log = _worker_log_paths(
             run_dir=run_dir,
             agent_id=agent_id,
@@ -1172,7 +1551,7 @@ def build_agent_tool_bindings(
             session_id=spawn_result.generated_uuid,
             pgid=spawn_result.pgid,
         )
-        manager.register(state)
+        manager.register(state=state)
         record = AgentRecord(
             id=agent_id,
             agent_type=agent_type,
@@ -1186,7 +1565,7 @@ def build_agent_tool_bindings(
             stdout_log=str(stdout_log),
             stderr_log=str(stderr_log),
             session_id=state.session_id,
-            resume=resume_info_for_agent_type(agent_type),
+            resume=resume_info_for_agent_type(agent_type=agent_type),
             pid=spawn_result.pid,
             pgid=spawn_result.pgid,
             starttime=spawn_result.starttime,
@@ -1194,8 +1573,13 @@ def build_agent_tool_bindings(
             requested_effort=effort_val,
             effective_model=spawn_result.effective_model,
             effective_effort=spawn_result.effective_effort,
+            assignment_path=str(assignment_path),
+            delegated_role=delegated_role,
+            delegated_task_id=delegated_task_id,
+            expected_outputs=expected_outputs,
+            state_responsibility=state_responsibility,
         )
-        run_log.record_agent_spawn(record)
+        run_log.record_agent_spawn(record=record)
         ui.agent_event(event="spawned", state=state)
 
         done_event = asyncio.Event()
@@ -1221,20 +1605,27 @@ def build_agent_tool_bindings(
                 done_event.set()
 
         async def _capture_session() -> None:
-            session_id = await capture_session_id_from_path(
-                stdout_path=stdout_log,
-                template=spawn_result.template,
-                pre_generated_uuid=spawn_result.generated_uuid,
-                stop_event=done_event,
-                max_wait_s=24 * 60 * 60,
-            )
+            """Capture this worker's provider session id after its final tail."""
+
+            try:
+                session_id = await capture_session_id_from_path(
+                    stdout_path=stdout_log,
+                    template=spawn_result.template,
+                    pre_generated_uuid=spawn_result.generated_uuid,
+                    stop_event=done_event,
+                    max_wait_s=24 * 60 * 60,
+                )
+            except (OSError, UnicodeError):
+                session_id = None
             if session_id is not None:
                 s = manager.get(agent_id)
                 s.session_id = session_id
                 run_log.update_agent(agent_id, session_id=session_id)
 
-        asyncio.ensure_future(_watch())
-        asyncio.ensure_future(_capture_session())
+        watch_task = asyncio.create_task(_watch())
+        capture_task = asyncio.create_task(_capture_session())
+        manager.track_finalization_task(task=watch_task)
+        manager.track_finalization_task(task=capture_task)
         return agent_id
 
     async def _agent_status(agent_id: str) -> str:
@@ -1426,7 +1817,7 @@ def build_agent_tool_bindings(
         )
 
     return [
-        (spawn_agent_schema(allowed_types, config=config), _spawn_agent),
+        (spawn_agent_schema(allowed_types=allowed_types, config=config), _spawn_agent),
         (AGENT_STATUS_SCHEMA, _agent_status),
         (READ_AGENT_OUTPUT_SCHEMA, _read_agent_output),
         (READ_NEW_AGENT_OUTPUT_SCHEMA, _read_new_agent_output),

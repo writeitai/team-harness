@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from datetime import timezone
-import json
 from pathlib import Path
-import re
 from typing import Any
 
 from team_harness.tracking.models import AgentRecord
@@ -12,11 +10,9 @@ from team_harness.tracking.models import WorkerResumeInfo
 from team_harness.tracking.models import WorkerSessionInfo
 from team_harness.tracking.models import WorkerSessionRecord
 from team_harness.tracking.models import WorkerSessionsManifest
+from team_harness.tracking.persistence import write_json_atomic
 
 _TAIL_CHARS = 4096
-_SECRET_RE = re.compile(
-    r"(?i)(sk-[a-z0-9_-]{8,}|[a-z0-9_-]{20,}\.[a-z0-9_-]{20,}\.[a-z0-9_-]{20,})"
-)
 
 
 def resume_info_for_agent_type(agent_type: str) -> WorkerResumeInfo:
@@ -114,29 +110,10 @@ def _build_salvaged_worker(record: AgentRecord) -> dict[str, Any] | None:
     }
 
 
-def _redact(value: str) -> str:
-    return _SECRET_RE.sub("[REDACTED]", value)
+def _recorded_command(command: list[str]) -> list[str]:
+    """Copy the executed command into a JSON-compatible audit list."""
 
-
-def _redacted_command(command: list[str]) -> list[str]:
-    redacted: list[str] = []
-    redact_next = False
-    secret_flags = {"--api-key", "--apikey", "--token", "--auth-token", "--password"}
-    for arg in command:
-        if redact_next:
-            redacted.append("[REDACTED]")
-            redact_next = False
-            continue
-        if arg in secret_flags:
-            redacted.append(arg)
-            redact_next = True
-            continue
-        if any(arg.startswith(f"{flag}=") for flag in secret_flags):
-            name, _, _ = arg.partition("=")
-            redacted.append(f"{name}=[REDACTED]")
-            continue
-        redacted.append(_redact(arg))
-    return redacted
+    return [str(item) for item in command]
 
 
 def _artifact_paths(session_dir: Path, record: AgentRecord) -> dict[str, str | None]:
@@ -161,29 +138,29 @@ def _artifact_paths(session_dir: Path, record: AgentRecord) -> dict[str, str | N
 def _write_worker_artifacts(
     *, session_dir: Path, record: AgentRecord, stdout_tail: str, stderr_tail: str
 ) -> dict[str, str | None]:
+    """Persist one worker's invocation, exit code, and output-tail artifacts."""
+
     paths = _artifact_paths(session_dir, record)
     invocation_path = Path(paths["invocation_path"] or "")
     exit_code_path = Path(paths["exit_code_path"] or "")
     stdout_tail_path = Path(paths["stdout_tail_path"] or "")
     stderr_tail_path = Path(paths["stderr_tail_path"] or "")
     invocation_path.parent.mkdir(parents=True, exist_ok=True)
-    invocation_path.write_text(
-        json.dumps(
-            {
-                "agent_id": record.id,
-                "agent_type": record.agent_type,
-                "cwd": record.cwd,
-                "command": _redacted_command(record.command),
-                "spawned_at": record.spawned_at.isoformat(),
-                "finished_at": record.finished_at.isoformat()
-                if record.finished_at
-                else None,
-                "status": record.status,
-                "exit_code": record.exit_code,
-                "session_id": record.session_id,
-            },
-            indent=2,
-        )
+    write_json_atomic(
+        path=invocation_path,
+        payload={
+            "agent_id": record.id,
+            "agent_type": record.agent_type,
+            "cwd": record.cwd,
+            "command": _recorded_command(command=record.command),
+            "spawned_at": record.spawned_at.isoformat(),
+            "finished_at": (
+                record.finished_at.isoformat() if record.finished_at else None
+            ),
+            "status": record.status,
+            "exit_code": record.exit_code,
+            "session_id": record.session_id,
+        },
     )
     exit_code_path.write_text(
         "" if record.exit_code is None else f"{record.exit_code}\n"
@@ -263,6 +240,8 @@ def write_worker_sessions_manifest(
     agents: list[AgentRecord],
     generated_at: datetime | None = None,
 ) -> Path:
+    """Write the compact worker/session index and its referenced artifacts."""
+
     session_dir = Path(session_output_dir).resolve()
     artifact_paths_by_agent: dict[str, dict[str, str | None]] = {}
     for record in agents:
@@ -282,14 +261,15 @@ def write_worker_sessions_manifest(
         artifact_paths_by_agent=artifact_paths_by_agent,
     )
     output_path = session_dir / "worker_sessions.json"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(manifest.model_dump(mode="json"), indent=2))
+    write_json_atomic(path=output_path, payload=manifest.model_dump(mode="json"))
     return output_path
 
 
 def build_worker_failure_detail(
     *, summary: str, agents: list[AgentRecord], session_output_dir: str | Path
 ) -> dict[str, Any] | None:
+    """Build structured caller evidence for the most relevant worker failure."""
+
     session_dir = Path(session_output_dir).resolve()
     worker_sessions_path = str((session_dir / "worker_sessions.json").resolve())
     salvaged_workers = [
@@ -330,7 +310,7 @@ def build_worker_failure_detail(
         "stdout_tail": _tail_text(stdout_path),
         "stderr_tail": _tail_text(stderr_path),
         "salvaged_workers": salvaged_workers,
-        "invocation": _redacted_command(record.command),
+        "invocation": _recorded_command(command=record.command),
         "invocation_path": _artifact_paths(session_dir, record)["invocation_path"],
         "worker_sessions_path": worker_sessions_path,
         "captured_at": datetime.now(timezone.utc).isoformat(),
