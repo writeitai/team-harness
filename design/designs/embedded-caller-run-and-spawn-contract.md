@@ -117,6 +117,11 @@ outer attempt/session identity when available, absolute parent and per-agent
 assignment paths, the agent output directory, relevant state paths, the four
 dynamic metadata fields, and both prompt forms:
 
+`assignment_path` always names the spawned agent's own envelope, matching the
+same field in `run.json`; `parent_assignment_path` names the outer loopy
+assignment. The distinct names prevent a nested coordinator from confusing
+its own responsibility with its parent's.
+
 1. `authored_prompt` — exactly what the coordinator delegated; and
 2. `effective_prompt` — the authored prompt plus configured suffixes and the
    automatic ecosystem/output footers.

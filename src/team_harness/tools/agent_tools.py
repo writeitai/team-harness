@@ -39,7 +39,6 @@ _run_log: "RunLogWriter | None" = None
 _config: "Config | None" = None
 _ui: "ConsoleBase | None" = None
 _session_output_dir: str = ""
-_caller_context: CallerContext | None = None
 
 _output_cursors: dict[str, int] = {}
 _output_locks: dict[str, asyncio.Lock] = {}
@@ -284,12 +283,12 @@ def _prepare_agent_assignment(
             "delegated_role": delegated_role,
             "delegated_task_id": delegated_task_id,
             "delegated_objective": prompt,
-            "assignment_path": (
+            "assignment_path": str(assignment_path),
+            "parent_assignment_path": (
                 str(caller_context.parent_assignment_path)
                 if caller_context is not None
                 else None
             ),
-            "agent_assignment_path": str(assignment_path),
             "output_dir": str(output_dir),
             "relevant_state_paths": (
                 [str(path) for path in caller_context.relevant_state_paths]
@@ -728,7 +727,6 @@ def setup(
     config: "Config",
     ui: "ConsoleBase",
     session_output_dir: str = "",
-    caller_context: CallerContext | None = None,
 ) -> None:
     """Bind legacy module-level agent tools to one active harness run."""
 
@@ -737,13 +735,11 @@ def setup(
     global _config
     global _ui
     global _session_output_dir
-    global _caller_context
     _manager = manager
     _run_log = run_log
     _config = config
     _ui = ui
     _session_output_dir = session_output_dir
-    _caller_context = caller_context
     _output_cursors.clear()
     _output_locks.clear()
     _wait_stdout_cursors.clear()
@@ -995,15 +991,8 @@ async def spawn_agent(**kwargs: object) -> str:
         config=config,
         run_dir=run_dir,
         session_output_dir=_session_output_dir,
-        caller_context=_caller_context,
+        caller_context=None,
         kwargs=kwargs,
-    )
-    _inherit_nested_caller_context(
-        extra_env=extra_env,
-        agent_type=agent_type,
-        caller_context=_caller_context,
-        parent_harness_run_id=run_log.run_id,
-        assignment_path=assignment_path,
     )
     stdout_log, stderr_log = _worker_log_paths(
         run_dir=run_dir,

@@ -334,7 +334,9 @@ async def test_direct_spawn_writes_dynamic_assignment_and_effective_prompt(tmp_p
     assert assignment["delegated_task_id"] == "impl-auth-flow"
     assert assignment["expected_outputs"] == ["code changes", "test evidence"]
     assert assignment["state_responsibility"].startswith("Report state changes")
-    assert assignment["assignment_path"] == str(context.parent_assignment_path)
+    assert assignment["assignment_path"] == str(assignment_path)
+    assert assignment["parent_assignment_path"] == str(context.parent_assignment_path)
+    assert "agent_assignment_path" not in assignment
     assert assignment["authored_prompt"] == "Implement authentication"
     assert str(assignment_path) in assignment["effective_prompt"]
     assert str(context.parent_assignment_path) in assignment["effective_prompt"]
