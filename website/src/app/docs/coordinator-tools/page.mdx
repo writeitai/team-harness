@@ -45,7 +45,15 @@ Read and edit files. Paths may be relative or absolute — the file tools are **
 
 | Tool   | Purpose                                    |
 | ------ | ------------------------------------------ |
-| `bash` | Run a shell command (unsandboxed, `stdin=/dev/null`) |
+| `bash` | Run a foreground shell command (unsandboxed, `stdin=/dev/null`) |
+
+`bash` defaults to a 120-second whole-command deadline. For a known
+long-running batch, the coordinator can pass a positive named
+`timeout_seconds` value sized for the complete foreground operation. That
+outer deadline is separate from any per-item timeout flag understood by the
+command itself. Timeout or tool cancellation terminates and reaps the command's
+whole process group, including descendants; a timeout reports interruption,
+not semantic failure of the command's task.
 
 ## Task tracking
 

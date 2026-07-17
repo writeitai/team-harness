@@ -859,6 +859,13 @@ The coordinator model has access to these tools:
 
 **Task tracking:** `todo_write`, `todo_read`
 
+The `bash` tool runs one foreground command with a whole-command deadline. It
+defaults to 120 seconds for compatibility; a coordinator invoking a known
+long-running batch can pass a positive named `timeout_seconds` value sized for
+the complete batch. On timeout or cancellation, Team Harness terminates and
+reaps the command's process group, including descendants. This outer deadline
+is independent of timeout flags understood by the command itself.
+
 ## Agent Skills
 
 team-harness supports the [Agent Skills](https://agentskills.io) standard — a cross-tool format for giving AI agents specialized knowledge and workflows.
@@ -969,7 +976,8 @@ their generated agent id as the directory name.
 ## Trust model
 
 - **Skills** execute arbitrary Python with the harness process's full privileges. Treat skill directories as you would your `PATH`.
-- **`bash` tool** runs shell commands unsandboxed with `stdin=/dev/null`.
+- **`bash` tool** runs shell commands unsandboxed with `stdin=/dev/null`; its
+  timeout controls lifecycle, not permissions or semantic acceptance.
 - **Worker CLIs** are separate local processes that may read/write files in their assigned working directories.
 - The harness only sends coordinator task content and tool outputs to the configured API endpoint.
 

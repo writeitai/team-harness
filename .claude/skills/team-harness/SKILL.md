@@ -339,6 +339,12 @@ The coordinator has these tools available — useful when explaining what it wil
 - **Shell:** `bash`
 - **Task tracking:** `todo_write`, `todo_read`
 
+`bash` defaults to a 120-second whole-command deadline. For a known
+long-running foreground batch, pass a positive named `timeout_seconds` sized
+for the complete batch; timeout or cancellation cleans up the command's whole
+process group. This outer deadline is separate from timeouts inside the invoked
+program.
+
 It also discovers Agent Skills under `<cwd>/.agents/skills/` and `~/.agents/skills/` (project skills override global ones). Skill metadata is shown to the coordinator at startup and full instructions are fetched via `read_file` on demand.
 
 ## 8. Common gotchas
