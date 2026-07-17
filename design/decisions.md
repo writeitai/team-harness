@@ -175,3 +175,67 @@ a valueless option (the level never reached the worker either way; the old behav
 could make the CLI eat the next token as the option's value). Anyone adding a new
 injection surface to templates must extend `_recorded_model()`/`template_supports_effort()`
 so the audit fields keep telling the truth.
+
+## TH-D7. Embedded callers negotiate an explicit run and delegation contract
+
+**Decision.** team-harness exposes named caller capabilities and an additive
+`CallerContext`. A caller that selects the v1 contract supplies an absolute
+caller-owned trace root plus parent attempt/session/assignment identity. The
+harness writes one self-contained run-id child there and returns the canonical
+`run.json`, session-output, and generated-coordinator-input paths on success and
+structured failure. It persists generated coordinator system/user input before
+the first provider operation and automatically writes an assignment envelope
+for every direct spawn. Coordinators choose free-form delegated role, task id,
+expected outputs, state responsibility, model, effort, and topology; the harness
+records those choices but does not turn them into an allowlist or policy gate.
+
+Structured traces preserve the exact coordinator input, direct assignments,
+worker prompts, commands, stdout/stderr paths, and provider session identifiers.
+JSON artifacts are replaced atomically, and worker streams go directly to the
+canonical caller-owned log files. The final run snapshot awaits the worker
+watcher and provider session-id capture task, including its last stdout
+prefix/tail scan. Worker shutdown is bounded by the caller's configured natural
+exit timeout plus a named one-second SIGTERM grace period; the outer bound
+includes both so it does not preempt graceful termination. The retained
+watcher/capture phase separately uses the configured shutdown timeout. On
+timeout the harness uses the process-group id it created to SIGKILL any unreaped
+worker without depending on a process-table probe. That releases watchers
+blocked in `proc.wait()`; the harness then cancels and settles its own
+cancellation-cooperative watcher/capture tasks so `asyncio.run()` teardown does
+not inherit pending work. Exceptions and phase-specific timeouts are collected
+rather than allowed to bypass cleanup; their classes and exact messages are
+persisted because these are raw caller-owned traces, not sanitized export
+artifacts. `run.json` and `worker_sessions.json` are written first, then the SDK
+raises a structured `TeamHarnessError` containing their canonical caller-owned
+paths.
+
+The generated coordinator and worker footers name the harness run lineage. For
+the built-in `type=harness`, team-harness propagates a validated
+`TEAM_HARNESS_CALLER_CONTEXT` envelope. A nested coordinator gets its direct
+assignment, its own trace root, and the parent harness run id while retaining
+the same outer session/depth/workflow identity. This is lineage and context,
+not a new loop layer or a delegation constraint. Arbitrary workers that launch
+`th` independently are outside this automatic propagation contract.
+
+**Context.** Embedding consumers such as loopy-loop own a durable session tree,
+but team-harness previously kept the complete coordinator `run.json` in its
+global private directory while worker artifacts lived under caller output. The
+SDK returned only a run id, forcing consumers to guess internal paths and making
+ordinary success, recovery, usage, and future trace export disagree. The
+coordinator and workers also depended on prompt authors remembering outer-loop
+identity and absolute paths.
+
+**Consequences.** Capability names, not package-version guesses or signature
+inspection, are the compatibility boundary. Context-aware runs are
+self-contained and every direct agent has durable authored/effective input plus
+its place in the outer ecosystem. Accountability remains prompt-and-evidence
+based, consistent with TH-D1; no static agent graph, path ACL, model policy, or
+semantic acceptance gate is introduced. Legacy callers keep the old layout and
+the original three required `TeamHarnessResult` fields. In caller-context runs,
+persisted process identity names the worker process-group leader; wait, kill,
+session capture, and orphan reap cover that execution group. Captured artifacts
+are an exact operational record; the caller owns access, retention, and any
+transformation before external export.
+Nested harness lineage is automatic only on the explicit built-in harness spawn
+path, so the implementation does not guess process ancestry. Full contract:
+`design/designs/embedded-caller-run-and-spawn-contract.md`.

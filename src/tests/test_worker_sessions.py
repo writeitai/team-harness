@@ -151,14 +151,14 @@ def test_write_worker_sessions_manifest_records_failed_before_session_diagnostic
     stderr_log = tmp_path / "logs" / "agent_stderr.log"
     stdout_log.parent.mkdir()
     stdout_log.write_text("stream-json fragment")
-    stderr_log.write_text("TEST: synthetic auth failure")
+    stderr_log.write_text("TEST: synthetic worker failure")
     record = AgentRecord(
         id="agent_failed",
         agent_type="codex",
         cwd=str(tmp_path),
         prompt="Do a thing",
         full_prompt="Do a thing\n\nfooter",
-        command=["codex", "exec", "--api-key", "sk-secret123456"],
+        command=["codex", "exec", "--verbose"],
         spawned_at=datetime(2026, 4, 9, 12, 0, tzinfo=timezone.utc),
         finished_at=datetime(2026, 4, 9, 12, 0, 7, tzinfo=timezone.utc),
         exit_code=7,
@@ -179,7 +179,7 @@ def test_write_worker_sessions_manifest_records_failed_before_session_diagnostic
     assert worker["outcome"] == "failed_before_session"
     assert worker["exit_code"] == 7
     assert worker["elapsed_seconds"] == 7.0
-    assert worker["stderr_tail"] == "TEST: synthetic auth failure"
+    assert worker["stderr_tail"] == "TEST: synthetic worker failure"
     assert worker["stdout_tail"] == "stream-json fragment"
     assert "workers/agent_failed_invocation.json" in worker["invocation_path"]
     assert "workers/agent_failed_exit_code.txt" in worker["exit_code_path"]
@@ -195,7 +195,7 @@ def test_write_worker_sessions_manifest_records_failed_before_session_diagnostic
             tmp_path / "outputs" / "run_1" / "workers" / "agent_failed_invocation.json"
         ).read_text()
     )
-    assert invocation["command"] == ["codex", "exec", "--api-key", "[REDACTED]"]
+    assert invocation["command"] == ["codex", "exec", "--verbose"]
 
 
 def test_worker_marked_killed_with_zero_exit_is_reported_as_succeeded(tmp_path):

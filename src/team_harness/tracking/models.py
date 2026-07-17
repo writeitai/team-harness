@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 from pydantic import ConfigDict
@@ -56,6 +57,13 @@ class AgentRecord(BaseModel):
     requested_effort: str | None = None
     effective_model: str | None = None
     effective_effort: str | None = None
+    # Direct-spawn assignment contract. These fields are additive so records
+    # written before caller-contract v1 remain readable.
+    assignment_path: str | None = None
+    delegated_role: str | None = None
+    delegated_task_id: str | None = None
+    expected_outputs: list[str] = Field(default_factory=list)
+    state_responsibility: str | None = None
 
 
 class WorkerResumeInfo(BaseModel):
@@ -174,6 +182,9 @@ class RunRecord(BaseModel):
     # by pid + starttime) unless forced — guarding live runs from being reaped.
     parent_pid: int | None = None
     parent_starttime: str | None = None
+    caller_context: dict[str, Any] | None = None
+    capabilities: list[str] = Field(default_factory=list)
+    coordinator_input_path: str | None = None
     coordinator_retries: list[CoordinatorRetryRecord] = Field(default_factory=list)
     turns: list[TurnRecord] = Field(default_factory=list)
     agents: list[AgentRecord] = Field(default_factory=list)

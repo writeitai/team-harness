@@ -10,6 +10,23 @@ from team_harness.agents.process_identity import ProcessProbeError
 from team_harness.agents.process_identity import signal_group
 
 
+class FinalizationTimeoutError(TimeoutError):
+    """Describe a bounded lifecycle phase that did not finish in time."""
+
+    def __init__(
+        self, *, phase: str, timeout_s: float, unfinished_task_count: int
+    ) -> None:
+        """Record the phase, effective bound, and unfinished task count."""
+
+        self.phase = phase
+        self.timeout_s = timeout_s
+        self.unfinished_task_count = unfinished_task_count
+        super().__init__(
+            f"{phase} exceeded its {timeout_s:g}s finalization bound "
+            f"with {unfinished_task_count} unfinished task(s)"
+        )
+
+
 @dataclass
 class AgentState:
     id: str
@@ -33,7 +50,10 @@ class AgentState:
 
 class AgentManager:
     def __init__(self) -> None:
+        """Initialize an empty worker registry and retained finalization set."""
+
         self._agents: dict[str, AgentState] = {}
+        self._finalization_tasks: set[asyncio.Task[None]] = set()
 
     def register(self, state: AgentState) -> None:
         self._agents[state.id] = state
@@ -46,6 +66,77 @@ class AgentManager:
 
     def running_count(self) -> int:
         return sum(1 for state in self._agents.values() if state.status == "running")
+
+    def track_finalization_task(self, task: asyncio.Task[None]) -> None:
+        """Keep worker watcher/session-capture tasks alive through run finalization."""
+
+        self._finalization_tasks.add(task)
+
+    async def await_finalization_tasks(
+        self, *, timeout_s: float
+    ) -> tuple[BaseException, ...]:
+        """Await watcher/session-capture tasks within a shared time bound.
+
+        A task failure is returned to the run finalizer instead of escaping from
+        this method. If the shared deadline expires, unfinished tasks are
+        cancelled and settled, and a phase-specific ``FinalizationTimeoutError``
+        is returned. Only harness-owned watcher and capture tasks enter this
+        registry; both are cancellation-cooperative once worker processes have
+        been force-terminated by the run finalizer. The finalizer can therefore
+        persist both final snapshots without leaving tasks for
+        ``asyncio.run()`` teardown.
+        """
+
+        if timeout_s < 0:
+            raise ValueError("timeout_s must be greater than or equal to zero")
+
+        failures: list[BaseException] = []
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
+        while self._finalization_tasks:
+            tasks = tuple(self._finalization_tasks)
+            remaining_s = max(0.0, deadline - loop.time())
+            done, pending = await asyncio.wait(tasks, timeout=remaining_s)
+            self._finalization_tasks.difference_update(done)
+            for task in done:
+                try:
+                    failure = task.exception()
+                except asyncio.CancelledError as exc:
+                    failures.append(exc)
+                else:
+                    if failure is not None:
+                        failures.append(failure)
+            if not pending:
+                continue
+
+            # The run finalizer force-terminates unreaped worker groups before
+            # entering this phase, so proc.wait() can complete. Cancel any
+            # other overdue harness-owned capture work and fully settle it;
+            # leaving tasks pending would merely move the wedge to
+            # asyncio.run() teardown.
+            overdue = set(pending)
+            overdue.update(self._finalization_tasks)
+            self._finalization_tasks.clear()
+            unfinished_task_count = sum(not task.done() for task in overdue)
+            for task in overdue:
+                if not task.done():
+                    task.cancel(msg="worker finalization deadline expired")
+            results = await asyncio.gather(*overdue, return_exceptions=True)
+            failures.extend(
+                result
+                for result in results
+                if isinstance(result, BaseException)
+                and not isinstance(result, asyncio.CancelledError)
+            )
+            failures.append(
+                FinalizationTimeoutError(
+                    phase="worker watcher/session-capture phase",
+                    timeout_s=timeout_s,
+                    unfinished_task_count=unfinished_task_count,
+                )
+            )
+            break
+        return tuple(failures)
 
     def poll_exit_codes(self) -> None:
         for state in self._agents.values():
@@ -73,6 +164,8 @@ class AgentManager:
         return dict(zip(ids, results, strict=True))
 
     def kill(self, agent_id: str) -> None:
+        """Terminate a live worker execution group and mark it killed."""
+
         state = self._agents[agent_id]
         if state.proc.returncode is not None:
             return
@@ -81,7 +174,7 @@ class AgentManager:
         # signal too. The leader-only terminate stays as belt-and-braces (and
         # as the sole path for states without a pgid, e.g. test doubles).
         if state.pgid is not None:
-            signal_group(state.pgid, signal.SIGTERM)
+            signal_group(pgid=state.pgid, sig=signal.SIGTERM)
         try:
             state.proc.terminate()
         except ProcessLookupError:
@@ -114,10 +207,12 @@ class AgentManager:
             return state.proc.returncode is not None
 
         async def _wait_members_gone(timeout_s: float) -> bool | None:
+            """Poll until the group disappears, times out, or cannot be probed."""
+
             deadline = asyncio.get_event_loop().time() + timeout_s
             while True:
                 try:
-                    if not group_members(state.pgid):  # type: ignore[arg-type]
+                    if not group_members(pgid=state.pgid):  # type: ignore[arg-type]
                         return True
                 except ProcessProbeError:
                     return None
@@ -126,19 +221,19 @@ class AgentManager:
                 await asyncio.sleep(poll_interval_s)
 
         try:
-            members = group_members(state.pgid)
+            members = group_members(pgid=state.pgid)
         except ProcessProbeError:
             return False
         if not members:
             return True
         # Polite TERM first — the sweep path (leader already exited, helpers
         # survive) reaches here without anyone having signalled the group yet.
-        signal_group(state.pgid, signal.SIGTERM)
+        signal_group(pgid=state.pgid, sig=signal.SIGTERM)
         gone = await _wait_members_gone(term_wait_s)
         if gone is None:
             return False
         if gone:
             return True
-        signal_group(state.pgid, signal.SIGKILL)
+        signal_group(pgid=state.pgid, sig=signal.SIGKILL)
         gone = await _wait_members_gone(kill_wait_s)
         return bool(gone)

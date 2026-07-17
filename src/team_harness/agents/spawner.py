@@ -14,6 +14,7 @@ from team_harness.agents.template import build_provider_env
 from team_harness.agents.template import build_template_env
 from team_harness.agents.template import template_supports_effort
 from team_harness.agents.template import template_uses_generated_uuid
+from team_harness.caller_contract import INHERITED_CALLER_CONTEXT_ENV
 from team_harness.config import Config
 
 
@@ -52,9 +53,15 @@ async def spawn(
     mode: str = "fresh",
     resume_session_id: str | None = None,
 ) -> SpawnResult:
+    """Launch one worker in its own process group with durable output files.
+
+    The returned record contains the exact executed command, provider session
+    hints, process identity for recovery, and effective model/effort audit data.
+    """
+
     template = resolve_template(agent_type=agent_type, config=config)
     generated_uuid: str | None = None
-    if template_uses_generated_uuid(template):
+    if template_uses_generated_uuid(template=template):
         generated_uuid = str(uuid.uuid4())
 
     # Effective model: explicit spawn argument wins over the template's
@@ -65,7 +72,7 @@ async def spawn(
     # Effective effort mirrors the model rule, but is only real when the
     # template can express it in argv; otherwise nothing is injected.
     effective_effort = effort if effort is not None else template.reasoning_effort
-    if not template_supports_effort(template):
+    if not template_supports_effort(template=template):
         effective_effort = None
 
     command = build_command(
@@ -96,17 +103,24 @@ async def spawn(
     #   3. template.model_env_vars — per-model, dynamic; for Claude Code's
     #                                three "main model" env vars etc.
     #   4. caller extra_env         — explicit override for tests/SDK users.
-    provider_env = build_provider_env(template)
-    template_env = build_template_env(template, effective_model=effective_model)
+    provider_env = build_provider_env(template=template)
+    template_env = build_template_env(
+        template=template, effective_model=effective_model
+    )
     merged_env = {**os.environ, **provider_env, **template_env, **(extra_env or {})}
+    if extra_env is None or INHERITED_CALLER_CONTEXT_ENV not in extra_env:
+        # The environment belongs to the harness coordinator process. A stale
+        # inherited envelope would describe that coordinator's assignment, not
+        # an arbitrary child worker's. Agent tools explicitly inject a newly
+        # derived value only for ``type=harness`` descendants.
+        merged_env.pop(INHERITED_CALLER_CONTEXT_ENV, None)
 
     stdout_file = stdout_path.open("wb")
     stderr_file = stderr_path.open("wb")
     try:
-        # start_new_session makes the worker the leader of its own process group
-        # (pgid == pid), so the whole worker subtree — including any helpers the
-        # CLI spawns — is one killable/watchable unit that survives the parent.
-        # Identity is persisted at spawn time via the run log (TH-D5).
+        # The worker is the process-group leader and writes its streams
+        # directly to the caller-owned log files. Descendants inherit both the
+        # group and file descriptors, preserving crash-recovery visibility.
         proc = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(cwd),
@@ -122,9 +136,9 @@ async def spawn(
     # Identity capture: retry once while the child is definitely still ours
     # (unreaped) — without a starttime the worker can later only be waited on,
     # never verifiably killed (probe verdict "unverifiable").
-    starttime = capture_starttime(proc.pid)
+    starttime = capture_starttime(pid=proc.pid)
     if starttime is None and proc.returncode is None:
-        starttime = capture_starttime(proc.pid)
+        starttime = capture_starttime(pid=proc.pid)
     return SpawnResult(
         proc=proc,
         command=command,

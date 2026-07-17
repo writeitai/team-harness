@@ -1,10 +1,9 @@
 from datetime import datetime
 from datetime import timezone
-import json
 import os
 from pathlib import Path
 import re
-import tempfile
+from typing import Any
 
 from team_harness.agents.process_identity import capture_starttime
 from team_harness.tracking.models import AgentRecord
@@ -13,6 +12,7 @@ from team_harness.tracking.models import RunFailureRecord
 from team_harness.tracking.models import RunRecord
 from team_harness.tracking.models import ToolCallRecord
 from team_harness.tracking.models import TurnRecord
+from team_harness.tracking.persistence import write_json_atomic
 
 _AGENT_ID_RE = re.compile(r"^agent_[a-zA-Z0-9]+$")
 _MAX_COORDINATOR_RETRY_RECORDS = 100
@@ -29,7 +29,12 @@ class RunLogWriter:
         model: str,
         api_base: str,
         session_output_dir: str | None = None,
+        caller_context: dict[str, Any] | None = None,
+        capabilities: list[str] | None = None,
+        coordinator_input_path: str | None = None,
     ) -> None:
+        """Create and immediately persist the durable record for one run."""
+
         self.path = run_dir / "run.json"
         parent_pid = os.getpid()
         self._log = RunRecord(
@@ -42,7 +47,10 @@ class RunLogWriter:
             # Recorded so a recovery process can verify whether this run's
             # owner is still alive before reaping its workers (TH-D5).
             parent_pid=parent_pid,
-            parent_starttime=capture_starttime(parent_pid),
+            parent_starttime=capture_starttime(pid=parent_pid),
+            caller_context=caller_context,
+            capabilities=capabilities or [],
+            coordinator_input_path=coordinator_input_path,
         )
         self._flush()
 
@@ -132,6 +140,12 @@ class RunLogWriter:
             ]
         self._flush()
 
+    def update_api_base(self, api_base: str) -> None:
+        """Record the effective client endpoint after client construction."""
+
+        self._log.api_base = api_base
+        self._flush()
+
     def finalize(
         self, error: str | None = None, failure: RunFailureRecord | None = None
     ) -> None:
@@ -144,21 +158,10 @@ class RunLogWriter:
         self._flush()
 
     def _flush(self) -> None:
+        """Atomically persist the current in-memory run snapshot."""
+
         # Atomic write: run.json is the crash-durable record of what this run
         # launched (TH-D5 reads it to reap orphans), so a crash mid-write must
         # never leave it truncated. The temp name is unique per write so a
         # concurrent writer (e.g. a forced reap) cannot race on one path.
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temp_name = tempfile.mkstemp(
-            dir=self.path.parent, prefix=self.path.name + ".", suffix=".tmp"
-        )
-        try:
-            with os.fdopen(fd, "w") as handle:
-                json.dump(self._log.model_dump(mode="json"), handle, indent=2)
-            os.replace(temp_name, self.path)
-        except BaseException:
-            try:
-                os.unlink(temp_name)
-            except OSError:
-                pass
-            raise
+        write_json_atomic(path=self.path, payload=self._log.model_dump(mode="json"))

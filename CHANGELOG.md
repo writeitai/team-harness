@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.5.0] - 2026-07-16
+
+### Added
+
+- **Explicit embedded-caller contract (TH-D7).** The public `CallerContext`,
+  `get_capabilities()`, and `TEAM_HARNESS_CAPABILITIES` APIs let consumers
+  capability-check `caller_run_record_v1`, `coordinator_input_v1`,
+  `spawn_assignment_v1`, and `nested_caller_context_v1` without guessing from
+  the package version. Context-aware SDK runs keep canonical `run.json`,
+  generated coordinator input, worker artifacts, and direct-agent assignments
+  beneath a caller-owned absolute trace root.
+- `TeamHarnessResult` now returns `run_json_path`, `session_output_dir`, and
+  `coordinator_input_path`; structured `TeamHarnessError.detail` exposes the
+  same paths. Existing three-argument result construction remains valid.
+- Generated coordinator system/user input is written atomically before client
+  construction or model discovery. The automatic system footer supplies the
+  outer attempt/session identity, workflow role, absolute assignment, run, and
+  relevant-state paths. Context-aware config/prompt preflight failures still
+  create a structured run and mark the input artifact `incomplete`; legacy
+  callers keep their existing exception behavior.
+- Every direct spawn gets `agents/<agent-id>/agent_assignment.json` and an
+  effective prompt footer. `spawn_agent` accepts dynamic `delegated_role`,
+  `delegated_task_id`, `expected_outputs`, and `state_responsibility` metadata;
+  none are enums or execution gates.
+- Worker stdout/stderr is captured directly under the canonical run directory.
+  Provider session-id capture tasks are retained and awaited through their
+  final stdout prefix/tail scan before final `run.json` and
+  `worker_sessions.json` snapshots.
+- Coordinator and direct-worker footers name the harness run id explicitly.
+  Built-in `type=harness` descendants also receive a validated
+  `TEAM_HARNESS_CALLER_CONTEXT` envelope: the same outer attempt/session/layer
+  identity, their own assignment and nested trace root, and the parent harness
+  run id. This records lineage without restricting dynamic delegation.
+
+  Consumer impact: additive for callers that do not pass `caller_context`.
+  Context-aware consumers should negotiate all required capability names and
+  consume returned paths instead of reconstructing private locations.
+
+### Fixed
+
+- Retained worker watcher or provider-session final-scan task failures no
+  longer escape before run finalization. Worker shutdown now uses the configured
+  natural-exit timeout plus a named one-second SIGTERM grace; retained
+  watcher/capture work separately uses the configured timeout. The outer bound
+  includes the grace, so responsive workers do not lose it to an outer timeout.
+  Overdue work triggers SIGKILL for any unreaped trusted worker group before
+  harness-owned lifecycle tasks are cancelled and settled. A failed
+  process-table probe can therefore no longer leave `proc.wait()` pending into
+  `asyncio.run()` teardown. The harness records phase-specific timeouts and
+  exact lifecycle exception messages, writes `run.json` and
+  `worker_sessions.json`, and then exposes the failure through the normal
+  structured `TeamHarnessError` with canonical caller-owned artifact paths
+  (TH-D7).
+
 ## [0.4.0] - 2026-07-14
 
 ### Added
@@ -312,7 +368,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project-local configuration via `th init` (config.toml, coordinator system message, worker suffix and footer templates).
 - `th` CLI entry point (`team-harness` retained as compatibility alias).
 
-[Unreleased]: https://github.com/writeitai/team-harness/compare/v0.2.8...HEAD
+[Unreleased]: https://github.com/writeitai/team-harness/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/writeitai/team-harness/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/writeitai/team-harness/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/writeitai/team-harness/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/writeitai/team-harness/compare/v0.2.8...v0.3.0
 [0.2.8]: https://github.com/writeitai/team-harness/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/writeitai/team-harness/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/writeitai/team-harness/compare/v0.2.5...v0.2.6
