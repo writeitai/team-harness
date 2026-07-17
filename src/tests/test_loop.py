@@ -19,6 +19,7 @@ from team_harness.coordinator.loop import _perform_manual_compaction
 from team_harness.coordinator.loop import _retry_sleep_seconds
 from team_harness.coordinator.loop import _should_compact
 from team_harness.coordinator.loop import run_one_turn
+from team_harness.tools import fs_tools
 from team_harness.tools.registry import ToolRegistry
 from team_harness.tracking.context import get_auto_compact_threshold
 from team_harness.tracking.run_log import RunLogWriter
@@ -148,6 +149,81 @@ async def test_run_one_turn_executes_tool_calls_first(tmp_path, config, ctx, ui)
     assert called == ["a", "b", "c"]
     assert len(messages) == 6
     assert ui.turns == [0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_schema", "tool_fn", "tool_name", "continuation_text"),
+    [
+        (
+            fs_tools.READ_FILE_SCHEMA,
+            fs_tools.read_file,
+            "read_file",
+            f"continue with offset_chars={fs_tools.READ_FILE_DEFAULT_LIMIT_CHARS}",
+        ),
+        (
+            fs_tools.READ_NEW_FILE_CONTENT_SCHEMA,
+            fs_tools.read_new_file_content,
+            "read_new_file_content",
+            "call again with the same path",
+        ),
+    ],
+)
+async def test_run_one_turn_keeps_large_file_tool_result_bounded(
+    tmp_path, config, ctx, ui, tool_schema, tool_fn, tool_name, continuation_text
+):
+    """Neither coordinator file reader can amplify the next model request."""
+    fs_tools.setup_fs()
+    source_path = tmp_path / "large-report.json"
+    source_path.write_text(data="x" * 2_000_000)
+    run_log = make_run_log(tmp_path, config, run_id=f"run_bounded_{tool_name}")
+    registry = ToolRegistry()
+    registry.register(schema=tool_schema, fn=tool_fn)
+    client = RecordingClient(
+        responses=[
+            make_response(
+                content="inspect report",
+                tool_calls=[(tool_name, {"path": str(source_path)}, "read-1")],
+                finish_reason="stop",
+            ),
+            make_response(content="done", tool_calls=None, finish_reason="stop"),
+        ]
+    )
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+
+    should_continue, last_logged = await run_one_turn(
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=client,
+        ctx=ctx,
+        turn_index=0,
+        last_logged_index=0,
+    )
+    page_result = messages[-1]["content"]
+    assert should_continue is True
+    assert len(page_result) < fs_tools.READ_FILE_DEFAULT_LIMIT_CHARS + 256
+    assert continuation_text in page_result
+    assert source_path.stat().st_size == 2_000_000
+
+    should_continue, _ = await run_one_turn(
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=client,
+        ctx=ctx,
+        turn_index=1,
+        last_logged_index=last_logged,
+    )
+
+    assert should_continue is False
+    assert client.calls[1]["messages"][-1]["content"] == page_result
+    run_data = json.loads((tmp_path / "run.json").read_text())
+    assert run_data["turns"][0]["tool_calls"][0]["result"] == page_result
 
 
 @pytest.mark.asyncio

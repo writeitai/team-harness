@@ -31,7 +31,7 @@ Read and edit files. Paths may be relative or absolute — the file tools are **
 
 | Tool                     | Purpose                                          |
 | ------------------------ | ------------------------------------------------ |
-| `read_file`              | Read a file (also used to read skill instructions) |
+| `read_file`              | Read one bounded page of a file (also used for skills) |
 | `write_file`             | Write a new file or overwrite an existing one     |
 | `append_file`            | Append to a file                                  |
 | `edit_file`              | Replace a string in a file                        |
@@ -39,7 +39,18 @@ Read and edit files. Paths may be relative or absolute — the file tools are **
 | `ls`                     | List a directory                                  |
 | `glob`                   | Match files by glob pattern                       |
 | `grep`                   | Search file contents                              |
-| `read_new_file_content`  | Read content produced since a prior read          |
+| `read_new_file_content`  | Read one bounded FIFO page produced since a prior read |
+
+Both file-content readers return small reads unchanged and cap each larger
+result at 32,768 characters and 32 KiB after UTF-8 encoding, plus short
+pagination metadata. A paged `read_file` result includes its exact character
+range, end-of-file status, and next `offset_chars`; request another page with
+named `offset_chars` and an optional smaller named `limit_chars`.
+`read_new_file_content` keeps an isolated FIFO cursor per run and tells the
+coordinator to call again with the same path while unread backlog remains. The
+fixed maxima prevent one file read from consuming the remaining coordinator
+context. For a large structured artifact, the coordinator may instead choose a
+focused `jq` projection through `bash`.
 
 ## Shell
 
