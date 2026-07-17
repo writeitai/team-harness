@@ -55,6 +55,7 @@ SPAWN_AGENT_KEYS = {
     "model",
     "effort",
     "mode",
+    "resume_from_agent_id",
     "resume_from_session_id",
     "flags",
     "env",
@@ -313,10 +314,75 @@ def _prepare_agent_assignment(
 
 
 def _validate_spawn_agent_kwargs(kwargs: Mapping[str, object]) -> None:
+    """Reject coordinator-supplied fields outside the public spawn schema."""
+
     unknown = sorted(set(kwargs) - SPAWN_AGENT_KEYS)
     if unknown:
         msg = f"unknown spawn_agent fields: {', '.join(unknown)}"
         raise ValueError(msg)
+
+
+def _resolve_resume_session_id(
+    *, manager: "AgentManager", agent_type: str, kwargs: Mapping[str, object]
+) -> tuple[str | None, str | None]:
+    """Resolve a same-run agent reference to its captured provider session.
+
+    ``resume_from_agent_id`` is the safe live-run interface: the coordinator
+    supplies an agent id returned by ``spawn_agent``/``list_agents``, and the
+    harness resolves the vendor session id it captured in memory. Raw
+    ``resume_from_session_id`` remains available for ids read from a finalized
+    earlier run. Invalid or ambiguous requests fail before a subprocess or
+    agent record is created.
+    """
+
+    raw_agent_id = kwargs.get("resume_from_agent_id")
+    raw_session_id = kwargs.get("resume_from_session_id")
+    if raw_agent_id is not None and raw_session_id is not None:
+        return (
+            None,
+            "ERROR: resume_from_agent_id and resume_from_session_id are "
+            "mutually exclusive",
+        )
+    if raw_agent_id is None:
+        if raw_session_id is not None and str(kwargs.get("mode", "fresh")) != "resume":
+            return None, "ERROR: resume_from_session_id requires mode='resume'"
+        return (str(raw_session_id) if raw_session_id is not None else None, None)
+
+    if str(kwargs.get("mode", "fresh")) != "resume":
+        return None, "ERROR: resume_from_agent_id requires mode='resume'"
+    source_agent_id = str(raw_agent_id).strip()
+    if not source_agent_id:
+        return None, "ERROR: resume_from_agent_id must be a non-empty agent id"
+
+    manager.poll_exit_codes()
+    try:
+        source = manager.get(agent_id=source_agent_id)
+    except KeyError:
+        return (
+            None,
+            f"ERROR: resume source agent {source_agent_id!r} does not exist "
+            "in this harness run",
+        )
+    if source.agent_type != agent_type:
+        return (
+            None,
+            f"ERROR: resume source agent {source_agent_id!r} has type "
+            f"{source.agent_type!r}, not requested type {agent_type!r}",
+        )
+    if source.proc.returncode is None or source.status == "running":
+        return (
+            None,
+            f"ERROR: resume source agent {source_agent_id!r} is still running; "
+            "wait for it to become terminal before resuming",
+        )
+    if source.session_id is None:
+        return (
+            None,
+            f"ERROR: resume source agent {source_agent_id!r} has no captured "
+            "provider session id yet; wait for session capture or use "
+            "resume_from_session_id from a finalized worker_sessions.json",
+        )
+    return source.session_id, None
 
 
 def _inherit_nested_caller_context(
@@ -673,7 +739,11 @@ LIST_AGENTS_SCHEMA = {
     "type": "function",
     "function": {
         "name": "list_agents",
-        "description": "List all agents in the current run.",
+        "description": (
+            "List all agents in the current run. A terminal agent id may be "
+            "passed to spawn_agent(resume_from_agent_id=...) for safe "
+            "same-run session resume."
+        ),
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
@@ -862,7 +932,21 @@ def spawn_agent_schema(
                         "type": "string",
                         "description": (
                             "Provider session ID to resume when mode == 'resume'. "
-                            "Use IDs captured in worker_sessions.json."
+                            "Use this for an ID read from a finalized current or "
+                            "prior worker_sessions.json. Mutually exclusive with "
+                            "resume_from_agent_id."
+                        ),
+                    },
+                    "resume_from_agent_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": (
+                            "Agent ID from this live harness run to resume when "
+                            "mode == 'resume'. Team-harness resolves the captured "
+                            "provider session internally. The source must be "
+                            "terminal, have the same agent type, and have a "
+                            "captured session ID. It is mutually exclusive with "
+                            "resume_from_session_id."
                         ),
                     },
                     "flags": {
@@ -969,6 +1053,12 @@ async def spawn_agent(**kwargs: object) -> str:
     )
     if effort_error is not None:
         return effort_error
+    spawn_mode = str(kwargs.get("mode", "fresh"))
+    resume_session_id, resume_error = _resolve_resume_session_id(
+        manager=manager, agent_type=agent_type, kwargs=kwargs
+    )
+    if resume_error is not None:
+        return resume_error
 
     current_depth = int(os.environ.get("TEAM_HARNESS_DEPTH", "0"))
     extra_env = {**(env or {}), "TEAM_HARNESS_DEPTH": str(current_depth + 1)}
@@ -1014,12 +1104,8 @@ async def spawn_agent(**kwargs: object) -> str:
         allowed_agents=agents if agent_type == "harness" else None,
         stdout_path=stdout_log,
         stderr_path=stderr_log,
-        mode=str(kwargs.get("mode", "fresh")),
-        resume_session_id=(
-            str(kwargs["resume_from_session_id"])
-            if kwargs.get("resume_from_session_id") is not None
-            else None
-        ),
+        mode=spawn_mode,
+        resume_session_id=resume_session_id,
     )
     state = AgentState(
         id=agent_id,
@@ -1407,6 +1493,12 @@ def build_agent_tool_bindings(
         )
         if effort_error is not None:
             return effort_error
+        spawn_mode = str(kwargs.get("mode", "fresh"))
+        resume_session_id, resume_error = _resolve_resume_session_id(
+            manager=manager, agent_type=agent_type, kwargs=kwargs
+        )
+        if resume_error is not None:
+            return resume_error
 
         current_depth = int(os.environ.get("TEAM_HARNESS_DEPTH", "0"))
         extra_env = {**(env or {}), "TEAM_HARNESS_DEPTH": str(current_depth + 1)}
@@ -1459,12 +1551,8 @@ def build_agent_tool_bindings(
             allowed_agents=agents_arg if agent_type == "harness" else None,
             stdout_path=stdout_log,
             stderr_path=stderr_log,
-            mode=str(kwargs.get("mode", "fresh")),
-            resume_session_id=(
-                str(kwargs["resume_from_session_id"])
-                if kwargs.get("resume_from_session_id") is not None
-                else None
-            ),
+            mode=spawn_mode,
+            resume_session_id=resume_session_id,
         )
         state = AgentState(
             id=agent_id,

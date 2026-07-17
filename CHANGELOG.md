@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-17
+
+### Added
+
+- `spawn_agent(mode="resume", resume_from_agent_id="<agent-id>")` now provides
+  a safe same-run continuation interface. Team-harness resolves the captured
+  provider session from the live `AgentManager` and requires a terminal,
+  same-type source with a captured session id. Raw
+  `resume_from_session_id` remains available for ids read from finalized
+  `worker_sessions.json` files.
+
+### Fixed
+
+- Live coordinators no longer have to guess a vendor session id that is not yet
+  published in `worker_sessions.json`. Invalid, ambiguous, cross-type,
+  still-running, or uncaptured same-run references fail before creating an
+  assignment, subprocess, or agent record. Supplying either resume selector
+  without `mode="resume"` now fails instead of silently launching a fresh
+  worker. A provider-rejected resume remains one visible failed worker and is
+  never silently retried fresh (TH-D4).
+
+  Consumer impact: `resume_from_agent_id` is additive, and existing raw-id
+  resumes that already set `mode="resume"` keep their behavior. Deliberate
+  behavior change: a raw session id supplied without resume mode now returns a
+  coordinator-visible error instead of silently launching a fresh worker.
+  Coordinators should prefer `resume_from_agent_id` for workers spawned in the
+  current harness run.
+
 ## [0.5.0] - 2026-07-16
 
 ### Added
@@ -368,7 +396,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project-local configuration via `th init` (config.toml, coordinator system message, worker suffix and footer templates).
 - `th` CLI entry point (`team-harness` retained as compatibility alias).
 
-[Unreleased]: https://github.com/writeitai/team-harness/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/writeitai/team-harness/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/writeitai/team-harness/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/writeitai/team-harness/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/writeitai/team-harness/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/writeitai/team-harness/compare/v0.3.0...v0.3.1
