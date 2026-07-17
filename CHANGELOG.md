@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-17
+
+### Added
+
+- The coordinator `bash` tool accepts a positive named `timeout_seconds` for
+  known long-running foreground commands. The historical 120-second default
+  and timeout error remain compatible, while callers can now size the outer
+  deadline for a complete sequential batch instead of being cut off by a
+  hidden fixed limit (TH-D8).
+
+### Fixed
+
+- Timed-out, cancelled, or failed shell tool calls now terminate and reap the
+  command's complete process group after a short SIGTERM grace, so child
+  processes cannot silently continue after the coordinator call ends. Tool
+  arguments and results continue to use the existing `run.json` trace.
+
+  Consumer impact: the tool-schema change is additive. Existing calls retain
+  the 120-second behavior; consumers with legitimate long commands should pass
+  an explicit whole-command deadline and keep the command in the foreground.
+
 ## [0.5.1] - 2026-07-17
 
 ### Added

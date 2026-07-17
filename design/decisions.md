@@ -258,3 +258,37 @@ transformation before external export.
 Nested harness lineage is automatic only on the explicit built-in harness spawn
 path, so the implementation does not guess process ancestry. Full contract:
 `design/designs/embedded-caller-run-and-spawn-contract.md`.
+
+## TH-D8. Coordinator shell commands have explicit whole-command deadlines
+
+**Decision.** The coordinator's `bash` tool keeps its historical 120-second
+default and accepts an optional positive integer `timeout_seconds`. That value
+is the deadline for the entire foreground shell command, including all of its
+sequential child work. There is no arbitrary maximum: a caller must be able to
+derive a truthful batch deadline from the work it is invoking. Every command
+starts in a new process group. Timeout, tool cancellation, or another
+post-spawn execution failure sends SIGTERM to the group, waits one named short
+grace period, then sends SIGKILL if the group leader remains and reaps the shell
+before the tool returns or re-raises. The leader check prevents a freed process
+group id from being signalled after the operating system recycles it.
+
+**Context.** The old fixed 120-second deadline was shorter than legitimate
+foreground tools while being invisible to their own timeout settings. For
+example, an `eval-banana` command may run five or eighty-four checks in
+sequence, each with its own judge timeout. Giving each judge 10,800 seconds
+does not extend the outer shell call. The shell used to terminate that batch at
+120 seconds, after partial prompt files but before the aggregate report, so a
+coordinator could neither finish the evaluation nor publish an honest verdict.
+Backgrounding the command and guessing its PID would weaken lifecycle cleanup
+and output/error attribution rather than fix the contract.
+
+**Consequences.** Existing calls are byte-compatible at the default, including
+the timeout error text. A coordinator that knowingly invokes a long batch must
+pass a named deadline large enough for the complete foreground operation; the
+tool-call arguments and result already remain in `run.json`. A timeout is an
+interrupted command, not evidence that the command's semantic task failed.
+Because a hard parent-process crash can still outlive in-memory tool cleanup,
+durable registration and recovery of arbitrary shell commands remains a
+separate future concern; this decision does not turn shell commands into
+TH-D2 workers. Full contract:
+`design/designs/coordinator-shell-command-lifecycle.md`.
