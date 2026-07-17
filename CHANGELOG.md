@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-07-17
+
+### Changed
+
+- Coordinator `read_file` and `read_new_file_content` calls are now bounded to
+  32,768 file-content characters and 32 KiB after UTF-8 encoding, plus short
+  pagination metadata, per tool result. `read_file` supports named
+  `offset_chars` / `limit_chars` pagination; the incremental reader preserves
+  FIFO backlog and asks for another same-path call. Small reads retain their
+  exact historical return value (TH-D9).
+
+### Fixed
+
+- Reading a large raw artifact can no longer inject the complete file into one
+  coordinator turn and bypass context compaction. Prompts and caller envelopes
+  continue to carry absolute artifact paths; the coordinator independently
+  chooses which bounded pages or compact shell projections to inspect.
+
+  Consumer impact: existing small calls are unchanged. Calls that relied on
+  receiving more than 32,768 characters or 32 KiB after UTF-8 encoding at once
+  must follow the returned continuation offset, call the incremental reader
+  again, or use a focused projection such as `jq`.
+
 ## [0.5.2] - 2026-07-17
 
 ### Added
@@ -417,7 +440,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project-local configuration via `th init` (config.toml, coordinator system message, worker suffix and footer templates).
 - `th` CLI entry point (`team-harness` retained as compatibility alias).
 
-[Unreleased]: https://github.com/writeitai/team-harness/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/writeitai/team-harness/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/writeitai/team-harness/compare/v0.5.2...v0.5.3
+[0.5.2]: https://github.com/writeitai/team-harness/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/writeitai/team-harness/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/writeitai/team-harness/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/writeitai/team-harness/compare/v0.3.1...v0.4.0

@@ -24,6 +24,7 @@ from team_harness.harness import TeamHarness
 from team_harness.harness import TeamHarnessError
 from team_harness.harness import TeamHarnessResult
 from team_harness.tools import agent_tools
+from team_harness.tools import fs_tools
 from team_harness.tools.agent_tools import build_agent_tool_bindings
 from team_harness.tools.fs_tools import build_fs_tool_bindings
 from team_harness.tools.todo_tools import build_todo_tool_bindings
@@ -905,6 +906,36 @@ async def test_fs_tool_bindings_isolate_cursor_state(tmp_path):
 
     result_b2 = await read_new_b(path=str(test_file))
     assert result_b2 == "line2\n"
+
+
+@pytest.mark.asyncio
+async def test_fs_tool_bindings_independently_page_large_incremental_files(tmp_path):
+    """Each binding set retains an isolated FIFO cursor across bounded pages."""
+    bindings_a = build_fs_tool_bindings()
+    bindings_b = build_fs_tool_bindings()
+    test_file = tmp_path / "large-progress.txt"
+    first_page = "x" * fs_tools.READ_FILE_MAX_CONTENT_BYTES
+    test_file.write_text(data=first_page + "tail")
+    read_new_a = next(
+        fn
+        for schema, fn in bindings_a
+        if schema["function"]["name"] == "read_new_file_content"
+    )
+    read_new_b = next(
+        fn
+        for schema, fn in bindings_b
+        if schema["function"]["name"] == "read_new_file_content"
+    )
+
+    first_a = await read_new_a(path=str(test_file))
+    first_b = await read_new_b(path=str(test_file))
+    second_a = await read_new_a(path=str(test_file))
+    second_b = await read_new_b(path=str(test_file))
+
+    assert first_a == first_b
+    assert "call again with the same path" in first_a
+    assert second_a == "tail"
+    assert second_b == "tail"
 
 
 # ---------------------------------------------------------------------------

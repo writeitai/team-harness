@@ -292,3 +292,45 @@ durable registration and recovery of arbitrary shell commands remains a
 separate future concern; this decision does not turn shell commands into
 TH-D2 workers. Full contract:
 `design/designs/coordinator-shell-command-lifecycle.md`.
+
+## TH-D9. Coordinator artifact reads are path-driven, bounded, and pageable
+
+**Decision.** Caller envelopes and prompts provide absolute artifact paths, not
+artifact contents. The two coordinator tools that can return general file
+content are bounded at that path boundary:
+
+- `read_file` returns at most 32,768 decoded characters and 32 KiB after UTF-8
+  encoding, plus short metadata. Its named `offset_chars` and `limit_chars`
+  arguments provide explicit random-access pagination.
+- `read_new_file_content` returns at most the same content limits from its
+  per-run append cursor. It preserves unread backlog in FIFO order and tells
+  the coordinator to call again with the same path when more is available.
+
+Both tools report the range returned by a partial page and never permit a
+content page above either fixed maximum. Small reads still return their exact
+contents without a wrapper. The complete source file remains untouched and
+available for further pages or a coordinator-chosen focused projection such
+as `jq`.
+
+**Context.** A loopy-loop eval runner received only the absolute path to a
+1.9 MiB canonical report, then reasonably called `read_file` to inspect it.
+The old tool returned the complete file. Because the report embedded verbose
+judge transcripts, that one result expanded the next coordinator request past
+the model's effective context limit. The five checks had already passed, but
+the coordinator failed before it could publish the receipt and goal-check
+output. Context tracking could not compact between a tool result and its
+required follow-up request, so path-only prompting was not sufficient while
+the file tool itself was unbounded. Review of the repair found that
+`read_new_file_content` had the same risk on its first call: its cursor began at
+zero and it read to EOF. Bounding only `read_file` would therefore have left a
+second core path for the same failure.
+
+**Consequences.** The coordinator remains autonomous: the harness does not
+choose semantic fields, summarize evidence, or inject file contents before a
+tool call. It only makes each read fit the transport it must traverse. Agents
+may page sequentially, request a smaller page, grep for a target, or run a
+structured projection. Existing small-read consumers are byte-compatible;
+consumers that expected one call to return more than 32,768 characters or
+32 KiB after UTF-8 encoding must follow `read_file`'s continuation offset or
+call `read_new_file_content` again with the same path. Full contract:
+`design/designs/bounded-coordinator-file-reading.md`.

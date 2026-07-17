@@ -855,6 +855,18 @@ The coordinator model has access to these tools:
 
 **File system:** `read_file`, `write_file`, `append_file`, `edit_file`, `multi_edit_file`, `ls`, `glob`, `grep`, `read_new_file_content`
 
+`read_file` and `read_new_file_content` return at most 32,768 file-content
+characters and 32 KiB after UTF-8 encoding, plus short pagination metadata,
+per call. Small reads are returned unchanged. For a larger random-access read,
+the result names the exact character range and next `offset_chars`; request
+another bounded page with named `offset_chars` and, optionally, a smaller named
+`limit_chars`. The incremental reader instead keeps a per-run FIFO cursor and
+tells the coordinator to call again with the same path while backlog remains.
+This keeps prompts path-based and lets the coordinator decide what to inspect
+without one accidental read consuming the model's remaining context. For large
+structured artifacts, the coordinator may choose a focused `bash` projection
+such as `jq` before paging into supporting evidence.
+
 **Shell:** `bash`
 
 **Task tracking:** `todo_write`, `todo_read`
