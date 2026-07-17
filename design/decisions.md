@@ -236,6 +236,14 @@ the same outer session/depth/workflow identity. This is lineage and context,
 not a new loop layer or a delegation constraint. Arbitrary workers that launch
 `th` independently are outside this automatic propagation contract.
 
+The additive `capability_roster_context_v1` capability lets a caller also
+supply the absolute path, digest, and compact JSON summary of its frozen
+harness-family/strength-tier roster. Team-harness renders the supplied summary
+for root and nested coordinators and records the same fields in every direct
+agent assignment. It does not open, derive, or enforce the caller-owned roster:
+the caller remains the source of truth, and coordinators retain judgment over
+which available bundle fits a delegated task.
+
 **Context.** Embedding consumers such as loopy-loop own a durable session tree,
 but team-harness previously kept the complete coordinator `run.json` in its
 global private directory while worker artifacts lived under caller output. The

@@ -39,10 +39,13 @@ parameters. Caller-contract version 1 advertises:
 - `spawn_assignment_v1` — every direct spawn receives an automatic assignment
   envelope and effective prompt footer; and
 - `nested_caller_context_v1` — a built-in `type=harness` descendant receives a
-  validated outer caller-context envelope and parent harness run lineage.
+  validated outer caller-context envelope and parent harness run lineage; and
+- `capability_roster_context_v1` — a caller can attach a frozen capability
+  roster path, digest, and compact JSON summary to root, nested, and direct
+  agent assignment context.
 
 Names, not the integer contract version, are the compatibility gate. A future
-build may add a capability without changing the meaning of these four.
+build may add a capability without changing the meaning of these names.
 
 ## Caller context and canonical paths
 
@@ -54,6 +57,14 @@ An embedding caller passes the additive SDK argument
 - parent attempt, root session, and current session identifiers;
 - the current session depth and workflow role; and
 - optional absolute `relevant_state_paths`.
+
+The caller may also provide `capability_roster_path`,
+`capability_roster_sha256`, and `capability_roster_summary`. The path names the
+canonical caller-owned artifact, the digest pins its frozen identity, and the
+JSON summary makes the actual enabled harness/tier choices visible without
+forcing the coordinator to load the complete artifact. Team-harness renders
+the supplied summary verbatim as structured JSON; it does not read the path or
+invent provider/model mappings.
 
 `parent_harness_run_id` is optional. An embedding caller such as loopy-loop
 omits it for the first harness coordinator. Team-harness fills it when it
@@ -115,7 +126,8 @@ Before launching a subprocess, `tools/agent_tools.py` writes
 `agents/<agent-id>/agent_assignment.json`. It includes the parent harness run,
 outer attempt/session identity when available, absolute parent and per-agent
 assignment paths, the agent output directory, relevant state paths, the four
-dynamic metadata fields, and both prompt forms:
+dynamic metadata fields, the optional capability-roster path/digest/summary,
+and both prompt forms:
 
 `assignment_path` always names the spawned agent's own envelope, matching the
 same field in `run.json`; `parent_assignment_path` names the enclosing
@@ -245,13 +257,15 @@ The generated value overrides a free-form `env` value supplied in the tool
 call, so lineage cannot accidentally be spoofed or dropped.
 
 The nested context keeps the same parent attempt, root/current session,
-session depth, workflow role, and relevant state paths. It changes the parent
-assignment to the direct agent assignment, places nested run artifacts under
+session depth, workflow role, relevant state paths, and capability-roster
+context. It changes the parent assignment to the direct agent assignment,
+places nested run artifacts under
 `<agent-output>/harness_runs/<nested-run-id>/`, and records the current run as
 `parent_harness_run_id`. Keeping the loop fields unchanged matters: adding a
 harness coordinator is dynamic delegation inside one loop assignment, not the
 creation of a new loopy-loop layer. Its coordinator footer explicitly says the
-parent harness coordinator retains the loop-layer decision.
+parent harness coordinator retains the loop-layer decision and shows the same
+caller-frozen roster summary.
 
 This automatic contract is deliberately limited to the built-in
 `type=harness` spawn path. A generic worker can execute arbitrary programs; the

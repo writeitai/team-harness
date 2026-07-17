@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 from typing import Literal
@@ -8,15 +9,19 @@ from typing import Literal
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import field_validator
+from pydantic import JsonValue
+from pydantic import model_validator
 
 CALLER_CONTRACT_VERSION = 1
 CALLER_RUN_RECORD_CAPABILITY = "caller_run_record_v1"
 COORDINATOR_INPUT_CAPABILITY = "coordinator_input_v1"
 SPAWN_ASSIGNMENT_CAPABILITY = "spawn_assignment_v1"
 NESTED_CALLER_CONTEXT_CAPABILITY = "nested_caller_context_v1"
+CAPABILITY_ROSTER_CONTEXT_CAPABILITY = "capability_roster_context_v1"
 INHERITED_CALLER_CONTEXT_ENV = "TEAM_HARNESS_CALLER_CONTEXT"
 TEAM_HARNESS_CAPABILITIES = frozenset(
     {
+        CAPABILITY_ROSTER_CONTEXT_CAPABILITY,
         CALLER_RUN_RECORD_CAPABILITY,
         COORDINATOR_INPUT_CAPABILITY,
         SPAWN_ASSIGNMENT_CAPABILITY,
@@ -75,12 +80,17 @@ class CallerContext(BaseModel):
     workflow_role: str
     relevant_state_paths: tuple[Path, ...] = ()
     parent_harness_run_id: str | None = None
+    capability_roster_path: Path | None = None
+    capability_roster_sha256: str | None = None
+    capability_roster_summary: dict[str, JsonValue] | None = None
 
-    @field_validator("trace_root", "parent_assignment_path")
+    @field_validator("trace_root", "parent_assignment_path", "capability_roster_path")
     @classmethod
-    def _require_absolute_path(cls, value: Path) -> Path:
-        """Normalize a required caller-owned path and reject relative input."""
+    def _require_absolute_path(cls, value: Path | None) -> Path | None:
+        """Normalize a caller-owned path and reject relative input."""
 
+        if value is None:
+            return None
         path = value.expanduser()
         if not path.is_absolute():
             raise ValueError("caller contract paths must be absolute")
@@ -127,6 +137,35 @@ class CallerContext(BaseModel):
             raise ValueError("session_depth must be greater than or equal to zero")
         return value
 
+    @field_validator("capability_roster_sha256")
+    @classmethod
+    def _require_nonblank_roster_digest(cls, value: str | None) -> str | None:
+        """Reject a blank roster digest while preserving optional absence."""
+
+        if value is None:
+            return None
+        digest = value.strip()
+        if not digest:
+            raise ValueError("capability_roster_sha256 must not be blank")
+        return digest
+
+    @model_validator(mode="after")
+    def _require_complete_roster_context(self) -> CallerContext:
+        """Require roster path, digest, and summary to travel as one bundle."""
+
+        roster_values = (
+            self.capability_roster_path,
+            self.capability_roster_sha256,
+            self.capability_roster_summary,
+        )
+        if any(value is not None for value in roster_values) and any(
+            value is None for value in roster_values
+        ):
+            raise ValueError(
+                "capability roster path, digest, and summary must be supplied together"
+            )
+        return self
+
 
 def inherited_caller_context() -> CallerContext | None:
     """Load the context propagated to a nested ``type=harness`` process."""
@@ -156,6 +195,9 @@ def build_nested_caller_context(
         workflow_role=context.workflow_role,
         relevant_state_paths=context.relevant_state_paths,
         parent_harness_run_id=parent_harness_run_id,
+        capability_roster_path=context.capability_roster_path,
+        capability_roster_sha256=context.capability_roster_sha256,
+        capability_roster_summary=context.capability_roster_summary,
     )
 
 
@@ -183,6 +225,31 @@ def build_coordinator_context_footer(
         if context.parent_harness_run_id is not None
         else ""
     )
+    roster_section = ""
+    if context.capability_roster_summary is not None:
+        roster_path = (
+            str(context.capability_roster_path)
+            if context.capability_roster_path is not None
+            else "(not declared)"
+        )
+        roster_digest = context.capability_roster_sha256 or "(not declared)"
+        roster_summary = json.dumps(
+            obj=context.capability_roster_summary, indent=2, sort_keys=True
+        )
+        roster_section = f"""
+
+Frozen harness capability roster:
+- Canonical roster (absolute): {roster_path}
+- SHA-256: {roster_digest}
+
+Enabled harness families and strength tiers supplied by the caller:
+```json
+{roster_summary}
+```
+
+Use this roster when choosing delegates. Select only an available family/tier
+bundle and pass its concrete model and effort explicitly to spawn_agent. The
+roster describes choices; it is not a delegation quota or completion gate."""
     return f"""# Embedded caller assignment context
 
 {coordinator_role} Agents you spawn are ephemeral delegates; they do not
@@ -204,4 +271,4 @@ must supply useful delegated_role, delegated_task_id, expected_outputs, and
 state_responsibility metadata when calling spawn_agent.
 
 Relevant state paths declared by the caller:
-{state_paths}"""
+{state_paths}{roster_section}"""
