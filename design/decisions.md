@@ -83,14 +83,33 @@ making a failed worker raise — is a breaking change to the consumer contract (
 **new** process that resumes that logical session (the CLIs' `--resume`/`continue` modes) —
 never by reattaching to a still-running process (which TH-D2 makes impossible).
 
+Within the same live harness run, a coordinator resumes with
+`spawn_agent(mode="resume", resume_from_agent_id="<agent id>")`. The harness resolves that
+agent's captured vendor session internally and rejects the request before spawning unless the
+source exists in this run, is terminal, has the same agent type, and has a captured session id.
+`resume_from_session_id` remains the explicit interface for a raw id obtained from a finalized
+`worker_sessions.json`, including a prior run. Both selectors require `mode="resume"`, and the
+two selectors are mutually exclusive.
+team-harness never silently turns a failed resume into a fresh spawn; the coordinator must make
+that fallback explicit with a self-contained prompt.
+
 **Context.** Long tasks and crashes need a way to pick up where a worker left off. The vendor
 CLIs already persist their own session state; capturing the id lets team-harness re-enter that
-state cleanly.
+state cleanly. A live coordinator previously had to provide the raw vendor id even though
+`worker_sessions.json` is finalized only after the coordinator loop ends and `list_agents`
+exposes harness agent ids, not vendor ids. In a real run the coordinator guessed a plausible
+Codex thread id, created a process that failed with `no rollout found`, and then had to route
+around it with a fresh worker. Resolving the live agent id inside `tools/agent_tools.py` removes
+that guessing step without exposing or duplicating provider-specific state in the prompt.
 
 **Consequences.** Process *identity* (is it still running?) and session *continuity* (resume
 the work) are two different concerns handled by two different mechanisms — resume by session id
 (this decision), and process reaping by pid/pgid (TH-D5). Not every backend supports resume
-(`WorkerResumeInfo.supported`); callers must handle the unsupported case.
+(`WorkerResumeInfo.supported`); callers must handle the unsupported case. Same-run lookup is
+additive and does not change raw-id resume. Invalid source references create no worker process or
+agent record. A rejected vendor resume remains a visible failed worker under TH-D3: automatic
+fresh retry would be unsafe because a short continuation prompt may depend on context that exists
+only in the old vendor session.
 
 ## TH-D5. Persist worker process identity and spawn workers in their own process group, to enable orphan reaping
 

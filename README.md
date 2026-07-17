@@ -950,6 +950,17 @@ session output directory:
 <output_dir>/<run-id>/agents/<agent-id>/agent_assignment.json
 ```
 
+To continue a terminal worker during the same live harness run, coordinators
+should use `spawn_agent(mode="resume", resume_from_agent_id="<agent-id>", ...)`.
+Team-harness resolves the captured provider session internally and rejects an
+unknown, still-running, cross-type, or not-yet-captured source before spawning.
+Use `resume_from_session_id` only when you already have a raw provider id, such
+as one read from a finalized `worker_sessions.json`. The selectors are mutually
+exclusive, and either selector requires `mode="resume"`; otherwise the request
+fails before spawning. A failed provider resume remains a visible failed worker; the
+harness never silently retries it as a fresh agent because the continuation
+prompt may depend on the old session's context.
+
 When a coordinator supplies `worker_label`, it is treated as a filesystem-safe
 label, not as a path. Team-harness rejects labels with path separators and keeps
 all worker logs inside the session output directory. Workers without labels use

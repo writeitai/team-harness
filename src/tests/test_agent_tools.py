@@ -18,7 +18,9 @@ from tests.helpers import fake_agent_template
 
 
 def test_spawn_agent_schema_exposes_resume_fields():
-    schema = agent_tools.spawn_agent_schema(["codex", "claude"])
+    """The tool schema must distinguish live agent refs from raw session ids."""
+
+    schema = agent_tools.spawn_agent_schema(allowed_types=["codex", "claude"])
     properties = schema["function"]["parameters"]["properties"]
 
     assert properties["mode"] == {
@@ -31,6 +33,10 @@ def test_spawn_agent_schema_exposes_resume_fields():
     }
     assert properties["resume_from_session_id"]["type"] == "string"
     assert "worker_sessions.json" in properties["resume_from_session_id"]["description"]
+    assert properties["resume_from_agent_id"]["type"] == "string"
+    assert properties["resume_from_agent_id"]["minLength"] == 1
+    assert "live harness run" in properties["resume_from_agent_id"]["description"]
+    assert "mutually exclusive" in properties["resume_from_agent_id"]["description"]
     assert "output_path" not in properties
     assert "filesystem-safe worker label" in properties["worker_label"]["description"]
     assert schema["function"]["parameters"]["additionalProperties"] is False
@@ -119,6 +125,218 @@ async def test_spawn_agent_can_resume_provider_session(tmp_path, config, manager
 
     args = capture_file.read_text(encoding="utf-8").splitlines()
     assert args[:4] == ["exec", "resume", "--json", "sid-123"]
+
+
+@pytest.mark.asyncio
+async def test_bound_spawn_agent_resolves_same_run_agent_session(tmp_path, ui):
+    """The live-run agent id must resolve to the captured provider session id."""
+
+    from team_harness.agents.manager import AgentManager
+    from team_harness.config import Config
+
+    capture_file = tmp_path / "args.txt"
+    fake_codex = tmp_path / "fake-codex"
+    fake_codex.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$@" > "$CAPTURE_FILE"\n', encoding="utf-8"
+    )
+    fake_codex.chmod(0o755)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    config = Config(
+        provider="openai_compat",
+        model="test/model",
+        api_base="http://localhost:9999",
+        api_key="test-key",
+        cwd=str(tmp_path),
+        run_dir=run_dir,
+        worker_suffix="",
+        agent_templates={
+            "codex": AgentTemplate(
+                command=(str(fake_codex), "exec"),
+                shared_flags=("--json",),
+                resume_prefix=("resume",),
+                resume_flags=("{session_id}",),
+                model_flag=None,
+            )
+        },
+    )
+    manager = AgentManager()
+    source_proc = await asyncio.create_subprocess_exec("sh", "-lc", "exit 0")
+    await asyncio.wait_for(source_proc.wait(), timeout=2)
+    source_stdout = tmp_path / "source-stdout.jsonl"
+    source_stderr = tmp_path / "source-stderr.log"
+    source_stdout.write_text("", encoding="utf-8")
+    source_stderr.write_text("", encoding="utf-8")
+    manager.register(
+        state=AgentState(
+            id="agent_source",
+            agent_type="codex",
+            prompt="original",
+            cwd=str(tmp_path),
+            proc=source_proc,
+            spawn_time=datetime.now(timezone.utc),
+            stdout_log=source_stdout,
+            stderr_log=source_stderr,
+            session_id="captured-thread-123",
+        )
+    )
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=run_dir,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    bindings = agent_tools.build_agent_tool_bindings(
+        manager=manager, run_log=run_log, config=config, ui=ui, allowed_types=["codex"]
+    )
+    spawn_fn = next(
+        fn for schema, fn in bindings if schema["function"]["name"] == "spawn_agent"
+    )
+
+    resumed_id = await spawn_fn(
+        type="codex",
+        prompt="continue",
+        cwd=str(tmp_path),
+        mode="resume",
+        resume_from_agent_id="agent_source",
+        env={"CAPTURE_FILE": str(capture_file)},
+    )
+    await asyncio.wait_for(manager.wait_one(agent_id=resumed_id), timeout=2)
+
+    assert capture_file.read_text(encoding="utf-8").splitlines()[:4] == [
+        "exec",
+        "resume",
+        "--json",
+        "captured-thread-123",
+    ]
+    assert len(manager.list_all()) == 2
+    assert len(run_log.snapshot_agents()) == 1
+
+
+@pytest.mark.asyncio
+async def test_same_run_resume_rejects_invalid_sources(tmp_path, manager):
+    """Ambiguous, unknown, live, uncaptured, and cross-type sources must fail."""
+
+    completed_proc = await asyncio.create_subprocess_exec("sh", "-lc", "exit 0")
+    await asyncio.wait_for(completed_proc.wait(), timeout=2)
+    running_proc = await asyncio.create_subprocess_exec("sleep", "5")
+    stdout = tmp_path / "source-stdout.jsonl"
+    stderr = tmp_path / "source-stderr.log"
+    stdout.write_text("", encoding="utf-8")
+    stderr.write_text("", encoding="utf-8")
+    manager.register(
+        state=AgentState(
+            id="agent_uncaptured",
+            agent_type="codex",
+            prompt="original",
+            cwd=str(tmp_path),
+            proc=completed_proc,
+            spawn_time=datetime.now(timezone.utc),
+            stdout_log=stdout,
+            stderr_log=stderr,
+        )
+    )
+    manager.register(
+        state=AgentState(
+            id="agent_wrong_type",
+            agent_type="claude",
+            prompt="original",
+            cwd=str(tmp_path),
+            proc=completed_proc,
+            spawn_time=datetime.now(timezone.utc),
+            stdout_log=stdout,
+            stderr_log=stderr,
+            session_id="claude-session",
+        )
+    )
+    manager.register(
+        state=AgentState(
+            id="agent_running",
+            agent_type="codex",
+            prompt="original",
+            cwd=str(tmp_path),
+            proc=running_proc,
+            spawn_time=datetime.now(timezone.utc),
+            stdout_log=stdout,
+            stderr_log=stderr,
+            session_id="live-session",
+        )
+    )
+
+    cases = [
+        (
+            {
+                "mode": "resume",
+                "resume_from_agent_id": "agent_source",
+                "resume_from_session_id": "raw-session",
+            },
+            "mutually exclusive",
+        ),
+        (
+            {"mode": "fresh", "resume_from_agent_id": "agent_uncaptured"},
+            "requires mode='resume'",
+        ),
+        (
+            {"mode": "fresh", "resume_from_session_id": "raw-session"},
+            "resume_from_session_id requires mode='resume'",
+        ),
+        ({"mode": "resume", "resume_from_agent_id": "agent_missing"}, "does not exist"),
+        (
+            {"mode": "resume", "resume_from_agent_id": "agent_wrong_type"},
+            "not requested type",
+        ),
+        ({"mode": "resume", "resume_from_agent_id": "agent_running"}, "still running"),
+        (
+            {"mode": "resume", "resume_from_agent_id": "agent_uncaptured"},
+            "no captured provider session id",
+        ),
+    ]
+    try:
+        for kwargs, expected_error in cases:
+            session_id, error = agent_tools._resolve_resume_session_id(
+                manager=manager, agent_type="codex", kwargs=kwargs
+            )
+            assert session_id is None
+            assert error is not None
+            assert expected_error in error
+    finally:
+        running_proc.terminate()
+        await asyncio.wait_for(running_proc.wait(), timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_invalid_same_run_resume_creates_no_worker_or_record(
+    tmp_path, config, manager, ui
+):
+    """A rejected source reference must fail before spawn-side effects."""
+
+    config.run_dir = tmp_path / "run"
+    config.run_dir.mkdir(exist_ok=True)
+    config.worker_suffix = ""
+    config.agent_templates = {"codex": fake_agent_template()}
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=config.run_dir,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+
+    result = await agent_tools.spawn_agent(
+        type="codex",
+        prompt="continue",
+        cwd=str(tmp_path),
+        mode="resume",
+        resume_from_agent_id="agent_missing",
+    )
+
+    assert result.startswith("ERROR:")
+    assert "does not exist" in result
+    assert manager.list_all() == []
+    assert run_log.snapshot_agents() == []
+    assert not (config.run_dir / "agents").exists()
 
 
 @pytest.mark.asyncio

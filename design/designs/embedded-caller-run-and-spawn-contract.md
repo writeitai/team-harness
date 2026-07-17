@@ -188,6 +188,53 @@ commands, and worker output rather than treating trace artifacts as sanitized
 export data. After `run.json` and `worker_sessions.json` exist, the SDK's normal
 error path raises `TeamHarnessError` with their canonical caller-owned paths.
 
+### Addressing a session during the live run
+
+Provider session capture and coordinator visibility have different timing.
+`AgentManager` may already hold a worker's captured Codex thread or Claude
+session while the coordinator is still running, but `worker_sessions.json` is
+intentionally not final until the run finalizer completes. Requiring the live
+coordinator to pass a raw provider id therefore creates an impossible lookup:
+the durable file that publishes the id does not yet exist, and provider ids are
+not the harness agent ids returned by `spawn_agent` and `list_agents`.
+
+For a same-run continuation, the coordinator passes the stable harness id it
+already has:
+
+```text
+spawn_agent(
+    type="codex",
+    prompt="Apply the three review fixes and re-run validation.",
+    cwd="/absolute/repository/path",
+    mode="resume",
+    resume_from_agent_id="agent_aed3b8a457d8",
+)
+```
+
+`tools/agent_tools.py` resolves that source through the current
+`AgentManager`, then passes only its captured vendor id to
+`agents/spawner.py`. Resolution succeeds only after the source process is
+terminal, the source and requested worker types match, and session capture has
+produced an id. Unknown, live, cross-type, or not-yet-captured sources return a
+coordinator-visible `ERROR` before an assignment envelope, subprocess, or
+agent record is created. `resume_from_agent_id` and
+`resume_from_session_id` both require `mode="resume"` and are mutually
+exclusive. This avoids silently discarding a supplied session selector while
+launching a fresh worker with a context-dependent continuation prompt.
+
+Raw `resume_from_session_id` remains useful when the coordinator or embedding
+caller already has a provider id from a finalized current or earlier
+`worker_sessions.json`. It is deliberately not removed or inferred from an
+agent id outside the current in-memory run.
+
+A resume subprocess can still fail because the provider deleted or rejected a
+once-valid session. That failed process remains in `run.json` like any other
+failed worker (TH-D3). team-harness does not silently retry it fresh: a prompt
+such as "apply the review fixes" may be meaningful only with the old session's
+context. The coordinator may explicitly spawn a fresh worker, but must give it
+a self-contained assignment. This keeps both the semantic choice and the audit
+trail honest.
+
 ## Nested harness context propagation
 
 When a caller-context coordinator chooses `spawn_agent(type="harness", ...)`,
