@@ -296,6 +296,22 @@ def _prepare_agent_assignment(
                 if caller_context is not None
                 else []
             ),
+            "capability_roster_path": (
+                str(caller_context.capability_roster_path)
+                if caller_context is not None
+                and caller_context.capability_roster_path is not None
+                else None
+            ),
+            "capability_roster_sha256": (
+                caller_context.capability_roster_sha256
+                if caller_context is not None
+                else None
+            ),
+            "capability_roster_summary": (
+                caller_context.capability_roster_summary
+                if caller_context is not None
+                else None
+            ),
             "expected_outputs": expected_outputs,
             "state_responsibility": state_responsibility,
             "authored_prompt": prompt,

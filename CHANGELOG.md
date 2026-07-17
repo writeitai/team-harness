@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-07-17
+
+### Added
+
+- Embedded callers can negotiate `capability_roster_context_v1` and pass a
+  frozen harness-capability roster path, digest, and compact JSON summary in
+  `CallerContext`. The summary is shown to root and nested coordinators, while
+  every direct `agent_assignment.json` records the same three fields. Team
+  Harness does not read or reinterpret the caller-owned roster artifact.
+
+  Consumer impact: callers that require roster-aware delegation should check
+  the named capability and populate `capability_roster_path`,
+  `capability_roster_sha256`, and `capability_roster_summary`.
+
 ## [0.5.3] - 2026-07-17
 
 ### Changed
@@ -440,7 +454,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project-local configuration via `th init` (config.toml, coordinator system message, worker suffix and footer templates).
 - `th` CLI entry point (`team-harness` retained as compatibility alias).
 
-[Unreleased]: https://github.com/writeitai/team-harness/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/writeitai/team-harness/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/writeitai/team-harness/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/writeitai/team-harness/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/writeitai/team-harness/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/writeitai/team-harness/compare/v0.5.0...v0.5.1

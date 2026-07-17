@@ -46,6 +46,8 @@ def _caller_context(tmp_path: Path) -> CallerContext:
     assignment.write_text('{"schema_version": 1}', encoding="utf-8")
     state_path = tmp_path / "session" / "project_state"
     state_path.mkdir(parents=True)
+    roster_path = tmp_path / "session" / "harness_capability_roster.json"
+    roster_path.write_text('{"schema_version": 1}', encoding="utf-8")
     return CallerContext(
         trace_root=tmp_path / "traces" / "attempt-abc",
         parent_assignment_path=assignment,
@@ -55,6 +57,28 @@ def _caller_context(tmp_path: Path) -> CallerContext:
         session_depth=2,
         workflow_role="inner",
         relevant_state_paths=(state_path,),
+        capability_roster_path=roster_path,
+        capability_roster_sha256="sha256:roster-abc",
+        capability_roster_summary={
+            "default_tier": "standard",
+            "harnesses": {
+                "claude": {
+                    "frontier": {
+                        "available": True,
+                        "model": "claude-fable",
+                        "effort": "high",
+                    },
+                    "economy": {"available": False},
+                },
+                "codex": {
+                    "standard": {
+                        "available": True,
+                        "model": "gpt-standard",
+                        "effort": "medium",
+                    }
+                },
+            },
+        },
     )
 
 
@@ -68,6 +92,7 @@ def test_capabilities_are_public_and_name_based():
         "coordinator_input_v1",
         "spawn_assignment_v1",
         "nested_caller_context_v1",
+        "capability_roster_context_v1",
     )
     assert not advertised.supports("future_contract_v99")
 
@@ -83,6 +108,50 @@ def test_caller_context_rejects_relative_contract_paths(tmp_path):
             session_depth=0,
             workflow_role="inner",
         )
+
+
+def test_caller_context_validates_capability_roster_fields(tmp_path):
+    """Require an absolute roster path, nonblank digest, and JSON summary."""
+
+    context = _caller_context(tmp_path=tmp_path)
+    with pytest.raises(ValidationError, match="absolute"):
+        CallerContext(
+            **{
+                **context.model_dump(),
+                "capability_roster_path": Path("relative-roster.json"),
+            }
+        )
+    with pytest.raises(ValidationError, match="must not be blank"):
+        CallerContext(**{**context.model_dump(), "capability_roster_sha256": "   "})
+    with pytest.raises(ValidationError, match="valid JSON"):
+        CallerContext(
+            **{
+                **context.model_dump(),
+                "capability_roster_summary": {"not_json": tmp_path},
+            }
+        )
+    without_digest = context.model_dump()
+    without_digest["capability_roster_sha256"] = None
+    with pytest.raises(ValidationError, match="must be supplied together"):
+        CallerContext(**without_digest)
+
+
+def test_coordinator_footer_renders_frozen_capability_roster(tmp_path):
+    """Show coordinators their actual caller-supplied family/tier choices."""
+
+    context = _caller_context(tmp_path=tmp_path)
+    footer = build_coordinator_context_footer(
+        context=context,
+        harness_run_id="run-root",
+        harness_run_dir=context.trace_root / "run-root",
+    )
+
+    assert str(context.capability_roster_path) in footer
+    assert context.capability_roster_sha256 in footer
+    assert '"claude"' in footer
+    assert '"frontier"' in footer
+    assert '"claude-fable"' in footer
+    assert "pass its concrete model and effort explicitly" in footer
 
 
 def test_spawn_delegation_metadata_is_dynamic_not_enumerated():
@@ -727,6 +796,9 @@ async def test_direct_spawn_writes_dynamic_assignment_and_effective_prompt(tmp_p
     assert assignment["state_responsibility"].startswith("Report state changes")
     assert assignment["assignment_path"] == str(assignment_path)
     assert assignment["parent_assignment_path"] == str(context.parent_assignment_path)
+    assert assignment["capability_roster_path"] == str(context.capability_roster_path)
+    assert assignment["capability_roster_sha256"] == context.capability_roster_sha256
+    assert assignment["capability_roster_summary"] == context.capability_roster_summary
     assert "agent_assignment_path" not in assignment
     assert assignment["authored_prompt"] == "Implement authentication"
     assert str(assignment_path) in assignment["effective_prompt"]
@@ -952,6 +1024,9 @@ async def test_nested_harness_inherits_outer_identity_and_parent_run(
     )
     assert inherited.parent_attempt_id == context.parent_attempt_id
     assert inherited.session_id == context.session_id
+    assert inherited.capability_roster_path == context.capability_roster_path
+    assert inherited.capability_roster_sha256 == context.capability_roster_sha256
+    assert inherited.capability_roster_summary == context.capability_roster_summary
     assert "Parent harness run id: run_parent" in record.full_prompt
     nested_footer = build_coordinator_context_footer(
         context=inherited,
