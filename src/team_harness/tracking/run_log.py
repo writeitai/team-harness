@@ -16,6 +16,55 @@ from team_harness.tracking.persistence import write_json_atomic
 
 _AGENT_ID_RE = re.compile(r"^agent_[a-zA-Z0-9]+$")
 _MAX_COORDINATOR_RETRY_RECORDS = 100
+_DEFAULT_TOOL_RESULT_MAX_BYTES = 8192
+
+
+def _truncate_persisted_text(text: str, max_bytes: int) -> str:
+    """Truncate a string to `max_bytes` UTF-8 bytes for run.json persistence,
+    appending a note. The full stream stays in the worker logs on disk."""
+
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    kept = encoded[:max_bytes].decode("utf-8", errors="ignore")
+    return (
+        f"{kept}\n[... truncated {len(encoded) - max_bytes} of {len(encoded)} "
+        "bytes for run.json persistence; full stream in the worker log ...]"
+    )
+
+
+def _truncate_delta_for_persistence(
+    messages_appended_delta: list[dict], max_bytes: int
+) -> list[dict]:
+    """Copy the turn delta, truncating tool-role message contents. Untouched
+    messages keep their original reference so the live message list is never
+    mutated."""
+
+    persisted: list[dict] = []
+    for message in messages_appended_delta:
+        content = message.get("content")
+        if message.get("role") == "tool" and isinstance(content, str):
+            truncated = _truncate_persisted_text(content, max_bytes)
+            if truncated != content:
+                persisted.append({**message, "content": truncated})
+                continue
+        persisted.append(message)
+    return persisted
+
+
+def _truncate_tool_calls_for_persistence(
+    tool_calls: list[ToolCallRecord], max_bytes: int
+) -> list[ToolCallRecord]:
+    """Copy tool-call records, truncating each result string for persistence."""
+
+    persisted: list[ToolCallRecord] = []
+    for tool_call in tool_calls:
+        truncated = _truncate_persisted_text(tool_call.result, max_bytes)
+        if truncated == tool_call.result:
+            persisted.append(tool_call)
+        else:
+            persisted.append(tool_call.model_copy(update={"result": truncated}))
+    return persisted
 
 
 class RunLogWriter:
@@ -32,10 +81,12 @@ class RunLogWriter:
         caller_context: dict[str, Any] | None = None,
         capabilities: list[str] | None = None,
         coordinator_input_path: str | None = None,
+        tool_result_max_bytes: int = _DEFAULT_TOOL_RESULT_MAX_BYTES,
     ) -> None:
         """Create and immediately persist the durable record for one run."""
 
         self.path = run_dir / "run.json"
+        self._tool_result_max_bytes = tool_result_max_bytes
         parent_pid = os.getpid()
         self._log = RunRecord(
             run_id=run_id,
@@ -74,15 +125,26 @@ class RunLogWriter:
         usage: dict,
         tool_calls: list[ToolCallRecord] | None = None,
     ) -> None:
+        # Persistence-only truncation: the live coordinator `messages` list is
+        # never touched, only the copies written to run.json. The full stream
+        # already exists once on disk in the worker logs.
+        persisted_delta = _truncate_delta_for_persistence(
+            messages_appended_delta, self._tool_result_max_bytes
+        )
+        persisted_tool_calls = _truncate_tool_calls_for_persistence(
+            tool_calls or [], self._tool_result_max_bytes
+        )
         self._log.turns.append(
             TurnRecord(
                 index=index,
-                messages_appended_delta=messages_appended_delta,
+                messages_appended_delta=persisted_delta,
                 response_text=response_text,
                 usage=usage,
-                tool_calls=tool_calls or [],
+                tool_calls=persisted_tool_calls,
             )
         )
+        # Agent-id detection runs on the original (untruncated) tool calls;
+        # spawn_agent results are short ids that never hit the byte ceiling.
         for tool_call in tool_calls or []:
             if tool_call.name != "spawn_agent" or tool_call.is_error:
                 continue

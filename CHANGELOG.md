@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-18
+
+Context economy for long coordinator runs: make the re-sent prefix cheap,
+let compaction actually fire, and bound what enters context or persists to
+run.json. See `design/designs/context-and-eval-economy.md` §A1–A3.
+
+### Added
+
+- **Prompt caching (A1).** New `coordinator.prompt_cache` knob (`"auto"` |
+  `"off"`, default `"auto"`). In `"auto"` mode, when the coordinator model is
+  an Anthropic-family model (name contains `claude`/`anthropic`,
+  case-insensitive), the OpenAI-compatible request gets content-part
+  `cache_control: {"type": "ephemeral"}` breakpoints — one on the system
+  message and one on the final message of each turn — so the append-only
+  prefix is cache-read on subsequent turns. Non-Anthropic models get nothing
+  (OpenAI-family caching is automatic server-side). Cache-read prompt tokens
+  reported by the provider (`prompt_tokens_details.cached_tokens` or the
+  Anthropic `cache_read_input_tokens` fallback) now flow into
+  `TurnRecord.usage` as an additive `cached_prompt_tokens` key; the existing
+  `prompt_tokens` / `completion_tokens` keys are unchanged. The Codex provider
+  client is unaffected.
+- **Safety-net compaction (A2).** New `coordinator.compact_above_tokens` knob
+  (`int | None`, default `None`). When set, the coordinator compacts once the
+  current context reaches that many tokens at any user- **or** tool-result
+  boundary, independent of the near-limit rule that needed a `user`-role tail
+  and ~model-limit-minus-33k tokens. The circuit breaker still applies.
+  `_perform_compaction` now preserves the initial task (the first user
+  message) verbatim in the rebuilt history across repeated compactions.
+- **Bounded agent output (A3).** New `coordinator.read_output_max_tail_bytes`
+  knob (default 16384) caps `read_agent_output(tail_bytes=...)`; over-large
+  requests return the clamped tail with a banner naming the full stdout/stderr
+  log paths. The former 64 KB `read_new_agent_output` cap is now the
+  configurable `coordinator.read_new_output_max_bytes` (default 65536).
+- **Bounded run.json persistence (A3).** New
+  `coordinator.run_log_tool_result_max_bytes` knob (default 8192) truncates
+  persisted tool-call results and tool-role message contents in run.json,
+  appending a truncation note. This is persistence-layer only — the live
+  in-memory coordinator context and `TurnRecord.usage` are untouched.
+- **SDK constructor knobs.** `TeamHarness(...)` now accepts
+  `compact_above_tokens: int | None` and `prompt_cache: str | None`, mirroring
+  the config keys so embedded (loopy-loop / SDK) runs — the ones that most need
+  them — can set caching and the safety-net compaction threshold directly. An
+  explicit constructor value overrides the config-file/default value; leaving
+  it `None` falls back to config.
+
+### Changed
+
+- Direct-spawn worker footer now instructs workers to end stdout with a
+  result card (≤15 lines: outcome, key decisions, files changed, and absolute
+  paths to any longer report written to a file) and to write long reports to
+  files rather than stdout, so the coordinator reads a card instead of
+  re-sending a full stream every turn.
+
 ## [0.5.4] - 2026-07-17
 
 ### Added

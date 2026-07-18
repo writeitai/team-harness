@@ -1192,3 +1192,98 @@ async def test_wait_for_any_no_classification_on_success(tmp_path, config, manag
 
     assert result["timed_out"] is False
     assert "failure_classification" not in result
+
+
+@pytest.mark.asyncio
+async def test_read_agent_output_clamps_tail_bytes_and_banners(
+    tmp_path, config, manager, ui
+):
+    stdout = tmp_path / "agent_stdout.log"
+    stderr = tmp_path / "agent_stderr.log"
+    stdout.write_text("S" * 5000)
+    stderr.write_text("E" * 5000)
+    proc = await asyncio.create_subprocess_exec("sh", "-lc", "exit 0")
+    state = AgentState(
+        id="agent_1",
+        agent_type="codex",
+        prompt="p",
+        cwd=str(tmp_path),
+        proc=proc,
+        spawn_time=datetime.now(timezone.utc),
+        stdout_log=stdout,
+        stderr_log=stderr,
+    )
+    manager.register(state)
+    await proc.wait()
+    config.read_output_max_tail_bytes = 1024
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+
+    result = await agent_tools.read_agent_output("agent_1", tail_bytes=100_000)
+
+    assert result.startswith("[read_agent_output truncated:")
+    # Banner names both full log paths.
+    assert str(stdout) in result
+    assert str(stderr) in result
+    # Only the clamped tail (1024 bytes) is returned per stream.
+    assert result.count("S") == 1024
+    assert result.count("E") == 1024
+
+
+@pytest.mark.asyncio
+async def test_read_agent_output_no_banner_within_ceiling(
+    tmp_path, config, manager, ui
+):
+    stdout = tmp_path / "agent_stdout.log"
+    stderr = tmp_path / "agent_stderr.log"
+    stdout.write_text("short out")
+    stderr.write_text("short err")
+    proc = await asyncio.create_subprocess_exec("sh", "-lc", "exit 0")
+    state = AgentState(
+        id="agent_1",
+        agent_type="codex",
+        prompt="p",
+        cwd=str(tmp_path),
+        proc=proc,
+        spawn_time=datetime.now(timezone.utc),
+        stdout_log=stdout,
+        stderr_log=stderr,
+    )
+    manager.register(state)
+    await proc.wait()
+    run_log = RunLogWriter(
+        run_id="run_1",
+        run_dir=tmp_path,
+        provider=config.provider,
+        model=config.model,
+        api_base=config.api_base,
+    )
+    agent_tools.setup(manager=manager, run_log=run_log, config=config, ui=ui)
+
+    result = await agent_tools.read_agent_output("agent_1", tail_bytes=8192)
+
+    assert "truncated" not in result
+    assert result == "=== stdout ===\nshort out\n=== stderr ===\nshort err"
+
+
+def test_build_direct_spawn_footer_contains_result_card_instruction(tmp_path):
+    footer = agent_tools._build_direct_spawn_footer(
+        assignment_path=tmp_path / "agent_assignment.json",
+        output_dir=tmp_path / "out",
+        caller_context=None,
+        delegated_role=None,
+        delegated_task_id=None,
+        expected_outputs=[],
+        state_responsibility=None,
+        parent_harness_run_id="run_1",
+    )
+
+    assert "result card" in footer
+    assert "at most 15 lines" in footer
+    assert "Write long reports to files, not stdout." in footer

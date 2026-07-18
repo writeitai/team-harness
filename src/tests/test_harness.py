@@ -5,6 +5,7 @@ from datetime import datetime
 from datetime import timezone
 import inspect
 import json
+from typing import cast
 
 import click
 import pytest
@@ -14,6 +15,7 @@ from team_harness.agents.manager import AgentManager
 from team_harness.agents.manager import AgentState
 from team_harness.cli import main
 from team_harness.config import Config
+from team_harness.coordinator.client import CoordinatorClient
 from team_harness.harness import _apply_agent_template_overrides
 from team_harness.harness import _extract_final_text
 from team_harness.harness import _normalize_agents
@@ -348,6 +350,113 @@ async def test_harness_run_creates_session_output_dir_and_passes_it_to_prompt(
     manifest = session_output_dir / "worker_sessions.json"
     assert manifest.exists()
     assert json.loads(manifest.read_text())["workers"] == []
+
+
+@pytest.mark.asyncio
+async def test_teamharness_ctor_threads_compact_and_prompt_cache(monkeypatch, tmp_path):
+    """The SDK ctor knobs must reach the resolved config, the coordinator loop
+    (compaction), and the client (prompt caching) in a loopy-driven run."""
+
+    async def fake_resolve_model_limit(model_id, client, config):
+        return 200_000
+
+    captured: dict[str, object] = {}
+
+    async def fake_run(messages, config, run_log, ui, tool_registry, client, ctx):
+        captured["loop_config"] = config
+        captured["loop_client"] = client
+        messages.append({"role": "assistant", "content": "done"})
+
+    monkeypatch.setattr("team_harness.harness.RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
+    monkeypatch.setattr(
+        "team_harness.harness.validate_templates", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "team_harness.harness.resolve_model_limit", fake_resolve_model_limit
+    )
+    monkeypatch.setattr("team_harness.harness.load_skill_metadata", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.harness.run", fake_run)
+
+    harness = TeamHarness(
+        model="anthropic/claude-opus-4",
+        api_base="http://localhost:11434/v1",
+        compact_above_tokens=80_000,
+        prompt_cache="auto",
+        cwd=str(tmp_path),
+    )
+    result = await harness.run("hello")
+
+    assert result.text == "done"
+    loop_config = cast(Config, captured["loop_config"])
+    loop_client = cast(CoordinatorClient, captured["loop_client"])
+    # Resolved config carries the ctor values into the compaction knob path.
+    assert loop_config.compact_above_tokens == 80_000
+    assert loop_config.prompt_cache == "auto"
+    # The real client (built by _make_client) enabled Anthropic prompt caching.
+    assert loop_client._cache_prefix is True
+
+
+@pytest.mark.asyncio
+async def test_teamharness_prompt_cache_off_disables_client_caching(
+    monkeypatch, tmp_path
+):
+    """prompt_cache='off' from the SDK ctor must reach the client and suppress
+    cache-control injection even for an Anthropic-family model."""
+
+    async def fake_resolve_model_limit(model_id, client, config):
+        return 200_000
+
+    captured: dict[str, object] = {}
+
+    async def fake_run(messages, config, run_log, ui, tool_registry, client, ctx):
+        captured["loop_client"] = client
+        messages.append({"role": "assistant", "content": "done"})
+
+    monkeypatch.setattr("team_harness.harness.RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "home" / "config.toml")
+    monkeypatch.setattr(
+        "team_harness.harness.validate_templates", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "team_harness.harness.resolve_model_limit", fake_resolve_model_limit
+    )
+    monkeypatch.setattr("team_harness.harness.load_skill_metadata", lambda cwd=None: [])
+    monkeypatch.setattr("team_harness.harness.run", fake_run)
+
+    harness = TeamHarness(
+        model="anthropic/claude-opus-4",
+        api_base="http://localhost:11434/v1",
+        prompt_cache="off",
+        cwd=str(tmp_path),
+    )
+    await harness.run("hello")
+
+    assert cast(CoordinatorClient, captured["loop_client"])._cache_prefix is False
+
+
+def test_load_config_sdk_overrides_win_over_toml(tmp_path, monkeypatch):
+    """SDK-supplied compact_above_tokens / prompt_cache override config.toml."""
+
+    path = tmp_path / "home" / ".team-harness" / "config.toml"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        '[coordinator]\ncompact_above_tokens = 40000\nprompt_cache = "off"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config_module, "CONFIG_PATH", path)
+
+    # No override -> TOML values win.
+    config = config_module.load_config(cwd=str(tmp_path))
+    assert config.compact_above_tokens == 40_000
+    assert config.prompt_cache == "off"
+
+    # Explicit SDK values override TOML.
+    overridden = config_module.load_config(
+        cwd=str(tmp_path), compact_above_tokens=90_000, prompt_cache="auto"
+    )
+    assert overridden.compact_above_tokens == 90_000
+    assert overridden.prompt_cache == "auto"
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,24 @@ class Config:
     system_prompt_extension: str = ""
     output_dir: str = "_outputs"
     context_limit: int | None = None
+    # Prompt caching for the coordinator request prefix. "auto" injects
+    # provider-appropriate cache breakpoints for Anthropic-family models
+    # (harmless no-op for others); "off" disables the injection entirely.
+    prompt_cache: str = "auto"
+    # Optional safety-net compaction threshold. When set, the coordinator loop
+    # compacts once `ctx.total` reaches this many tokens at any user- or
+    # tool-result boundary — independent of the near-limit auto-compaction
+    # rule. `None` leaves only the near-limit rule active.
+    compact_above_tokens: int | None = None
+    # Ceiling for `read_agent_output(tail_bytes=...)`. Requests above this are
+    # clamped and annotated with a banner naming the full log paths.
+    read_output_max_tail_bytes: int = 16384
+    # Ceiling for a single `read_new_agent_output` chunk entering context.
+    read_new_output_max_bytes: int = 65536
+    # Persistence-only cap: tool-call results and tool-role message contents
+    # written to run.json are truncated to this many bytes (the full stream
+    # already lives in the worker logs). Never touches the live message list.
+    run_log_tool_result_max_bytes: int = 8192
     shutdown_timeout_s: float = 10.0
     min_agent_lifetime_before_kill_s: float = 600.0
     allowed_agents: list[str] | None = None
@@ -305,6 +323,26 @@ max_depth = 3
 # Override the model's context window size (tokens). Leave commented to auto-detect.
 # context_limit = 128000
 
+# Prompt caching for the coordinator request prefix. "auto" adds cache
+# breakpoints for Anthropic-family models (no-op for others); "off" disables it.
+# prompt_cache = "auto"
+
+# Safety-net compaction: compact once current context reaches this many tokens
+# at any user- or tool-result boundary. Leave commented to rely only on the
+# near-limit auto-compaction rule.
+# compact_above_tokens = 80000
+
+# Ceiling for read_agent_output(tail_bytes=...); larger requests are clamped
+# and annotated with a banner naming the full log paths.
+# read_output_max_tail_bytes = 16384
+
+# Ceiling for one read_new_agent_output chunk entering coordinator context.
+# read_new_output_max_bytes = 65536
+
+# Persistence-only cap for tool-call results / tool-role messages in run.json
+# (the full stream stays in the worker logs). Does not affect live context.
+# run_log_tool_result_max_bytes = 8192
+
 # Seconds to wait for running agents on /quit or Ctrl+C before force-killing.
 shutdown_timeout_s = 10.0
 
@@ -367,6 +405,26 @@ max_depth = 3
 
 # Override the model's context window size (tokens). Leave commented to auto-detect.
 # context_limit = 128000
+
+# Prompt caching for the coordinator request prefix. "auto" adds cache
+# breakpoints for Anthropic-family models (no-op for others); "off" disables it.
+# prompt_cache = "auto"
+
+# Safety-net compaction: compact once current context reaches this many tokens
+# at any user- or tool-result boundary. Leave commented to rely only on the
+# near-limit auto-compaction rule.
+# compact_above_tokens = 80000
+
+# Ceiling for read_agent_output(tail_bytes=...); larger requests are clamped
+# and annotated with a banner naming the full log paths.
+# read_output_max_tail_bytes = 16384
+
+# Ceiling for one read_new_agent_output chunk entering coordinator context.
+# read_new_output_max_bytes = 65536
+
+# Persistence-only cap for tool-call results / tool-role messages in run.json
+# (the full stream stays in the worker logs). Does not affect live context.
+# run_log_tool_result_max_bytes = 8192
 
 # Seconds to wait for running agents on /quit or Ctrl+C before force-killing.
 shutdown_timeout_s = 10.0
@@ -977,6 +1035,8 @@ def load_config(
     retry_base_delay_s: float | None = None,
     retry_max_delay_s: float | None = None,
     max_depth: int | None = None,
+    compact_above_tokens: int | None = None,
+    prompt_cache: str | None = None,
     system_prompt: str | None = None,
     cli_system_prompt_file: str | None = None,
     allowed_agents: str | None = None,
@@ -1120,6 +1180,27 @@ def load_config(
             int(cast(int | str, coordinator["context_limit"]))
             if coordinator.get("context_limit") is not None
             else None
+        ),
+        prompt_cache=prompt_cache
+        if prompt_cache is not None
+        else str(coordinator.get("prompt_cache", Config.prompt_cache)),
+        compact_above_tokens=compact_above_tokens
+        if compact_above_tokens is not None
+        else (
+            int(cast(int | str, coordinator["compact_above_tokens"]))
+            if coordinator.get("compact_above_tokens") is not None
+            else None
+        ),
+        read_output_max_tail_bytes=_coordinator_int(
+            coordinator, "read_output_max_tail_bytes", Config.read_output_max_tail_bytes
+        ),
+        read_new_output_max_bytes=_coordinator_int(
+            coordinator, "read_new_output_max_bytes", Config.read_new_output_max_bytes
+        ),
+        run_log_tool_result_max_bytes=_coordinator_int(
+            coordinator,
+            "run_log_tool_result_max_bytes",
+            Config.run_log_tool_result_max_bytes,
         ),
         shutdown_timeout_s=_coordinator_float(
             coordinator, "shutdown_timeout_s", Config.shutdown_timeout_s

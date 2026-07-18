@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from typing import Callable
@@ -15,12 +16,19 @@ from openai import AsyncOpenAI
 class UsageRecord:
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    # Cache-read prompt tokens reported by the provider (OpenRouter/Anthropic
+    # cached_tokens). Additive-only: it appears in model_dump() when non-zero so
+    # existing consumers that read prompt_tokens/completion_tokens are unaffected.
+    cached_prompt_tokens: int = 0
 
     def model_dump(self) -> dict[str, int]:
-        return {
+        payload = {
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
         }
+        if self.cached_prompt_tokens:
+            payload["cached_prompt_tokens"] = self.cached_prompt_tokens
+        return payload
 
 
 @dataclass
@@ -94,11 +102,91 @@ class _AsyncNullContext:
         return None
 
 
+def _is_anthropic_model(model: str) -> bool:
+    """True for Anthropic-family model names (case-insensitive)."""
+    lowered = model.lower()
+    return "claude" in lowered or "anthropic" in lowered
+
+
+_CACHE_CONTROL: dict[str, str] = {"type": "ephemeral"}
+
+
+def _with_cache_control(message: dict) -> dict:
+    """Return a copy of `message` with an ephemeral cache breakpoint on its
+    content, promoting a string body to the content-part form OpenRouter
+    expects for Anthropic caching. Non-string / empty bodies are returned
+    unchanged so no invalid part is emitted."""
+
+    content = message.get("content")
+    if isinstance(content, str) and content:
+        parts = [
+            {"type": "text", "text": content, "cache_control": dict(_CACHE_CONTROL)}
+        ]
+        return {**message, "content": parts}
+    if isinstance(content, list) and content:
+        new_parts = [dict(part) if isinstance(part, dict) else part for part in content]
+        last = new_parts[-1]
+        if isinstance(last, dict):
+            last["cache_control"] = dict(_CACHE_CONTROL)
+            return {**message, "content": new_parts}
+    return message
+
+
+def _apply_prompt_cache(messages: list[dict]) -> list[dict]:
+    """Inject ephemeral cache breakpoints for OpenRouter/Anthropic.
+
+    Places one breakpoint on the leading system message (the long-lived
+    prefix) and one on the final message of the request. Because the
+    conversation is append-only, the breakpoint written on this turn's last
+    message becomes the most recent boundary before the next turn's new
+    content — a cache read then covers the whole prefix up to it. Only the
+    modified messages are copied; the caller's list is left untouched."""
+
+    if not messages:
+        return messages
+    result = list(messages)
+    if result[0].get("role") == "system":
+        result[0] = _with_cache_control(result[0])
+    last_index = len(result) - 1
+    if last_index != 0 or result[0].get("role") != "system":
+        result[last_index] = _with_cache_control(result[last_index])
+    return result
+
+
+def _extract_cached_tokens(usage: Any) -> int:
+    """Pull cache-read prompt tokens from a provider usage object.
+
+    Handles the OpenAI-compatible `prompt_tokens_details.cached_tokens` shape
+    (object or mapping) plus the Anthropic-style `cache_read_input_tokens`
+    fallback that some OpenRouter responses expose at the usage top level."""
+
+    if usage is None:
+        return 0
+    details = getattr(usage, "prompt_tokens_details", None)
+    if details is None and isinstance(usage, Mapping):
+        details = usage.get("prompt_tokens_details")
+    if details is not None:
+        cached = getattr(details, "cached_tokens", None)
+        if cached is None and isinstance(details, Mapping):
+            cached = details.get("cached_tokens")
+        if cached:
+            return int(cached)
+    fallback = getattr(usage, "cache_read_input_tokens", None)
+    if fallback is None and isinstance(usage, Mapping):
+        fallback = usage.get("cache_read_input_tokens")
+    return int(fallback) if fallback else 0
+
+
 class CoordinatorClient:
-    def __init__(self, api_base: str, api_key: str, model: str) -> None:
+    def __init__(
+        self, api_base: str, api_key: str, model: str, prompt_cache: str = "auto"
+    ) -> None:
         self.model = model
         self.api_base = api_base
         self.provider = "openai_compat"
+        # Anthropic-family models need explicit cache breakpoints; OpenAI-family
+        # caching is automatic server-side, so we inject nothing for them.
+        self._cache_prefix = prompt_cache == "auto" and _is_anthropic_model(model)
         self._client = AsyncOpenAI(base_url=api_base, api_key=api_key)
 
     async def chat(
@@ -108,11 +196,14 @@ class CoordinatorClient:
         stream: bool = False,
         token_callback: Callable[[str], None] | None = None,
     ) -> ChatResponse:
+        request_messages = (
+            _apply_prompt_cache(messages) if self._cache_prefix else messages
+        )
         try:
             if not stream or token_callback is None:
                 completion = await self._client.chat.completions.create(
                     model=self.model,
-                    messages=cast(Any, messages),
+                    messages=cast(Any, request_messages),
                     tools=cast(Any, tools),
                 )
                 return self._normalize_completion(completion)
@@ -124,7 +215,7 @@ class CoordinatorClient:
 
             stream_resp = await self._client.chat.completions.create(
                 model=self.model,
-                messages=cast(Any, messages),
+                messages=cast(Any, request_messages),
                 tools=cast(Any, tools),
                 stream=True,
                 stream_options={"include_usage": True},
@@ -179,6 +270,7 @@ class CoordinatorClient:
                             completion_tokens=int(
                                 getattr(chunk.usage, "completion_tokens", 0)
                             ),
+                            cached_prompt_tokens=_extract_cached_tokens(chunk.usage),
                         )
 
             tool_calls = [
@@ -237,6 +329,7 @@ class CoordinatorClient:
             usage_record = UsageRecord(
                 prompt_tokens=int(getattr(usage, "prompt_tokens", 0)),
                 completion_tokens=int(getattr(usage, "completion_tokens", 0)),
+                cached_prompt_tokens=_extract_cached_tokens(usage),
             )
         return ChatResponse(
             choices=[

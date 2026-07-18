@@ -109,7 +109,12 @@ async def run_one_turn(
     ui.begin_turn(turn_index)
     messages_before = last_logged_index
     threshold = get_auto_compact_threshold(ctx.model_id, ctx.model_limit)
-    if _should_compact(messages=messages, ctx=ctx, threshold=threshold):
+    if _should_compact(
+        messages=messages,
+        ctx=ctx,
+        threshold=threshold,
+        compact_above_tokens=config.compact_above_tokens,
+    ):
         compacted = await _perform_compaction(
             messages=messages, client=client, ctx=ctx, ui=ui
         )
@@ -240,14 +245,30 @@ async def run_one_turn(
 
 
 def _should_compact(
-    messages: list[dict], ctx: "ContextTracker", threshold: int
+    messages: list[dict],
+    ctx: "ContextTracker",
+    threshold: int,
+    compact_above_tokens: int | None = None,
 ) -> bool:
     if ctx.breaker_tripped:
         return False
-    if not messages or messages[-1]["role"] != "user":
+    if not messages:
         return False
-    # Falls back to estimate if API usage is unavailable
-    return ctx.total >= threshold
+    last_role = messages[-1].get("role")
+    total = ctx.total  # falls back to estimate if API usage is unavailable
+    # Near-limit rule: only compact right after a user message.
+    if last_role == "user" and total >= threshold:
+        return True
+    # Explicit safety-net knob: compact at any user- or tool-result boundary
+    # once configured threshold is reached, so SDK runs that never approach the
+    # model limit can still shed context.
+    if (
+        compact_above_tokens is not None
+        and total >= compact_above_tokens
+        and last_role in ("user", "tool")
+    ):
+        return True
+    return False
 
 
 async def _perform_compaction(
@@ -256,7 +277,7 @@ async def _perform_compaction(
     ctx: "ContextTracker",
     ui: "ConsoleBase",
 ) -> bool:
-    assert messages and messages[-1]["role"] == "user"
+    assert messages and messages[-1].get("role") in ("user", "tool")
     before_tokens = ctx.prompt_tokens + ctx.completion_tokens
     after_tokens = before_tokens
     try:
@@ -265,8 +286,19 @@ async def _perform_compaction(
         pass
     try:
         original_system = messages[0]
-        pending_user = messages[-1]
-        rendered_transcript = _render_transcript(messages[1:-1])
+        initial_task = _first_user_message(messages)
+        tail = messages[-1]
+        if tail.get("role") == "user":
+            pending_user: dict | None = tail
+            transcript_source = messages[1:-1]
+        else:
+            # Tool-result boundary: fold the trailing tool output into the
+            # summary. A dangling tool message can't end the rebuilt history
+            # (its parent tool_calls message is summarized away), so this path
+            # keeps no pending message.
+            pending_user = None
+            transcript_source = messages[1:]
+        rendered_transcript = _render_transcript(transcript_source)
         try:
             response = await client.chat(
                 messages=[
@@ -296,6 +328,7 @@ async def _perform_compaction(
             return False
         replacement_messages = _build_summary_messages(
             original_system=original_system,
+            initial_task=initial_task,
             summary_text=content.strip(),
             pending_user=pending_user,
         )
@@ -425,15 +458,35 @@ def _record_compaction_failure(ctx: "ContextTracker", ui: "ConsoleBase") -> None
     ui.print(_COMPACTION_FAILURE_WARNING)
 
 
+def _first_user_message(messages: list[dict]) -> dict | None:
+    """Return the first user-role message after the system prompt.
+
+    On a fresh conversation this is the initial task (the assignment). Because
+    compaction re-pins it as the leading user message, the same lookup keeps
+    returning it across repeated compactions."""
+
+    for message in messages[1:]:
+        if message.get("role") == "user":
+            return message
+    return None
+
+
 def _build_summary_messages(
-    original_system: dict, summary_text: str, pending_user: dict
+    original_system: dict,
+    initial_task: dict | None,
+    summary_text: str,
+    pending_user: dict | None,
 ) -> list[dict]:
-    return [
-        original_system,
-        {"role": "system", "content": _COMPACT_BOUNDARY_TEXT},
-        {"role": "user", "content": _COMPACT_SUMMARY_PREFIX + summary_text},
-        pending_user,
-    ]
+    rebuilt: list[dict] = [original_system]
+    # Pin the initial task verbatim so the assignment survives every
+    # compaction, not just the first (skip when it already is the pending tail).
+    if initial_task is not None and initial_task is not pending_user:
+        rebuilt.append(initial_task)
+    rebuilt.append({"role": "system", "content": _COMPACT_BOUNDARY_TEXT})
+    rebuilt.append({"role": "user", "content": _COMPACT_SUMMARY_PREFIX + summary_text})
+    if pending_user is not None:
+        rebuilt.append(pending_user)
+    return rebuilt
 
 
 def _render_transcript(messages: list[dict]) -> str:
