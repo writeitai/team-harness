@@ -63,13 +63,17 @@ class RecordingClient:
         return None
 
 
-def make_run_log(tmp_path, config, run_id="run_1"):
+def make_run_log(tmp_path, config, run_id="run_1", tool_result_max_bytes=None):
+    kwargs = {}
+    if tool_result_max_bytes is not None:
+        kwargs["tool_result_max_bytes"] = tool_result_max_bytes
     return RunLogWriter(
         run_id=run_id,
         run_dir=tmp_path,
         provider=config.provider,
         model=config.model,
         api_base=config.api_base,
+        **kwargs,
     )
 
 
@@ -176,7 +180,14 @@ async def test_run_one_turn_keeps_large_file_tool_result_bounded(
     fs_tools.setup_fs()
     source_path = tmp_path / "large-report.json"
     source_path.write_text(data="x" * 2_000_000)
-    run_log = make_run_log(tmp_path, config, run_id=f"run_bounded_{tool_name}")
+    # This test isolates the file-reader context bound; keep run.json
+    # persistence truncation out of the way with a generous ceiling.
+    run_log = make_run_log(
+        tmp_path,
+        config,
+        run_id=f"run_bounded_{tool_name}",
+        tool_result_max_bytes=2_000_000,
+    )
     registry = ToolRegistry()
     registry.register(schema=tool_schema, fn=tool_fn)
     client = RecordingClient(
@@ -721,9 +732,11 @@ async def test_compaction_rebuilds_messages_with_boundary_summary_and_pending_us
 ):
     messages = compactable_messages()
     original_system = copy.deepcopy(messages[0])
+    initial_task = copy.deepcopy(messages[1])
     pending_user = copy.deepcopy(messages[-1])
     expected_messages = [
         original_system,
+        initial_task,
         {
             "role": "system",
             "content": (
@@ -746,7 +759,9 @@ async def test_compaction_rebuilds_messages_with_boundary_summary_and_pending_us
 
     assert compacted is True
     assert messages == expected_messages
-    assert len(messages) == 4
+    assert len(messages) == 5
+    # The initial task (the assignment) survives compaction verbatim.
+    assert messages[1] == {"role": "user", "content": "first request"}
 
 
 @pytest.mark.asyncio
@@ -875,8 +890,10 @@ async def test_compaction_survives_begin_compaction_raise(ctx, ui):
     )
 
     assert compacted is True
-    assert messages[1]["role"] == "system"
-    assert messages[2]["content"] == (
+    # Layout: [system, pinned initial task, boundary, summary, pending user].
+    assert messages[1] == {"role": "user", "content": "first request"}
+    assert messages[2]["role"] == "system"
+    assert messages[3]["content"] == (
         "Compact summary of earlier conversation:\n\nsummary body"
     )
     assert raising_ui.compaction_begin_calls == 1
@@ -899,8 +916,9 @@ async def test_compaction_survives_end_compaction_raise(ctx, ui):
     )
 
     assert compacted is True
-    assert messages[1]["role"] == "system"
-    assert messages[2]["content"] == (
+    assert messages[1] == {"role": "user", "content": "first request"}
+    assert messages[2]["role"] == "system"
+    assert messages[3]["content"] == (
         "Compact summary of earlier conversation:\n\nsummary body"
     )
     assert len(raising_ui.compaction_end_calls) == 1
@@ -1540,8 +1558,10 @@ async def test_run_one_turn_resets_messages_before_to_zero_after_compaction(
     delta = run_data["turns"][0]["messages_appended_delta"]
     assert delta == messages
     assert delta[0]["role"] == "system"
-    assert delta[1]["role"] == "system"
-    assert delta[2]["content"].startswith("Compact summary of earlier conversation:")
+    # delta[1] is the pinned initial task; delta[2] is the compaction boundary.
+    assert delta[1] == {"role": "user", "content": "first request"}
+    assert delta[2]["role"] == "system"
+    assert delta[3]["content"].startswith("Compact summary of earlier conversation:")
     assert delta[-1] == {"role": "assistant", "content": "final assistant"}
 
 
@@ -1579,7 +1599,9 @@ async def test_run_one_turn_integration_compacts_then_replies(
 
     assert should_continue is False
     assert client.calls[1]["messages"] == messages[:-1]
-    assert messages[3] == {"role": "user", "content": "pending user"}
+    # Pinned initial task shifts the pending user to index 4.
+    assert messages[1] == {"role": "user", "content": "first request"}
+    assert messages[4] == {"role": "user", "content": "pending user"}
     assert messages[-1] == {"role": "assistant", "content": "assistant reply"}
     run_data = json.loads(run_log.path.read_text())
     assert (
@@ -1624,3 +1646,172 @@ def test_should_compact_on_system_only_messages_returns_false(ctx):
         )
         is False
     )
+
+
+def _tool_tail_messages():
+    return [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "the initial task"},
+        {
+            "role": "assistant",
+            "content": "calling a tool",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "sample", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "large tool result"},
+    ]
+
+
+def test_should_compact_fires_on_tool_tail_with_compact_above_tokens(ctx):
+    ctx.breaker_tripped = False
+    ctx.prompt_tokens = 90_000
+    ctx.completion_tokens = 0
+
+    # Near-limit threshold is unreachable here; the explicit knob still fires
+    # because the tail is a tool-result boundary above compact_above_tokens.
+    assert (
+        _should_compact(
+            messages=_tool_tail_messages(),
+            ctx=ctx,
+            threshold=10_000_000,
+            compact_above_tokens=80_000,
+        )
+        is True
+    )
+
+
+def test_should_compact_knob_ignores_assistant_tail(ctx):
+    ctx.breaker_tripped = False
+    ctx.prompt_tokens = 90_000
+    ctx.completion_tokens = 0
+    messages = _tool_tail_messages()[:-1]  # tail is the assistant tool-call msg
+
+    assert (
+        _should_compact(
+            messages=messages,
+            ctx=ctx,
+            threshold=10_000_000,
+            compact_above_tokens=80_000,
+        )
+        is False
+    )
+
+
+def test_should_compact_knob_respects_circuit_breaker(ctx):
+    ctx.breaker_tripped = True
+    ctx.prompt_tokens = 90_000
+    ctx.completion_tokens = 0
+
+    assert (
+        _should_compact(
+            messages=_tool_tail_messages(),
+            ctx=ctx,
+            threshold=10_000_000,
+            compact_above_tokens=80_000,
+        )
+        is False
+    )
+
+
+def test_should_compact_knob_below_threshold_does_not_fire(ctx):
+    ctx.breaker_tripped = False
+    ctx.prompt_tokens = 50_000
+    ctx.completion_tokens = 0
+
+    assert (
+        _should_compact(
+            messages=_tool_tail_messages(),
+            ctx=ctx,
+            threshold=10_000_000,
+            compact_above_tokens=80_000,
+        )
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_one_turn_compacts_at_tool_boundary_via_knob(
+    tmp_path, config, ctx, ui, monkeypatch
+):
+    config.compact_above_tokens = 80_000
+    run_log = make_run_log(tmp_path, config, run_id="run_knob")
+    registry = ToolRegistry()
+    events: list[str] = []
+
+    async def fake_perform_compaction(messages, client, ctx, ui):
+        events.append("compact")
+        return True
+
+    monkeypatch.setattr(
+        "team_harness.coordinator.loop._perform_compaction", fake_perform_compaction
+    )
+    ctx.model_id = "openai/gpt-4o"
+    ctx.model_limit = 128_000
+    # Above the knob (80k) but below the near-limit auto threshold (~98.6k).
+    ctx.prompt_tokens = 90_000
+    ctx.completion_tokens = 0
+    messages = _tool_tail_messages()
+    client = RecordingClient([make_response(content="done")])
+
+    await run_one_turn(
+        messages=messages,
+        config=config,
+        run_log=run_log,
+        ui=ui,
+        tool_registry=registry,
+        client=client,
+        ctx=ctx,
+        turn_index=0,
+        last_logged_index=0,
+    )
+
+    assert events == ["compact"]
+
+
+@pytest.mark.asyncio
+async def test_perform_compaction_tool_tail_folds_result_and_pins_task(ctx, ui):
+    messages = _tool_tail_messages()
+    client = SequenceClient([make_response(content="dense summary")])
+
+    compacted = await _perform_compaction(
+        messages=messages, client=client, ctx=ctx, ui=ui
+    )
+
+    assert compacted is True
+    # The initial task is pinned verbatim right after the system prompt.
+    assert messages[1] == {"role": "user", "content": "the initial task"}
+    # The trailing tool result is folded into the summary; no dangling tool
+    # message remains (its parent tool_calls message was summarized away).
+    assert all(message.get("role") != "tool" for message in messages)
+    assert messages[-1]["role"] == "user"
+    assert messages[-1]["content"].startswith(
+        "Compact summary of earlier conversation:"
+    )
+
+
+@pytest.mark.asyncio
+async def test_initial_task_survives_repeated_compactions(ctx, ui):
+    messages = compactable_messages()
+    client = SequenceClient(
+        [
+            make_response(content="first summary"),
+            make_response(content="second summary"),
+        ]
+    )
+
+    await _perform_compaction(messages=messages, client=client, ctx=ctx, ui=ui)
+    assert messages[1] == {"role": "user", "content": "first request"}
+
+    # Continue working, then compact a second time.
+    messages.append({"role": "assistant", "content": "more work"})
+    messages.append({"role": "user", "content": "second pending"})
+
+    await _perform_compaction(messages=messages, client=client, ctx=ctx, ui=ui)
+    # Same original assignment, not the intermediate summary, is still pinned.
+    assert messages[1] == {"role": "user", "content": "first request"}
+    assert messages[-1] == {"role": "user", "content": "second pending"}

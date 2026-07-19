@@ -77,6 +77,8 @@ class TeamHarness:
         retry_base_delay_s: float | None = None,
         retry_max_delay_s: float | None = None,
         max_depth: int | None = None,
+        compact_above_tokens: int | None = None,
+        prompt_cache: str | None = None,
         system_prompt: str | None = None,
         system_prompt_file: str | None = None,
         agent_models: dict[str, str] | None = None,
@@ -102,6 +104,8 @@ class TeamHarness:
         self._retry_base_delay_s = retry_base_delay_s
         self._retry_max_delay_s = retry_max_delay_s
         self._max_depth = max_depth
+        self._compact_above_tokens = compact_above_tokens
+        self._prompt_cache = prompt_cache
         self._system_prompt = system_prompt
         self._system_prompt_file = system_prompt_file
         self._agent_models = agent_models
@@ -136,6 +140,8 @@ class TeamHarness:
                 retry_base_delay_s=self._retry_base_delay_s,
                 retry_max_delay_s=self._retry_max_delay_s,
                 max_depth=self._max_depth,
+                compact_above_tokens=self._compact_above_tokens,
+                prompt_cache=self._prompt_cache,
                 system_prompt=self._system_prompt,
                 cli_system_prompt_file=self._system_prompt_file,
                 allowed_agents=allowed_agents_str,
@@ -186,6 +192,7 @@ class TeamHarness:
                 ),
                 capabilities=sorted(TEAM_HARNESS_CAPABILITIES),
                 coordinator_input_path=str(coordinator_input_path),
+                tool_result_max_bytes=config.run_log_tool_result_max_bytes,
             )
             skills = load_skill_metadata(cwd=config.cwd)
             allowed_types = get_allowed_types(config=config)
@@ -944,7 +951,10 @@ def _make_client(config: Config) -> CoordinatorLike:
     """Create the appropriate coordinator client based on provider."""
     if config.provider == "openai_compat":
         return CoordinatorClient(
-            api_base=config.api_base, api_key=config.api_key, model=config.model
+            api_base=config.api_base,
+            api_key=config.api_key,
+            model=config.model,
+            prompt_cache=config.prompt_cache,
         )
     if config.provider == "codex":
         try:

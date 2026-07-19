@@ -73,6 +73,52 @@ _READ_NEW_TRUNCATION_TEMPLATE = (
     "Full stdout log: {stdout_path}]\n"
 )
 
+_READ_AGENT_OUTPUT_TRUNCATION_TEMPLATE = (
+    "[read_agent_output truncated: requested tail_bytes={requested_bytes} "
+    "clamped to {effective_bytes}; showing the latest {effective_bytes} bytes "
+    "per stream. Full stdout log: {stdout_path} | Full stderr log: "
+    "{stderr_path}]\n"
+)
+
+# Default ceiling for read_agent_output(tail_bytes=...) when no run config is
+# bound (module-level tools before setup, or config missing the knob).
+READ_AGENT_OUTPUT_MAX_TAIL_BYTES = 16 * 1024
+
+
+def _read_output_tail(path: Path, tail_bytes: int) -> tuple[str, int]:
+    """Return (decoded tail, full file size) for one log path."""
+    if not path.exists():
+        return "", 0
+    with path.open("rb") as handle:
+        size = path.stat().st_size
+        handle.seek(max(0, size - tail_bytes))
+        return handle.read().decode(errors="replace"), size
+
+
+def _render_agent_output(
+    *,
+    stdout_log: Path,
+    stderr_log: Path,
+    requested_tail_bytes: int,
+    max_tail_bytes: int,
+) -> str:
+    """Read bounded stdout/stderr tails and prepend a banner when the request
+    was clamped or the underlying logs were larger than the returned tail."""
+    effective = min(max(0, requested_tail_bytes), max(0, max_tail_bytes))
+    stdout_text, stdout_size = _read_output_tail(stdout_log, effective)
+    stderr_text, stderr_size = _read_output_tail(stderr_log, effective)
+    clamped = requested_tail_bytes > max_tail_bytes
+    truncated = stdout_size > effective or stderr_size > effective
+    banner = ""
+    if clamped or truncated:
+        banner = _READ_AGENT_OUTPUT_TRUNCATION_TEMPLATE.format(
+            requested_bytes=requested_tail_bytes,
+            effective_bytes=effective,
+            stdout_path=stdout_log,
+            stderr_path=stderr_log,
+        )
+    return f"{banner}=== stdout ===\n{stdout_text}\n=== stderr ===\n{stderr_text}"
+
 
 def _build_worker_output_footer(
     output_dir: str = "", config: "Config | None" = None
@@ -195,6 +241,9 @@ def _build_direct_spawn_footer(
         "Read the assignment envelope before working and use the absolute paths it declares.",
         "You are an ephemeral delegate. Report your result to the harness coordinator; ",
         "the coordinator owns integration and the loop-layer decision.",
+        "End your stdout with a result card of at most 15 lines: outcome, key "
+        "decisions, files changed, and absolute paths to any longer report you "
+        "wrote to a file. Write long reports to files, not stdout.",
     ]
     if caller_context is not None:
         context_lines.extend(
@@ -728,7 +777,11 @@ READ_AGENT_OUTPUT_SCHEMA = {
     "type": "function",
     "function": {
         "name": "read_agent_output",
-        "description": "Read stdout and stderr log tails for a spawned agent.",
+        "description": (
+            "Read stdout and stderr log tails for a spawned agent. tail_bytes "
+            "is clamped to a per-run ceiling; over-large requests return the "
+            "clamped tail with a banner naming the full log paths."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -1243,25 +1296,26 @@ async def agent_status(agent_id: str) -> str:
 
 
 async def read_agent_output(agent_id: str, tail_bytes: int = 8192) -> str:
-    manager, _, _, _ = _require_setup()
+    manager, _, config, _ = _require_setup()
     state = manager.get(agent_id)
-
-    def _tail(path: Path) -> str:
-        if not path.exists():
-            return ""
-        with path.open("rb") as handle:
-            size = path.stat().st_size
-            handle.seek(max(0, size - tail_bytes))
-            return handle.read().decode(errors="replace")
-
-    stdout_text = await asyncio.to_thread(_tail, state.stdout_log)
-    stderr_text = await asyncio.to_thread(_tail, state.stderr_log)
-    return f"=== stdout ===\n{stdout_text}\n=== stderr ===\n{stderr_text}"
+    max_tail_bytes = int(
+        getattr(config, "read_output_max_tail_bytes", READ_AGENT_OUTPUT_MAX_TAIL_BYTES)
+    )
+    return await asyncio.to_thread(
+        _render_agent_output,
+        stdout_log=state.stdout_log,
+        stderr_log=state.stderr_log,
+        requested_tail_bytes=tail_bytes,
+        max_tail_bytes=max_tail_bytes,
+    )
 
 
 async def read_new_agent_output(agent_id: str) -> str:
-    manager, _, _, _ = _require_setup()
+    manager, _, config, _ = _require_setup()
     state = manager.get(agent_id)
+    max_bytes = int(
+        getattr(config, "read_new_output_max_bytes", READ_NEW_AGENT_OUTPUT_MAX_BYTES)
+    )
     lock = _output_locks.setdefault(agent_id, asyncio.Lock())
     async with lock:
         cursor = _output_cursors.get(agent_id, 0)
@@ -1272,6 +1326,7 @@ async def read_new_agent_output(agent_id: str) -> str:
             stdout_log=state.stdout_log,
             output_cursor=cursor,
             seen_stdout_cursor=seen_cursor,
+            max_bytes=max_bytes,
         )
         if not data:
             return ""
@@ -1665,21 +1720,26 @@ def build_agent_tool_bindings(
 
     async def _read_agent_output(agent_id: str, tail_bytes: int = 8192) -> str:
         state = manager.get(agent_id)
-
-        def _tail(path: Path) -> str:
-            if not path.exists():
-                return ""
-            with path.open("rb") as handle:
-                size = path.stat().st_size
-                handle.seek(max(0, size - tail_bytes))
-                return handle.read().decode(errors="replace")
-
-        stdout_text = await asyncio.to_thread(_tail, state.stdout_log)
-        stderr_text = await asyncio.to_thread(_tail, state.stderr_log)
-        return f"=== stdout ===\n{stdout_text}\n=== stderr ===\n{stderr_text}"
+        max_tail_bytes = int(
+            getattr(
+                config, "read_output_max_tail_bytes", READ_AGENT_OUTPUT_MAX_TAIL_BYTES
+            )
+        )
+        return await asyncio.to_thread(
+            _render_agent_output,
+            stdout_log=state.stdout_log,
+            stderr_log=state.stderr_log,
+            requested_tail_bytes=tail_bytes,
+            max_tail_bytes=max_tail_bytes,
+        )
 
     async def _read_new_agent_output(agent_id: str) -> str:
         state = manager.get(agent_id)
+        max_bytes = int(
+            getattr(
+                config, "read_new_output_max_bytes", READ_NEW_AGENT_OUTPUT_MAX_BYTES
+            )
+        )
         lock = output_locks.setdefault(agent_id, asyncio.Lock())
         async with lock:
             cursor = output_cursors.get(agent_id, 0)
@@ -1690,6 +1750,7 @@ def build_agent_tool_bindings(
                 stdout_log=state.stdout_log,
                 output_cursor=cursor,
                 seen_stdout_cursor=seen_cursor,
+                max_bytes=max_bytes,
             )
             if not data:
                 return ""
