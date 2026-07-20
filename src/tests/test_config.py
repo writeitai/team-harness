@@ -552,6 +552,40 @@ def test_default_agent_templates_use_th_for_harness():
     assert DEFAULT_AGENT_TEMPLATES["harness"].model_flag == "--model"
 
 
+def test_custom_grok_inherits_omitted_fields_and_clears_explicit_values(
+    tmp_path, monkeypatch
+):
+    _write_global_config(
+        tmp_path,
+        monkeypatch,
+        [],
+        agents_text="""
+[agents.grok]
+command = ["legacy-grok-wrapper"]
+shared_flags = []
+prompt_flag = false
+model_flag = false
+default_model = false
+reasoning_effort_flag = []
+deduplicate_flags = []
+""",
+    )
+
+    template = load_config(cwd=str(tmp_path)).agent_templates["grok"]
+    builtin = DEFAULT_AGENT_TEMPLATES["grok"]
+
+    assert template.command == ("legacy-grok-wrapper",)
+    assert template.shared_flags == ()
+    assert template.prompt_flag is None
+    assert template.model_flag is None
+    assert template.default_model is None
+    assert template.reasoning_effort_flag == ()
+    assert template.deduplicate_flags == ()
+    # Omitted fields continue to inherit the new built-in defaults.
+    assert template.resume_flags == builtin.resume_flags
+    assert template.session_capture == builtin.session_capture
+
+
 def test_default_config_text_uses_structured_agents():
     default_config = _default_config_text()
     assert default_config.startswith("# th")
@@ -735,6 +769,17 @@ def test_default_config_text_contains_verified_flag_tokens():
     assert 'deduplicate_flags = [\n    "-p",' in text
     assert "[agents.claude.session_capture]" in text
     assert 'match = { type = "system", subtype = "init" }' in text
+    # Grok Build CLI
+    assert "[agents.grok]" in text
+    assert 'command = ["grok"]' in text
+    assert '"--always-approve"' in text
+    assert '"--output-format", "streaming-json"' in text
+    assert '"--no-auto-update"' in text
+    assert 'default_model = "grok-4.5"' in text
+    assert 'reasoning_effort_flag = ["--reasoning-effort", "{effort}"]' in text
+    assert "[agents.grok.session_capture]" in text
+    assert 'match = { type = "end" }' in text
+    assert 'field_path = ["sessionId"]' in text
     # Antigravity
     assert "[agents.antigravity]" in text
     assert 'command = ["agy"]' in text

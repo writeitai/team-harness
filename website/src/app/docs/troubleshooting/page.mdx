@@ -8,7 +8,7 @@ export const metadata = {
 
 ## A worker fails to start or authenticate
 
-Workers are separate CLIs with their own installation and auth. Confirm the binary is installed and that you can run it standalone (e.g. `codex`, `gemini`, `claude`, `agy`). Each worker uses its **own native auth** — the harness does not forward the coordinator's API key to workers unless you explicitly configure `provider_env` (see [Providers & Auth](/docs/providers#routing-workers-through-openrouter)). Restrict a run to only the workers you have with `--agents codex,gemini`.
+Workers are separate CLIs with their own installation and auth. Confirm the binary is installed and that you can run it standalone (e.g. `codex`, `gemini`, `claude`, `grok`, `agy`). Each worker uses its **own native auth** — the harness does not forward the coordinator's API key to workers unless you explicitly configure `provider_env` (see [Providers & Auth](/docs/providers#routing-workers-through-openrouter)). Restrict a run to only the workers you have with `--agents codex,gemini`. For Grok, set `XAI_API_KEY` or run `grok login`.
 
 ## "Codex model … is not in the built-in known model list"
 
@@ -28,9 +28,13 @@ th init --force
 
 See [Workers](/docs/workers#the-agent-template-schema) for the structured schema.
 
-## Antigravity has no model flag
+## Grok session capture is late
 
-`agy --help` exposes no model flag, so team-harness does not inject `--model` for the `antigravity` worker. Print mode also emits no stream-json, so automatic session capture is off — but resume mode still works if you already know a conversation id (`--conversation <id>`).
+The built-in `grok` worker uses `--output-format streaming-json` and captures `sessionId` from the final NDJSON `end` event. A crash before that event may leave no resumable session id. Resume uses `--resume <id>` (not `--session-id`, which creates/forks rather than resumes). Auth is external: `XAI_API_KEY` or `grok login`.
+
+## Antigravity model / session notes
+
+Print mode does not emit stream-json, so automatic session capture is off for the `antigravity` worker — but resume mode still works if you already know a conversation id (`--conversation <id>`).
 
 ## Alt/Esc keys feel delayed in tmux
 

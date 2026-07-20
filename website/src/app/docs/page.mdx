@@ -31,7 +31,7 @@ You could get a similar result from Claude Code's built-in agent teams. team-har
 ## Why team-harness
 
 - **Any model, any provider.** The coordinator talks to any OpenAI-compatible endpoint (OpenRouter, OpenAI, local proxies) or a Codex subscription. Each worker keeps its own native auth, or you can route it through OpenRouter too.
-- **Real CLIs, not reimplementations.** Workers are the actual `codex`, `gemini`, `claude`, and `agy` binaries as subprocesses — you get their real capabilities, sandboxes, and session handling.
+- **Real CLIs, not reimplementations.** Workers are the actual `codex`, `gemini`, `claude`, `grok`, and `agy` binaries as subprocesses — you get their real capabilities, sandboxes, and session handling.
 - **Editable prompts.** The coordinator base prompt, a per-worker suffix, and a worker footer are all plain files you can version-control per project.
 - **Inspectable runs.** Every run writes a losslessly replayable log, a per-worker session manifest, and each worker's stdout/stderr under a session output directory.
 

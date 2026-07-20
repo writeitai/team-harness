@@ -1,6 +1,6 @@
 # Team Harness
 
-Coordination layer for other harnesses (Codex, Gemini, Claude Code, Antigravity, OpenCode, pi, OpenHands).
+Coordination layer for other harnesses (Codex, Gemini, Claude Code, Grok Build, Antigravity, OpenCode, pi, OpenHands).
 
 <br>
 
@@ -55,6 +55,7 @@ Install with `pip install openhands` (the PyPI distribution name is `openhands`,
 | `codex`   | [Codex CLI](https://github.com/openai/codex)               |
 | `gemini`  | [Gemini CLI](https://github.com/google-gemini/gemini-cli)  |
 | `claude`  | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) |
+| `grok`    | [Grok Build CLI](https://docs.x.ai/build/cli/headless-scripting) (`XAI_API_KEY` or `grok login`) |
 | `antigravity` | [Antigravity CLI](https://antigravity.google/docs/cli-overview) |
 | `openhands` | [OpenHands CLI](https://github.com/OpenHands/OpenHands-CLI) |
 | `opencode`| [opencode](https://github.com/opencode-ai/opencode)        |
@@ -332,6 +333,25 @@ strategy = "stream_json_event"
 match = { type = "system", subtype = "init" }
 field_path = ["session_id"]
 
+[agents.grok]
+command = ["grok"]
+shared_flags = [
+    "--always-approve",
+    "--output-format", "streaming-json",
+    "--no-auto-update",
+]
+resume_flags = ["--resume", "{session_id}"]
+prompt_flag = "-p"
+model_flag = "--model"
+default_model = "grok-4.5"
+deduplicate_flags = ["--always-approve", "--no-auto-update"]
+reasoning_effort_flag = ["--reasoning-effort", "{effort}"]
+
+[agents.grok.session_capture]
+strategy = "stream_json_event"
+match = { type = "end" }
+field_path = ["sessionId"]
+
 [agents.antigravity]
 command = ["agy"]
 shared_flags = [
@@ -367,9 +387,11 @@ OpenHands runs are not auto-resumable from team-harness today. The `--json` outp
 
 `--override-with-envs` is required so `LLM_MODEL` injection works. A side-effect is that any `LLM_MODEL`, `LLM_API_KEY`, or `LLM_BASE_URL` already set in your shell will also be picked up by the worker. Unset or override them if you want deterministic per-run behavior.
 
-Antigravity runs use `agy --print` so the worker can run as a non-interactive subprocess. The CLI does not expose a model flag in `agy --help`, so team-harness does not inject `--model` for this worker by default. Automatic session capture is not configured because print mode does not emit stream-json; callers that already know a conversation id can still use resume mode, which renders `--conversation <id>`.
+Grok Build (`grok`) runs headless with `--always-approve`, `--output-format streaming-json`, and `--no-auto-update`. Session ids are captured from the final NDJSON `end` event (`sessionId`) and resume uses `--resume <id>`. Auth is external: set `XAI_API_KEY` or run `grok login`. Set `GROK_HOME` when CI needs an isolated Grok home; `GROK_DISABLE_AUTOUPDATER=1` is an optional environment-policy fallback to `--no-auto-update` and is not injected by the built-in template. Do not put `--session-id` in `shared_flags` — combining it with `--resume` forks rather than resumes. A crash before the `end` event may leave no captured session id. Unattended tool approval is intentional for harness workers.
 
-Custom `[agents.openhands]` sections in existing `.team-harness/config.toml` files will, after upgrade, inherit the new built-in defaults for any fields they do not explicitly set (including `shared_flags`). If your custom section was a standalone agent that coincidentally used the name `openhands`, rename it or explicitly clear inherited fields (e.g. `shared_flags = []`, `prompt_flag = false`, `model_env_vars = []`).
+Antigravity runs use `agy --print` so the worker can run as a non-interactive subprocess. Automatic session capture is not configured because print mode does not emit stream-json; callers that already know a conversation id can still use resume mode, which renders `--conversation <id>`.
+
+Custom `[agents.openhands]` or `[agents.grok]` sections in existing `.team-harness/config.toml` files will, after upgrade, inherit the new built-in defaults for any fields they do not explicitly set (including `shared_flags`). If your custom section was a standalone agent that coincidentally used the name `openhands` or `grok`, rename it or explicitly clear inherited fields (e.g. `shared_flags = []`, `prompt_flag = false`, `model_env_vars = []`).
 
 ### Prompt configuration
 
@@ -628,6 +650,7 @@ Per-CLI shapes and allowed values:
 |---|---|---|
 | codex  | `["-c", "model_reasoning_effort={effort}"]` | `low`, `medium`, `high`, `xhigh` |
 | claude | `["--effort", "{effort}"]` | `low`, `medium`, `high`, `max` |
+| grok   | `["--reasoning-effort", "{effort}"]` | `low`, `medium`, `high` |
 | gemini | (not supported upstream) | — |
 
 The harness does **not** validate the value against a per-CLI enum. Pass

@@ -213,6 +213,34 @@ strategy = "stream_json_event"
 match = { type = "system", subtype = "init" }
 field_path = ["session_id"]
 
+# Grok Build CLI worker (https://docs.x.ai/build/cli/headless-scripting).
+# Headless unattended mode uses --always-approve. streaming-json emits an
+# NDJSON `end` event with camelCase sessionId used for resume via --resume.
+# Auth: XAI_API_KEY or `grok login`. Do not put --session-id in shared_flags:
+# combining -s with --resume requires --fork-session and would fork, not resume.
+# A crash before the `end` event may leave no captured session id.
+# If you previously defined a custom [agents.grok] for an unrelated binary,
+# rename it or explicitly clear/replace inherited fields after upgrading.
+[agents.grok]
+command = ["grok"]
+shared_flags = [
+    "--always-approve",
+    "--output-format", "streaming-json",
+    "--no-auto-update",
+]
+resume_flags = ["--resume", "{session_id}"]
+prompt_flag = "-p"
+model_flag = "--model"
+default_model = "grok-4.5"
+deduplicate_flags = ["--always-approve", "--no-auto-update"]
+reasoning_effort_flag = ["--reasoning-effort", "{effort}"]
+# reasoning_effort = "high"   # optional pin: low|medium|high (grok 0.2.106 rejects others)
+
+[agents.grok.session_capture]
+strategy = "stream_json_event"
+match = { type = "end" }
+field_path = ["sessionId"]
+
 # --- OpenRouter recipe for Claude Code ---------------------------------
 # By default the claude worker talks to native Anthropic (or whichever
 # provider your existing ANTHROPIC_* shell env points at). To route
@@ -350,7 +378,7 @@ shutdown_timeout_s = 10.0
 min_agent_lifetime_before_kill_s = 600.0
 
 # Restrict which agent types the coordinator can spawn. Leave commented to allow all.
-# allowed_agents = ["codex", "gemini", "claude", "antigravity", "openhands", "opencode", "pi", "harness"]
+# allowed_agents = ["codex", "gemini", "claude", "grok", "antigravity", "openhands", "opencode", "pi", "harness"]
 
 # --- Experimental Codex subscription coordinator ---
 # provider = "codex"
@@ -433,7 +461,7 @@ shutdown_timeout_s = 10.0
 min_agent_lifetime_before_kill_s = 600.0
 
 # Restrict which agent types the coordinator can spawn. Leave commented to allow all.
-# allowed_agents = ["codex", "gemini", "claude", "antigravity", "openhands", "opencode", "pi", "harness"]
+# allowed_agents = ["codex", "gemini", "claude", "grok", "antigravity", "openhands", "opencode", "pi", "harness"]
 
 # --- Experimental Codex subscription coordinator ---
 # provider = "codex"

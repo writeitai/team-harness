@@ -503,3 +503,11 @@ def test_agent_emoji_unknown_type_falls_back():
     from team_harness.ui.console import AGENT_EMOJIS
 
     assert AGENT_EMOJIS.get("unknown_type", "") == ""
+
+
+def test_grok_agent_chrome_is_registered():
+    from team_harness.ui.console import AGENT_COLORS
+    from team_harness.ui.console import AGENT_EMOJIS
+
+    assert AGENT_COLORS["grok"] == "bright_magenta"
+    assert AGENT_EMOJIS["grok"] == "\u26a1"
