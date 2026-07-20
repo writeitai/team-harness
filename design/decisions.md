@@ -342,3 +342,43 @@ consumers that expected one call to return more than 32,768 characters or
 32 KiB after UTF-8 encoding must follow `read_file`'s continuation offset or
 call `read_new_file_content` again with the same path. Full contract:
 `design/designs/bounded-coordinator-file-reading.md`.
+
+## TH-D10. Hard worker rate limits open a run-scoped family circuit
+
+**Decision.** After a worker finishes, team-harness scans its captured stdout
+JSONL for explicit hard provider signals: a failing terminal result that
+reports HTTP 429, or a `rate_limit_event` whose `status` or `overageStatus` is
+`rejected` and is not followed by a successful terminal result. A rejected
+event is provisional because worker CLIs may retry internally and subsequently
+succeed; process exit zero is a second guard against blocking a family after a
+successful worker. A failed stdout read is retried by the next synchronization
+rather than being treated as a completed scan.
+
+Active state is keyed by the agent-template family (`claude`, `codex`,
+`gemini`, and so on); the effective model remains audit metadata. The family is
+the blocking scope because it is the provider-routing choice the coordinator
+can change. A retrip merges its candidate expiry with the current family expiry
+using the later of the two. It can extend a window, but can never shorten an
+active provider reset to the configurable 15-minute fallback. Until that
+effective expiry, a same-family `spawn_agent` call returns a structured
+rejection without creating an assignment, agent record, or process.
+
+**Context.** A hard seven-day Claude limit caused one production coordinator to
+launch and lose roughly nine Claude subprocesses across four turns. Existing
+API-error guidance could recommend another family after each failure, but no
+run-level mechanism remembered that the provider family was unavailable. Each
+repeat paid subprocess startup and failover latency even though the captured
+stream already contained an authoritative reset time hours away.
+
+**Consequences.** Worker processes remain one-shot under TH-D2, and failed
+workers remain ordinary agent records under TH-D3. The new circuit only
+prevents a later redundant launch. `agent_availability` gives the coordinator a
+separate query without changing the historical `list_agents` array contract.
+Every observed trip is appended to the additive `run.json`
+`rate_limited_families` list and remains there after expiry for audit; active
+in-memory state expires automatically, so the next spawn re-probes. The feature
+is enabled by default and can be disabled to recover the old behavior. A
+programmatic caller can distinguish the unchanged bare `agent_<id>` success
+from the JSON short-circuit via `parse_rate_limited_spawn_result`. Non-429
+failures never open the circuit. Full contract:
+`design/designs/worker-rate-limit-circuit-breaker.md`.

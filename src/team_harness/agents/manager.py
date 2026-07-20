@@ -42,6 +42,10 @@ class AgentState:
     exit_code: int | None = None
     finished_at: datetime | None = None
     failure_classification: dict | None = None
+    effective_model: str | None = None
+    # Terminal stdout is marked checked only after a successful rate-limit scan;
+    # transient file-read errors leave it retryable on the next tool operation.
+    rate_limit_checked: bool = False
     # Process-group id when spawned with start_new_session (pgid == pid); lets
     # shutdown kill the whole worker subtree, not just the leader (TH-D5).
     # None for test doubles / externally-constructed states → leader-only kill.

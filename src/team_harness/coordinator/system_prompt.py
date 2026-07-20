@@ -199,10 +199,14 @@ exhaustion, server errors (5xx), and model unavailability.
 
 When an API error failure is detected:
 1. Read the agent's output to confirm the nature of the failure.
-2. If confirmed as an API/infrastructure error (not a task-level bug or code
-   issue), select a DIFFERENT agent type from the available types to retry the
-   same task (e.g. codex instead of gemini).
-3. Spawn the replacement agent with the SAME original prompt and working
+2. Check `agent_availability`. A hard 429/rejected provider event trips a
+   run-scoped circuit for that agent family until its reset time; a blocked
+   `spawn_agent` call returns a structured rate-limit result without launching
+   a subprocess.
+3. If confirmed as an API/infrastructure error (not a task-level bug or code
+   issue), select a DIFFERENT agent type that `agent_availability` reports as
+   available to retry the same task (e.g. codex instead of gemini).
+4. Spawn the replacement agent with the SAME original prompt and working
    directory. Preserve the original task scope exactly — do not modify the
    prompt unless the failure indicates the model itself is unavailable, in
    which case you may adjust the model parameter.

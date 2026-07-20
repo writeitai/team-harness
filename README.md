@@ -160,6 +160,8 @@ harness = TeamHarness(
     retry_base_delay_s=1.0,
     retry_max_delay_s=30.0,
     max_depth=3,
+    rate_limit_circuit_breaker=True,
+    rate_limit_default_cooldown_s=900,
     system_prompt="Extra instructions",
     system_prompt_file="prompt.txt",
     agent_models={"codex": "gpt-5.5"},
@@ -464,6 +466,24 @@ retry_max_delay_s = 30.0
 Retry records for transient coordinator API/network failures are written to
 `run.json` under `coordinator_retries`, and the terminal run-level failure is
 written under `failure`.
+
+Hard rate limits reported by worker JSONL streams use a run-scoped family
+circuit by default:
+
+```toml
+rate_limit_circuit_breaker = true
+rate_limit_default_cooldown_s = 900
+```
+
+When a worker finishes with a failing terminal 429, or with a rejected
+rate-limit event that is not followed by terminal success, later spawns for the
+same agent-template family short-circuit until the provider's reset time (or
+the fallback cooldown when no reset is present). Retrips can extend but never
+shorten an active reset. `agent_availability` shows which families remain
+usable, and `run.json` records the trip under `rate_limited_families`. Set the
+boolean to `false` to retain the previous spawn behavior. Programmatic tool
+callers can use `team_harness.parse_rate_limited_spawn_result` to distinguish
+the JSON short-circuit from the unchanged bare `agent_<id>` success result.
 
 `th init --force` overwrites `config.toml` but preserves existing `coordinator_system_message.md`, `worker_suffix.md`, and `worker_footer.md` files to protect user customizations. Missing sidecar files are re-created.
 

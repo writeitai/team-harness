@@ -1,3 +1,4 @@
+from team_harness.agents.rate_limits import parse_rate_limited_spawn_result
 from team_harness.caller_contract import CallerContext
 from team_harness.caller_contract import get_capabilities
 from team_harness.caller_contract import HarnessCapabilities
@@ -16,4 +17,5 @@ __all__ = [
     "TeamHarnessError",
     "TeamHarnessResult",
     "get_capabilities",
+    "parse_rate_limited_spawn_result",
 ]

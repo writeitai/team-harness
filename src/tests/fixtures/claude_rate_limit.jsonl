@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"claude-rate-limit-session"}
+not-json
+{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1784811600,"rateLimitType":"seven_day_overage_included","overageStatus":"rejected"}}
+{"type":"assistant","message":{"content":[]}}
+{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"result":"You've reached your Fable 5 limit."}
+{"type":"partial"

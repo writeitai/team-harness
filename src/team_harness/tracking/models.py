@@ -163,6 +163,18 @@ class RunFailureRecord(BaseModel):
     max_retries: int | None = None
 
 
+class RateLimitedFamilyRecord(BaseModel):
+    """One hard worker-provider rate-limit interval observed during a run."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=False)
+
+    family: str
+    model: str | None = None
+    tripped_at: datetime
+    resets_at: datetime
+    reason: str
+
+
 class RunRecord(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=False)
 
@@ -186,5 +198,8 @@ class RunRecord(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     coordinator_input_path: str | None = None
     coordinator_retries: list[CoordinatorRetryRecord] = Field(default_factory=list)
+    # Additive audit history. Expired entries remain queryable; resets_at makes
+    # the interval boundary explicit without changing any existing run fields.
+    rate_limited_families: list[RateLimitedFamilyRecord] = Field(default_factory=list)
     turns: list[TurnRecord] = Field(default_factory=list)
     agents: list[AgentRecord] = Field(default_factory=list)

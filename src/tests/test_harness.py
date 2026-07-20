@@ -353,7 +353,7 @@ async def test_harness_run_creates_session_output_dir_and_passes_it_to_prompt(
 
 
 @pytest.mark.asyncio
-async def test_teamharness_ctor_threads_compact_and_prompt_cache(monkeypatch, tmp_path):
+async def test_teamharness_ctor_threads_run_config_knobs(monkeypatch, tmp_path):
     """The SDK ctor knobs must reach the resolved config, the coordinator loop
     (compaction), and the client (prompt caching) in a loopy-driven run."""
 
@@ -381,8 +381,11 @@ async def test_teamharness_ctor_threads_compact_and_prompt_cache(monkeypatch, tm
     harness = TeamHarness(
         model="anthropic/claude-opus-4",
         api_base="http://localhost:11434/v1",
+        api_key="test-key",
         compact_above_tokens=80_000,
         prompt_cache="auto",
+        rate_limit_circuit_breaker=False,
+        rate_limit_default_cooldown_s=321,
         cwd=str(tmp_path),
     )
     result = await harness.run("hello")
@@ -393,6 +396,8 @@ async def test_teamharness_ctor_threads_compact_and_prompt_cache(monkeypatch, tm
     # Resolved config carries the ctor values into the compaction knob path.
     assert loop_config.compact_above_tokens == 80_000
     assert loop_config.prompt_cache == "auto"
+    assert loop_config.rate_limit_circuit_breaker is False
+    assert loop_config.rate_limit_default_cooldown_s == 321
     # The real client (built by _make_client) enabled Anthropic prompt caching.
     assert loop_client._cache_prefix is True
 
@@ -427,6 +432,7 @@ async def test_teamharness_prompt_cache_off_disables_client_caching(
     harness = TeamHarness(
         model="anthropic/claude-opus-4",
         api_base="http://localhost:11434/v1",
+        api_key="test-key",
         prompt_cache="off",
         cwd=str(tmp_path),
     )
@@ -436,12 +442,17 @@ async def test_teamharness_prompt_cache_off_disables_client_caching(
 
 
 def test_load_config_sdk_overrides_win_over_toml(tmp_path, monkeypatch):
-    """SDK-supplied compact_above_tokens / prompt_cache override config.toml."""
+    """Explicit SDK values override the corresponding config.toml values."""
 
     path = tmp_path / "home" / ".team-harness" / "config.toml"
     path.parent.mkdir(parents=True)
     path.write_text(
-        '[coordinator]\ncompact_above_tokens = 40000\nprompt_cache = "off"\n',
+        """[coordinator]
+compact_above_tokens = 40000
+prompt_cache = "off"
+rate_limit_circuit_breaker = true
+rate_limit_default_cooldown_s = 600
+""",
         encoding="utf-8",
     )
     monkeypatch.setattr(config_module, "CONFIG_PATH", path)
@@ -450,13 +461,21 @@ def test_load_config_sdk_overrides_win_over_toml(tmp_path, monkeypatch):
     config = config_module.load_config(cwd=str(tmp_path))
     assert config.compact_above_tokens == 40_000
     assert config.prompt_cache == "off"
+    assert config.rate_limit_circuit_breaker is True
+    assert config.rate_limit_default_cooldown_s == 600
 
     # Explicit SDK values override TOML.
     overridden = config_module.load_config(
-        cwd=str(tmp_path), compact_above_tokens=90_000, prompt_cache="auto"
+        cwd=str(tmp_path),
+        compact_above_tokens=90_000,
+        prompt_cache="auto",
+        rate_limit_circuit_breaker=False,
+        rate_limit_default_cooldown_s=123,
     )
     assert overridden.compact_above_tokens == 90_000
     assert overridden.prompt_cache == "auto"
+    assert overridden.rate_limit_circuit_breaker is False
+    assert overridden.rate_limit_default_cooldown_s == 123
 
 
 # ---------------------------------------------------------------------------
@@ -693,13 +712,14 @@ async def test_build_agent_tool_bindings_produces_closures(tmp_path):
         allowed_types=allowed_types,
     )
 
-    assert len(bindings) == 8
+    assert len(bindings) == 9
     schema_names = {b[0]["function"]["name"] for b in bindings}
     assert "spawn_agent" in schema_names
     assert "agent_status" in schema_names
     assert "read_agent_output" in schema_names
     assert "read_new_agent_output" in schema_names
     assert "list_agents" in schema_names
+    assert "agent_availability" in schema_names
     assert "wait_for_agents" in schema_names
     assert "wait_for_any" in schema_names
     assert "kill_agent" in schema_names
@@ -959,8 +979,8 @@ async def test_agent_tool_bindings_isolate_cursor_state(tmp_path):
     )
 
     # Both produce independent binding lists
-    assert len(bindings_a) == 8
-    assert len(bindings_b) == 8
+    assert len(bindings_a) == 9
+    assert len(bindings_b) == 9
 
     # list_agents calls use different managers
     list_a = next(fn for s, fn in bindings_a if s["function"]["name"] == "list_agents")

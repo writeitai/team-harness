@@ -41,6 +41,8 @@ def test_default_model_is_gpt_5_6_sol():
     assert Config().coordinator_prompt == COORDINATOR_PROMPT
     assert Config().worker_suffix == ""
     assert Config().worker_footer == DEFAULT_WORKER_FOOTER
+    assert Config().rate_limit_circuit_breaker is True
+    assert Config().rate_limit_default_cooldown_s == 900
 
 
 def test_default_agent_templates_structured_shape():
@@ -178,6 +180,27 @@ def test_load_config_cli_output_dir_overrides_file(tmp_path, monkeypatch):
     config = load_config(output_dir="/tmp/from-sdk", cwd=str(tmp_path))
 
     assert config.output_dir == "/tmp/from-sdk"
+
+
+def test_load_config_rate_limit_circuit_knobs(tmp_path, monkeypatch):
+    global_path = _write_global_config(
+        tmp_path,
+        monkeypatch,
+        ["rate_limit_circuit_breaker = false", "rate_limit_default_cooldown_s = 123"],
+    )
+
+    config = load_config(cwd=str(tmp_path))
+
+    assert global_path.exists()
+    assert config.rate_limit_circuit_breaker is False
+    assert config.rate_limit_default_cooldown_s == 123
+
+
+def test_rate_limit_default_cooldown_must_be_positive():
+    with pytest.raises(
+        ValueError, match="rate_limit_default_cooldown_s must be greater than 0"
+    ):
+        Config(rate_limit_default_cooldown_s=0)
 
 
 def test_coordinator_prompt_file_supplies_coordinator_prompt(tmp_path, monkeypatch):
