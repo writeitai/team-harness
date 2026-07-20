@@ -61,6 +61,8 @@ output_dir = "_outputs"
 max_retries = 5
 retry_base_delay_s = 1.0
 retry_max_delay_s = 30.0
+rate_limit_circuit_breaker = true
+rate_limit_default_cooldown_s = 900
 max_depth = 3
 ```
 
@@ -104,6 +106,21 @@ retry_max_delay_s = 30.0
 ```
 
 Retry records are written to `run.json` under `coordinator_retries`, and the terminal run-level failure under `failure`.
+
+## Worker hard rate limits
+
+When a finished worker's JSONL reports a terminal 429 or rejected rate-limit
+event, team-harness blocks later spawns of that agent-template family until the
+provider reset time. If the event has no reset time, the default cooldown is
+900 seconds. The coordinator can query `agent_availability`, and the trip is
+recorded under `run.json.rate_limited_families`.
+
+```toml
+rate_limit_circuit_breaker = true
+rate_limit_default_cooldown_s = 900
+```
+
+Set the boolean to `false` to disable detection, recording, and spawn blocking.
 
 ## Legacy single-string templates
 

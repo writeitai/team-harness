@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Run-scoped worker rate-limit circuit (TH-D10).** Finished worker stdout
+  JSONL is checked for terminal `api_error_status = 429` results and rejected
+  `rate_limit_event` records. A tripped agent-template family is blocked until
+  its provider reset time (or a 900-second fallback), without launching another
+  process. The coordinator can inspect `agent_availability`, and `run.json`
+  carries an additive `rate_limited_families` audit list.
+- New `[coordinator]` knobs: `rate_limit_circuit_breaker = true` and
+  `rate_limit_default_cooldown_s = 900`. The SDK constructor exposes matching
+  overrides; disabling the breaker restores the previous spawn behavior.
+
+  Consumer impact: existing successful `spawn_agent` calls still return an
+  agent id, `list_agents` remains an array, and all existing `run.json` fields
+  (including per-turn usage tokens) are unchanged. A spawn targeting an active
+  circuit now returns structured JSON and creates no worker record or process.
+
 ## [0.6.1] - 2026-07-20
 
 ### Added

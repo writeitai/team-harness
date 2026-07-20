@@ -40,3 +40,8 @@ When the coordinator supplies a `worker_label`, it is treated as a filesystem-sa
 ## Retry and failure records
 
 Transient coordinator API failures (429 / 5xx) are recorded in `run.json` under `coordinator_retries`, and the terminal run-level failure under `failure`. Retry behavior is tuned with `max_retries`, `retry_base_delay_s`, and `retry_max_delay_s` — see [Configuration](/docs/configuration#coordinator-retries).
+
+Hard provider limits reported by worker JSONL are recorded separately under
+`rate_limited_families`. Each entry contains `family`, the effective `model`
+when known, `tripped_at`, `resets_at`, and `reason`. These records are additive
+audit history; existing per-turn usage fields are unchanged.

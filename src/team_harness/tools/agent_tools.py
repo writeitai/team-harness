@@ -15,7 +15,11 @@ import uuid
 from team_harness.agents import spawner
 from team_harness.agents.api_error_classifier import classify_agent_failure
 from team_harness.agents.manager import AgentState
+from team_harness.agents.rate_limits import detect_rate_limit_from_path
+from team_harness.agents.rate_limits import RateLimitCircuitBreaker
+from team_harness.agents.rate_limits import RateLimitTrip
 from team_harness.agents.registry import check_harness_depth
+from team_harness.agents.registry import get_allowed_types
 from team_harness.agents.registry import resolve_template
 from team_harness.agents.session_capture import capture_session_id_from_path
 from team_harness.agents.template import AgentTemplate
@@ -25,6 +29,7 @@ from team_harness.caller_contract import CallerContext
 from team_harness.caller_contract import INHERITED_CALLER_CONTEXT_ENV
 from team_harness.coordinator.system_prompt import DEFAULT_WORKER_FOOTER
 from team_harness.tracking.models import AgentRecord
+from team_harness.tracking.models import RateLimitedFamilyRecord
 from team_harness.tracking.persistence import write_json_atomic
 from team_harness.tracking.worker_sessions import resume_info_for_agent_type
 
@@ -38,6 +43,7 @@ _manager: "AgentManager | None" = None
 _run_log: "RunLogWriter | None" = None
 _config: "Config | None" = None
 _ui: "ConsoleBase | None" = None
+_rate_limit_breaker: RateLimitCircuitBreaker | None = None
 _session_output_dir: str = ""
 
 _output_cursors: dict[str, int] = {}
@@ -589,10 +595,10 @@ def _classify_if_failed(state: AgentState) -> dict | None:
     Returns the cached dict if already classified, or None if the failure
     does not look like an API error.
     """
-    if state.exit_code is None or state.exit_code == 0:
-        return None
     if state.failure_classification is not None:
         return state.failure_classification
+    if state.exit_code is None or state.exit_code == 0:
+        return None
     stderr_text = _tail_text(state.stderr_log, 4000)
     stdout_text = _tail_text(state.stdout_log, 4000)
     result = classify_agent_failure(stderr_text=stderr_text, stdout_text=stdout_text)
@@ -607,6 +613,110 @@ def _classify_if_failed(state: AgentState) -> dict | None:
             ),
         }
     return state.failure_classification
+
+
+def _sync_finished_rate_limits(
+    *,
+    manager: "AgentManager",
+    run_log: "RunLogWriter",
+    breaker: RateLimitCircuitBreaker,
+) -> None:
+    """Detect and persist hard rate limits for newly terminal workers once."""
+
+    manager.poll_exit_codes()
+    for state in manager.list_all():
+        if state.exit_code is None or state.rate_limit_checked:
+            continue
+        state.rate_limit_checked = True
+        if not breaker.enabled:
+            continue
+        try:
+            signal = detect_rate_limit_from_path(state.stdout_log)
+        except (OSError, UnicodeError):
+            continue
+        if signal is None:
+            continue
+        trip = breaker.trip(
+            family=state.agent_type, model=state.effective_model, signal=signal
+        )
+        if trip is None:
+            continue
+        run_log.record_rate_limited_family(
+            RateLimitedFamilyRecord(
+                family=trip.family,
+                model=trip.model,
+                tripped_at=trip.tripped_at,
+                resets_at=trip.resets_at,
+                reason=trip.reason,
+            )
+        )
+        state.failure_classification = {
+            "is_api_error": True,
+            "category": "rate_limit",
+            "detail": trip.reason,
+            "family": trip.family,
+            "model": trip.model,
+            "resets_at": trip.resets_at.isoformat(),
+            "suggested_action": (
+                "Choose a different available agent family. This family is "
+                f"blocked until {trip.resets_at.isoformat()}."
+            ),
+        }
+
+
+def _agent_availability_payload(
+    *, allowed_types: list[str], config: "Config", breaker: RateLimitCircuitBreaker
+) -> dict[str, object]:
+    """Render stable coordinator-facing availability without changing list_agents."""
+
+    active = breaker.active_trips()
+    families: list[dict[str, object]] = []
+    available_families: list[str] = []
+    rate_limited_families: list[dict[str, str | None]] = []
+    for family in allowed_types:
+        trip = active.get(family)
+        if trip is not None:
+            trip_payload = trip.as_dict()
+            families.append({"status": "rate_limited", **trip_payload})
+            rate_limited_families.append(trip_payload)
+            continue
+        template = resolve_template(agent_type=family, config=config)
+        families.append(
+            {"family": family, "model": template.default_model, "status": "available"}
+        )
+        available_families.append(family)
+    return {
+        "circuit_breaker_enabled": breaker.enabled,
+        "available_families": available_families,
+        "rate_limited_families": rate_limited_families,
+        "families": families,
+    }
+
+
+def _rate_limited_spawn_result(
+    *,
+    trip: RateLimitTrip,
+    requested_model: str | None,
+    allowed_types: list[str],
+    config: "Config",
+    breaker: RateLimitCircuitBreaker,
+) -> str:
+    availability = _agent_availability_payload(
+        allowed_types=allowed_types, config=config, breaker=breaker
+    )
+    return json.dumps(
+        {
+            "spawned": False,
+            "status": "rate_limited",
+            **trip.as_dict(),
+            "requested_model": requested_model,
+            "message": (
+                f"Agent family {trip.family!r} is rate-limited until "
+                f"{trip.resets_at.isoformat()}; choose a different available family."
+            ),
+            "available_families": availability["available_families"],
+        }
+    )
 
 
 def _seconds_since_last_output(stdout_log: Path, stderr_log: Path) -> float | None:
@@ -816,6 +926,17 @@ LIST_AGENTS_SCHEMA = {
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
+AGENT_AVAILABILITY_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "agent_availability",
+        "description": (
+            "List agent-template families that are available or temporarily "
+            "blocked by a hard provider rate-limit circuit."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
 WAIT_FOR_AGENTS_SCHEMA = {
     "type": "function",
     "function": {
@@ -873,11 +994,16 @@ def setup(
     global _run_log
     global _config
     global _ui
+    global _rate_limit_breaker
     global _session_output_dir
     _manager = manager
     _run_log = run_log
     _config = config
     _ui = ui
+    _rate_limit_breaker = RateLimitCircuitBreaker(
+        enabled=config.rate_limit_circuit_breaker,
+        default_cooldown_s=config.rate_limit_default_cooldown_s,
+    )
     _session_output_dir = session_output_dir
     _output_cursors.clear()
     _output_locks.clear()
@@ -891,6 +1017,14 @@ def _require_setup() -> tuple["AgentManager", "RunLogWriter", "Config", "Console
             "agent_tools.setup() must be called before using agent tools"
         )
     return _manager, _run_log, _config, _ui
+
+
+def _require_rate_limit_breaker() -> RateLimitCircuitBreaker:
+    if _rate_limit_breaker is None:
+        raise RuntimeError(
+            "agent_tools.setup() must be called before using agent tools"
+        )
+    return _rate_limit_breaker
 
 
 def _format_spawn_agent_defaults(
@@ -1094,6 +1228,17 @@ async def spawn_agent(**kwargs: object) -> str:
     prompt = str(kwargs["prompt"])
     cwd = str(Path(str(kwargs["cwd"])).expanduser().resolve())
     model = str(kwargs["model"]) if kwargs.get("model") is not None else None
+    breaker = _require_rate_limit_breaker()
+    _sync_finished_rate_limits(manager=manager, run_log=run_log, breaker=breaker)
+    active_trip = breaker.active_trip(agent_type)
+    if active_trip is not None:
+        return _rate_limited_spawn_result(
+            trip=active_trip,
+            requested_model=model,
+            allowed_types=get_allowed_types(config=config),
+            config=config,
+            breaker=breaker,
+        )
     effort = str(kwargs["effort"]) if kwargs.get("effort") is not None else None
     flags = (
         [str(item) for item in kwargs.get("flags", [])]
@@ -1186,6 +1331,7 @@ async def spawn_agent(**kwargs: object) -> str:
         stdout_log=stdout_log,
         stderr_log=stderr_log,
         session_id=spawn_result.generated_uuid,
+        effective_model=spawn_result.effective_model,
         pgid=spawn_result.pgid,
     )
     manager.register(state=state)
@@ -1235,11 +1381,15 @@ async def spawn_agent(**kwargs: object) -> str:
 
 async def _watch_agent(agent_id: str, done_event: asyncio.Event) -> None:
     manager, run_log, _, ui = _require_setup()
+    breaker = _require_rate_limit_breaker()
     try:
         exit_code = await manager.wait_one(agent_id)
         state = manager.get(agent_id)
         if state.status != "killed":
             state.status = "done" if exit_code == 0 else "failed"
+            _sync_finished_rate_limits(
+                manager=manager, run_log=run_log, breaker=breaker
+            )
             if state.status == "failed":
                 _classify_if_failed(state)
             run_log.update_agent(
@@ -1290,8 +1440,10 @@ def _status_from_state(state: AgentState) -> str:
 
 
 async def agent_status(agent_id: str) -> str:
-    manager, _, _, _ = _require_setup()
-    manager.poll_exit_codes()
+    manager, run_log, _, _ = _require_setup()
+    _sync_finished_rate_limits(
+        manager=manager, run_log=run_log, breaker=_require_rate_limit_breaker()
+    )
     return _status_from_state(manager.get(agent_id))
 
 
@@ -1341,8 +1493,10 @@ async def read_new_agent_output(agent_id: str) -> str:
 
 
 async def list_agents() -> str:
-    manager, _, _, _ = _require_setup()
-    manager.poll_exit_codes()
+    manager, run_log, _, _ = _require_setup()
+    _sync_finished_rate_limits(
+        manager=manager, run_log=run_log, breaker=_require_rate_limit_breaker()
+    )
     payload = []
     for state in manager.list_all():
         payload.append(
@@ -1357,16 +1511,30 @@ async def list_agents() -> str:
     return json.dumps(payload)
 
 
+async def agent_availability() -> str:
+    manager, run_log, config, _ = _require_setup()
+    breaker = _require_rate_limit_breaker()
+    _sync_finished_rate_limits(manager=manager, run_log=run_log, breaker=breaker)
+    return json.dumps(
+        _agent_availability_payload(
+            allowed_types=get_allowed_types(config=config),
+            config=config,
+            breaker=breaker,
+        )
+    )
+
+
 async def wait_for_agents(
     agent_ids: list[str] | None = None, timeout: float | None = None
 ) -> str:
-    manager, _, _, _ = _require_setup()
+    manager, run_log, _, _ = _require_setup()
+    breaker = _require_rate_limit_breaker()
     ids = list(manager._agents) if agent_ids is None else agent_ids
     if not ids:
         return json.dumps({"agents": {}, "timed_out": False})
     try:
         await asyncio.wait_for(manager.wait_for(ids), timeout=timeout)
-        manager.poll_exit_codes()
+        _sync_finished_rate_limits(manager=manager, run_log=run_log, breaker=breaker)
         return json.dumps(
             {
                 "agents": {
@@ -1377,7 +1545,7 @@ async def wait_for_agents(
             }
         )
     except asyncio.TimeoutError:
-        manager.poll_exit_codes()
+        _sync_finished_rate_limits(manager=manager, run_log=run_log, breaker=breaker)
         return json.dumps(
             {
                 "agents": {
@@ -1499,6 +1667,7 @@ AGENT_TOOL_SCHEMAS = [
     (READ_AGENT_OUTPUT_SCHEMA, read_agent_output),
     (READ_NEW_AGENT_OUTPUT_SCHEMA, read_new_agent_output),
     (LIST_AGENTS_SCHEMA, list_agents),
+    (AGENT_AVAILABILITY_SCHEMA, agent_availability),
     (WAIT_FOR_AGENTS_SCHEMA, wait_for_agents),
     (WAIT_FOR_ANY_SCHEMA, wait_for_any),
     (KILL_AGENT_SCHEMA, kill_agent),
@@ -1525,6 +1694,10 @@ def build_agent_tool_bindings(
     output_locks: dict[str, asyncio.Lock] = {}
     wait_stdout_cursors: dict[str, int] = {}
     wait_stderr_cursors: dict[str, int] = {}
+    rate_limit_breaker = RateLimitCircuitBreaker(
+        enabled=config.rate_limit_circuit_breaker,
+        default_cooldown_s=config.rate_limit_default_cooldown_s,
+    )
 
     async def _spawn_agent(**kwargs: object) -> str:
         """Validate, record, and launch one worker for this run-local binding."""
@@ -1534,6 +1707,18 @@ def build_agent_tool_bindings(
         prompt = str(kwargs["prompt"])
         cwd = str(Path(str(kwargs["cwd"])).expanduser().resolve())
         model_val = str(kwargs["model"]) if kwargs.get("model") is not None else None
+        _sync_finished_rate_limits(
+            manager=manager, run_log=run_log, breaker=rate_limit_breaker
+        )
+        active_trip = rate_limit_breaker.active_trip(agent_type)
+        if active_trip is not None:
+            return _rate_limited_spawn_result(
+                trip=active_trip,
+                requested_model=model_val,
+                allowed_types=allowed_types,
+                config=config,
+                breaker=rate_limit_breaker,
+            )
         effort_val = str(kwargs["effort"]) if kwargs.get("effort") is not None else None
         flags = (
             [str(item) for item in kwargs.get("flags", [])]
@@ -1635,6 +1820,7 @@ def build_agent_tool_bindings(
             stdout_log=stdout_log,
             stderr_log=stderr_log,
             session_id=spawn_result.generated_uuid,
+            effective_model=spawn_result.effective_model,
             pgid=spawn_result.pgid,
         )
         manager.register(state=state)
@@ -1676,6 +1862,9 @@ def build_agent_tool_bindings(
                 s = manager.get(agent_id)
                 if s.status != "killed":
                     s.status = "done" if exit_code == 0 else "failed"
+                    _sync_finished_rate_limits(
+                        manager=manager, run_log=run_log, breaker=rate_limit_breaker
+                    )
                     if s.status == "failed":
                         _classify_if_failed(s)
                     run_log.update_agent(
@@ -1715,7 +1904,9 @@ def build_agent_tool_bindings(
         return agent_id
 
     async def _agent_status(agent_id: str) -> str:
-        manager.poll_exit_codes()
+        _sync_finished_rate_limits(
+            manager=manager, run_log=run_log, breaker=rate_limit_breaker
+        )
         return _status_from_state(manager.get(agent_id))
 
     async def _read_agent_output(agent_id: str, tail_bytes: int = 8192) -> str:
@@ -1764,7 +1955,9 @@ def build_agent_tool_bindings(
             )
 
     async def _list_agents() -> str:
-        manager.poll_exit_codes()
+        _sync_finished_rate_limits(
+            manager=manager, run_log=run_log, breaker=rate_limit_breaker
+        )
         payload = []
         for state in manager.list_all():
             payload.append(
@@ -1778,6 +1971,16 @@ def build_agent_tool_bindings(
             )
         return json.dumps(payload)
 
+    async def _agent_availability() -> str:
+        _sync_finished_rate_limits(
+            manager=manager, run_log=run_log, breaker=rate_limit_breaker
+        )
+        return json.dumps(
+            _agent_availability_payload(
+                allowed_types=allowed_types, config=config, breaker=rate_limit_breaker
+            )
+        )
+
     async def _wait_for_agents(
         agent_ids: list[str] | None = None, timeout: float | None = None
     ) -> str:
@@ -1786,7 +1989,9 @@ def build_agent_tool_bindings(
             return json.dumps({"agents": {}, "timed_out": False})
         try:
             await asyncio.wait_for(manager.wait_for(ids), timeout=timeout)
-            manager.poll_exit_codes()
+            _sync_finished_rate_limits(
+                manager=manager, run_log=run_log, breaker=rate_limit_breaker
+            )
             return json.dumps(
                 {
                     "agents": {
@@ -1796,7 +2001,9 @@ def build_agent_tool_bindings(
                 }
             )
         except asyncio.TimeoutError:
-            manager.poll_exit_codes()
+            _sync_finished_rate_limits(
+                manager=manager, run_log=run_log, breaker=rate_limit_breaker
+            )
             return json.dumps(
                 {
                     "agents": {
@@ -1818,6 +2025,9 @@ def build_agent_tool_bindings(
             for pending_task in pending:
                 pending_task.cancel()
             finished_id = tasks[next(iter(done))]
+            _sync_finished_rate_limits(
+                manager=manager, run_log=run_log, breaker=rate_limit_breaker
+            )
             finished_state = manager.get(finished_id)
             elapsed = int(
                 (datetime.now(timezone.utc) - finished_state.spawn_time).total_seconds()
@@ -1847,6 +2057,9 @@ def build_agent_tool_bindings(
         except asyncio.TimeoutError:
             for task in tasks:
                 task.cancel()
+            _sync_finished_rate_limits(
+                manager=manager, run_log=run_log, breaker=rate_limit_breaker
+            )
             return json.dumps(
                 {
                     "agent_id": None,
@@ -1914,6 +2127,7 @@ def build_agent_tool_bindings(
         (READ_AGENT_OUTPUT_SCHEMA, _read_agent_output),
         (READ_NEW_AGENT_OUTPUT_SCHEMA, _read_new_agent_output),
         (LIST_AGENTS_SCHEMA, _list_agents),
+        (AGENT_AVAILABILITY_SCHEMA, _agent_availability),
         (WAIT_FOR_AGENTS_SCHEMA, _wait_for_agents),
         (WAIT_FOR_ANY_SCHEMA, _wait_for_any),
         (KILL_AGENT_SCHEMA, _kill_agent),

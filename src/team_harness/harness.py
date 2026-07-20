@@ -79,6 +79,8 @@ class TeamHarness:
         max_depth: int | None = None,
         compact_above_tokens: int | None = None,
         prompt_cache: str | None = None,
+        rate_limit_circuit_breaker: bool | None = None,
+        rate_limit_default_cooldown_s: int | None = None,
         system_prompt: str | None = None,
         system_prompt_file: str | None = None,
         agent_models: dict[str, str] | None = None,
@@ -106,6 +108,8 @@ class TeamHarness:
         self._max_depth = max_depth
         self._compact_above_tokens = compact_above_tokens
         self._prompt_cache = prompt_cache
+        self._rate_limit_circuit_breaker = rate_limit_circuit_breaker
+        self._rate_limit_default_cooldown_s = rate_limit_default_cooldown_s
         self._system_prompt = system_prompt
         self._system_prompt_file = system_prompt_file
         self._agent_models = agent_models
@@ -142,6 +146,8 @@ class TeamHarness:
                 max_depth=self._max_depth,
                 compact_above_tokens=self._compact_above_tokens,
                 prompt_cache=self._prompt_cache,
+                rate_limit_circuit_breaker=self._rate_limit_circuit_breaker,
+                rate_limit_default_cooldown_s=self._rate_limit_default_cooldown_s,
                 system_prompt=self._system_prompt,
                 cli_system_prompt_file=self._system_prompt_file,
                 allowed_agents=allowed_agents_str,

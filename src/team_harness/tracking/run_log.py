@@ -8,6 +8,7 @@ from typing import Any
 from team_harness.agents.process_identity import capture_starttime
 from team_harness.tracking.models import AgentRecord
 from team_harness.tracking.models import CoordinatorRetryRecord
+from team_harness.tracking.models import RateLimitedFamilyRecord
 from team_harness.tracking.models import RunFailureRecord
 from team_harness.tracking.models import RunRecord
 from team_harness.tracking.models import ToolCallRecord
@@ -200,6 +201,12 @@ class RunLogWriter:
             self._log.coordinator_retries = self._log.coordinator_retries[
                 -_MAX_COORDINATOR_RETRY_RECORDS:
             ]
+        self._flush()
+
+    def record_rate_limited_family(self, record: RateLimitedFamilyRecord) -> None:
+        """Append one observed worker-family circuit interval to run.json."""
+
+        self._log.rate_limited_families.append(record)
         self._flush()
 
     def update_api_base(self, api_base: str) -> None:

@@ -58,6 +58,10 @@ class Config:
     # written to run.json are truncated to this many bytes (the full stream
     # already lives in the worker logs). Never touches the live message list.
     run_log_tool_result_max_bytes: int = 8192
+    # Run-scoped hard provider rate-limit circuit for worker families. A
+    # provider-supplied reset time wins; otherwise use the bounded fallback.
+    rate_limit_circuit_breaker: bool = True
+    rate_limit_default_cooldown_s: int = 900
     shutdown_timeout_s: float = 10.0
     min_agent_lifetime_before_kill_s: float = 600.0
     allowed_agents: list[str] | None = None
@@ -76,6 +80,8 @@ class Config:
             raise ValueError(
                 "retry_max_delay_s must be greater than or equal to retry_base_delay_s"
             )
+        if self.rate_limit_default_cooldown_s <= 0:
+            raise ValueError("rate_limit_default_cooldown_s must be greater than 0")
         default_message = COORDINATOR_PROMPT
         if (
             self.coordinator_system_message == default_message
@@ -371,6 +377,12 @@ max_depth = 3
 # (the full stream stays in the worker logs). Does not affect live context.
 # run_log_tool_result_max_bytes = 8192
 
+# Prevent repeated worker launches for an agent-template family after its
+# JSONL stream reports a hard provider 429/rejection. Disable to retain the
+# pre-circuit behavior. When the provider omits resetsAt, use this cooldown.
+# rate_limit_circuit_breaker = true
+# rate_limit_default_cooldown_s = 900
+
 # Seconds to wait for running agents on /quit or Ctrl+C before force-killing.
 shutdown_timeout_s = 10.0
 
@@ -453,6 +465,12 @@ max_depth = 3
 # Persistence-only cap for tool-call results / tool-role messages in run.json
 # (the full stream stays in the worker logs). Does not affect live context.
 # run_log_tool_result_max_bytes = 8192
+
+# Prevent repeated worker launches for an agent-template family after its
+# JSONL stream reports a hard provider 429/rejection. Disable to retain the
+# pre-circuit behavior. When the provider omits resetsAt, use this cooldown.
+# rate_limit_circuit_breaker = true
+# rate_limit_default_cooldown_s = 900
 
 # Seconds to wait for running agents on /quit or Ctrl+C before force-killing.
 shutdown_timeout_s = 10.0
@@ -1052,6 +1070,13 @@ def _coordinator_float(
     return float(raw)
 
 
+def _coordinator_bool(coordinator: dict[str, object], key: str, default: bool) -> bool:
+    raw = coordinator.get(key, default)
+    if not isinstance(raw, bool):
+        raise ValueError(f"coordinator.{key} must be a boolean")
+    return raw
+
+
 def load_config(
     *,
     provider: str | None = None,
@@ -1065,6 +1090,8 @@ def load_config(
     max_depth: int | None = None,
     compact_above_tokens: int | None = None,
     prompt_cache: str | None = None,
+    rate_limit_circuit_breaker: bool | None = None,
+    rate_limit_default_cooldown_s: int | None = None,
     system_prompt: str | None = None,
     cli_system_prompt_file: str | None = None,
     allowed_agents: str | None = None,
@@ -1229,6 +1256,24 @@ def load_config(
             coordinator,
             "run_log_tool_result_max_bytes",
             Config.run_log_tool_result_max_bytes,
+        ),
+        rate_limit_circuit_breaker=(
+            rate_limit_circuit_breaker
+            if rate_limit_circuit_breaker is not None
+            else _coordinator_bool(
+                coordinator,
+                "rate_limit_circuit_breaker",
+                Config.rate_limit_circuit_breaker,
+            )
+        ),
+        rate_limit_default_cooldown_s=(
+            rate_limit_default_cooldown_s
+            if rate_limit_default_cooldown_s is not None
+            else _coordinator_int(
+                coordinator,
+                "rate_limit_default_cooldown_s",
+                Config.rate_limit_default_cooldown_s,
+            )
         ),
         shutdown_timeout_s=_coordinator_float(
             coordinator, "shutdown_timeout_s", Config.shutdown_timeout_s
