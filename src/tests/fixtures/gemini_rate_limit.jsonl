@@ -1,0 +1,2 @@
+{"type":"init","timestamp":"2026-07-20T12:00:00.000Z","session_id":"gemini-rate-limit-session","model":"gemini-2.5-pro"}
+{"type":"result","timestamp":"2026-07-20T12:00:01.000Z","status":"error","error":{"type":"ApiError","message":"[API Error: 429 - Resource exhausted]"},"stats":{"total_tokens":0}}

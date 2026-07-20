@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import timedelta
@@ -10,6 +11,13 @@ from datetime import timezone
 import json
 import math
 from pathlib import Path
+import re
+
+_MILLISECONDS_TIMESTAMP_THRESHOLD = 100_000_000_000
+_EXPLICIT_429_MESSAGE = re.compile(
+    r"(?i)(?:\bapi(?:\s+request)?\s+error\b|\bhttp(?:\s+error)?\b|"
+    r"\bstatus(?:\s+code)?\b|[\"']?code[\"']?)\s*[:=]?\s*429(?:\.0)?\b"
+)
 
 
 @dataclass(frozen=True)
@@ -53,6 +61,11 @@ def _timestamp(value: object) -> datetime | None:
         return None
     if not math.isfinite(timestamp):
         return None
+    # Provider streams are inconsistent about Unix seconds versus milliseconds.
+    # Values above this threshold cannot be realistic reset dates in seconds
+    # (they would be after year 5000), but are ordinary contemporary dates in ms.
+    if abs(timestamp) >= _MILLISECONDS_TIMESTAMP_THRESHOLD:
+        timestamp /= 1000
     try:
         return datetime.fromtimestamp(timestamp, tz=timezone.utc)
     except (OverflowError, OSError, ValueError):
@@ -84,68 +97,174 @@ def _rejected_fields(event: dict[str, object]) -> tuple[str, ...]:
     )
 
 
+def _status_is_429(value: object) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        status = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(status) and status == 429
+
+
+def _result_is_error(event: dict[str, object]) -> bool:
+    if event.get("type") != "result":
+        return False
+    is_error = event.get("is_error")
+    if is_error is not None:
+        return is_error is True
+    status = event.get("status")
+    return isinstance(status, str) and status.lower() in {"error", "failed", "failure"}
+
+
+def _result_is_success(event: dict[str, object]) -> bool:
+    if event.get("type") != "result":
+        return False
+    is_error = event.get("is_error")
+    if is_error is not None:
+        return is_error is False
+    status = event.get("status")
+    return isinstance(status, str) and status.lower() in {"success", "succeeded"}
+
+
+def _result_status_is_429(event: dict[str, object]) -> bool:
+    fields = (
+        "api_error_status",
+        "status_code",
+        "statusCode",
+        "http_status",
+        "httpStatus",
+        "code",
+    )
+    if any(_status_is_429(event.get(field)) for field in fields):
+        return True
+    error = event.get("error")
+    return isinstance(error, dict) and any(
+        _status_is_429(error.get(field)) for field in fields
+    )
+
+
+def _result_message_has_explicit_429(event: dict[str, object]) -> bool:
+    """Recognize a typed terminal API 429 when a CLI omits a numeric field.
+
+    Gemini stream-json terminal errors currently retain the explicit HTTP code
+    in ``error.message`` but omit it as a separate field. This deliberately does
+    not inspect arbitrary output text: the message must belong to an error
+    terminal result and name an API/HTTP/status/code 429.
+    """
+
+    error = event.get("error")
+    if not isinstance(error, dict):
+        return False
+    message = error.get("message")
+    return (
+        isinstance(message, str) and _EXPLICIT_429_MESSAGE.search(message) is not None
+    )
+
+
 def _is_429_result(event: dict[str, object]) -> bool:
     if event.get("type") != "result":
         return False
-    status = event.get("api_error_status")
-    return not isinstance(status, bool) and str(status) == "429"
+    return _result_is_error(event) and (
+        _result_status_is_429(event) or _result_message_has_explicit_429(event)
+    )
 
 
-def detect_rate_limit(stdout_bytes: bytes) -> RateLimitSignal | None:
-    """Return the last hard rate-limit signal in a worker JSONL byte stream.
-
-    Invalid and partial lines are ignored. Later valid rate-limit records replace
-    earlier ones; a terminal 429 result retains the reset time from the preceding
-    rejected rate-limit event when the result itself omits it.
-    """
-
-    latest: RateLimitSignal | None = None
-    rejected_reset: datetime | None = None
-    for raw_line in stdout_bytes.splitlines():
+def _parse_events(raw_lines: Iterable[bytes]) -> Iterable[dict[str, object]]:
+    for raw_line in raw_lines:
         try:
             event = json.loads(raw_line)
         except (json.JSONDecodeError, UnicodeDecodeError):
             continue
-        if not isinstance(event, dict):
-            continue
+        if isinstance(event, dict):
+            yield event
+
+
+def _later_reset(first: datetime | None, second: datetime | None) -> datetime | None:
+    if first is None:
+        return second
+    if second is None:
+        return first
+    return max(first, second)
+
+
+def _detect_rate_limit_events(
+    events: Iterable[dict[str, object]],
+) -> RateLimitSignal | None:
+    """Resolve provisional rejection evidence against later terminal results."""
+
+    pending: RateLimitSignal | None = None
+    for event in events:
         if _is_rejected_rate_limit_event(event):
-            rejected_reset = _reset_from_event(event)
             rejected_fields = _rejected_fields(event)
-            latest = RateLimitSignal(
-                resets_at=rejected_reset,
+            pending = RateLimitSignal(
+                resets_at=_reset_from_event(event),
                 reason=(
                     "rate_limit_event reported "
                     + ", ".join(f"{name}=rejected" for name in rejected_fields)
                 ),
             )
-        if _is_429_result(event):
-            latest = RateLimitSignal(
-                resets_at=_reset_from_event(event) or rejected_reset,
+        if _result_is_success(event):
+            # A provider CLI may emit a rejection while retrying internally.
+            # Its later successful terminal result means the worker recovered.
+            pending = None
+        elif _is_429_result(event):
+            pending = RateLimitSignal(
+                resets_at=_later_reset(
+                    pending.resets_at if pending is not None else None,
+                    _reset_from_event(event),
+                ),
                 reason="worker result reported api_error_status=429",
             )
-    return latest
+    return pending
+
+
+def detect_rate_limit(stdout_bytes: bytes) -> RateLimitSignal | None:
+    """Return terminal hard-rate-limit evidence from worker JSONL bytes.
+
+    Invalid and partial lines are ignored. Rejected events are provisional: a
+    later successful terminal result clears them because the CLI recovered. A
+    failing terminal 429 retains the most conservative reset from preceding
+    rejected evidence when its own result omits or shortens the reset.
+    """
+
+    return _detect_rate_limit_events(_parse_events(stdout_bytes.splitlines()))
 
 
 def detect_rate_limit_from_path(stdout_path: Path) -> RateLimitSignal | None:
     """Scan a finished worker's stdout JSONL without loading the file at once."""
 
-    latest: RateLimitSignal | None = None
-    rejected_reset: datetime | None = None
     with stdout_path.open("rb") as handle:
-        for raw_line in handle:
-            signal = detect_rate_limit(raw_line)
-            if signal is None:
-                continue
-            if signal.reason.startswith("rate_limit_event"):
-                rejected_reset = signal.resets_at
-            if signal.resets_at is None and signal.reason.endswith("=429"):
-                signal = RateLimitSignal(resets_at=rejected_reset, reason=signal.reason)
-            latest = signal
-    return latest
+        return _detect_rate_limit_events(_parse_events(handle))
+
+
+def parse_rate_limited_spawn_result(result: str) -> dict[str, object] | None:
+    """Parse the rate-limit branch of the polymorphic ``spawn_agent`` result.
+
+    Successful spawns are bare ``agent_<id>`` strings. A circuit short-circuit
+    is JSON whose ``spawned`` field is exactly false and whose ``status`` is
+    ``rate_limited``. Other JSON and legacy ``ERROR:`` strings return ``None``.
+    This gives programmatic tool callers a strict guard without changing the
+    existing successful-spawn contract.
+    """
+
+    try:
+        payload = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("spawned") is not False or payload.get("status") != "rate_limited":
+        return None
+    if not isinstance(payload.get("family"), str) or not isinstance(
+        payload.get("resets_at"), str
+    ):
+        return None
+    return payload
 
 
 class RateLimitCircuitBreaker:
-    """Run-local rate-limit evidence keyed by family/model, blocking families."""
+    """Run-local rate-limit evidence keyed by and blocking whole families."""
 
     def __init__(
         self,
@@ -157,7 +276,7 @@ class RateLimitCircuitBreaker:
         self.enabled = enabled
         self.default_cooldown_s = default_cooldown_s
         self._now = now or _utc_now
-        self._trips: dict[tuple[str, str | None], RateLimitTrip] = {}
+        self._trips: dict[str, RateLimitTrip] = {}
 
     def trip(
         self, *, family: str, model: str | None, signal: RateLimitSignal
@@ -165,8 +284,15 @@ class RateLimitCircuitBreaker:
         if not self.enabled:
             return None
         tripped_at = self._now()
-        resets_at = signal.resets_at or (
+        candidate_reset = signal.resets_at or (
             tripped_at + timedelta(seconds=self.default_cooldown_s)
+        )
+        self._expire_stale()
+        current = self._trips.get(family)
+        resets_at = (
+            max(current.resets_at, candidate_reset)
+            if current is not None
+            else candidate_reset
         )
         trip = RateLimitTrip(
             family=family,
@@ -175,7 +301,7 @@ class RateLimitCircuitBreaker:
             resets_at=resets_at,
             reason=signal.reason,
         )
-        self._trips[(family, model)] = trip
+        self._trips[family] = trip
         return trip
 
     def active_trip(self, family: str) -> RateLimitTrip | None:
@@ -184,10 +310,7 @@ class RateLimitCircuitBreaker:
         if not self.enabled:
             return None
         self._expire_stale()
-        family_trips = [trip for trip in self._trips.values() if trip.family == family]
-        if not family_trips:
-            return None
-        return max(family_trips, key=lambda trip: trip.tripped_at)
+        return self._trips.get(family)
 
     def active_trips(self) -> dict[str, RateLimitTrip]:
         """Return a copy of all active trips after expiring stale windows."""
@@ -195,12 +318,7 @@ class RateLimitCircuitBreaker:
         if not self.enabled:
             return {}
         self._expire_stale()
-        active: dict[str, RateLimitTrip] = {}
-        for trip in self._trips.values():
-            current = active.get(trip.family)
-            if current is None or trip.tripped_at > current.tripped_at:
-                active[trip.family] = trip
-        return active
+        return dict(self._trips)
 
     def _expire_stale(self) -> None:
         now = self._now()

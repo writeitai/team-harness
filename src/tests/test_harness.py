@@ -381,6 +381,7 @@ async def test_teamharness_ctor_threads_run_config_knobs(monkeypatch, tmp_path):
     harness = TeamHarness(
         model="anthropic/claude-opus-4",
         api_base="http://localhost:11434/v1",
+        api_key="test-key",
         compact_above_tokens=80_000,
         prompt_cache="auto",
         rate_limit_circuit_breaker=False,
@@ -431,6 +432,7 @@ async def test_teamharness_prompt_cache_off_disables_client_caching(
     harness = TeamHarness(
         model="anthropic/claude-opus-4",
         api_base="http://localhost:11434/v1",
+        api_key="test-key",
         prompt_cache="off",
         cwd=str(tmp_path),
     )

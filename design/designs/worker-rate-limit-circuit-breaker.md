@@ -22,33 +22,50 @@ rejected that process for the same account-wide reason.
 
 `agents/rate_limits.py` reads the stdout file that `agents/spawner.py` already
 captures for every worker. Detection runs only after the worker is terminal.
-It recognizes either of these explicit signals:
+It recognizes either of these hard terminal outcomes:
 
-- a JSON object with `type == "result"` and `api_error_status == 429`; or
+- a JSON object with `type == "result"`, a failure marker (`is_error == true`
+  or `status == "error"`), and an explicit 429 status. The status may be a
+  numeric field such as `api_error_status`/`error.code`; Gemini stream-json may
+  instead retain the explicit `API Error: 429` marker only in that terminal
+  result's `error.message`; or
 - a JSON object with `type == "rate_limit_event"` whose nested
-  `rate_limit_info.status` or `overageStatus` equals `"rejected"`.
+  `rate_limit_info.status` or `overageStatus` equals `"rejected"`, unless a
+  successful terminal result follows it in the same stream.
 
-The scanner processes JSONL incrementally, ignores invalid or truncated lines,
-and lets the last valid rate-limit signal win. A final 429 result often omits
-the reset time, so it retains `resetsAt` from the preceding rejected event.
-Text matches, generic API failures, overloads, authentication errors, and task
-failures do not open this circuit.
+The scanner processes JSONL incrementally and ignores invalid or truncated
+lines. Rejected events are provisional because a worker CLI can report one,
+retry internally, and finish successfully. A successful terminal result clears
+that evidence; additionally, an exit-zero worker never trips the circuit. A
+final failing 429 often omits the reset time, so it retains the latest reset
+from the preceding rejected event. Arbitrary output text, generic API failures,
+overloads, authentication errors, and task failures do not open this circuit.
+
+Opening stdout can fail transiently while a watcher and another status tool are
+synchronizing. `tools/agent_tools.py::_sync_finished_rate_limits` sets
+`AgentState.rate_limit_checked` only after the file scan returns successfully.
+An `OSError` is fail-open for that call but leaves the worker retry-eligible on
+the next spawn, wait, status, list, or availability synchronization.
 
 ## State and key
 
 `RateLimitCircuitBreaker` lives inside the per-run agent-tool bindings built by
-`tools/agent_tools.py`. It indexes evidence by agent-template name (called
-`family` in the record) plus the effective model when known. The template family
-is the blocking scope: when `claude` is account-rate-limited, selecting another
-Claude model generally does not move the work to a different provider account.
-The model that actually reached the failed worker is obtained from
-`agents/spawner.py`'s effective-model audit value.
+`tools/agent_tools.py`. Its active map is keyed by agent-template name (called
+`family` in the record). The template family is the blocking scope: when
+`claude` is account-rate-limited, selecting another Claude model generally does
+not move the work to a different provider account. The model that actually
+reached the failed worker remains audit metadata obtained from
+`agents/spawner.py`'s effective-model value.
 
 The provider's Unix `resetsAt` becomes the circuit expiry. If it is absent or
-invalid, the expiry is `tripped_at + rate_limit_default_cooldown_s`. At or after
-expiry, an availability check or spawn removes the active entry and the spawn
-is allowed as a probe. State is intentionally run-local: a new harness run does
-not inherit an old process's in-memory health assumptions.
+invalid, the candidate expiry is
+`tripped_at + rate_limit_default_cooldown_s`. Providers may encode Unix time in
+seconds or milliseconds; both are normalized to a UTC datetime. A retrip uses
+`max(current_family_expiry, candidate_expiry)`, so a later bare 429 can refresh
+the evidence but cannot replace a multi-day provider reset with the fallback
+cooldown. At or after expiry, an availability check or spawn removes the active
+entry and the spawn is allowed as a probe. State is intentionally run-local: a
+new harness run does not inherit an old process's in-memory health assumptions.
 
 ## Spawn and coordinator contract
 
@@ -75,6 +92,14 @@ No subprocess, assignment file, `AgentState`, or `run.json.agents` entry is
 created for that rejected request. This preserves the existing spawn success
 contract: successful calls still return only an `agent_<id>` string.
 
+The result is intentionally polymorphic for compatibility: a successful spawn
+is the bare id, while only a rate-limit short-circuit is the JSON object above.
+Non-LLM callers should pass the returned string to the exported
+`team_harness.parse_rate_limited_spawn_result`; it returns the validated object
+only when `spawned` is exactly `false`, `status` is `rate_limited`, and the
+required family/reset fields are present. It returns `None` for an agent id,
+unrelated JSON, and existing `ERROR:` strings.
+
 The additive `agent_availability` coordinator tool returns the breaker enabled
 flag, available family names, active trip records, and one status record per
 allowed family. `list_agents` remains an array of processes that were actually
@@ -100,9 +125,9 @@ new `run.json` contains it, including runs with no rate limit:
 ```
 
 Entries are audit history, not only the currently active map. They remain after
-expiry, and a later independent trip can append another interval. Existing
-fields—including per-turn `usage.prompt_tokens` and `usage.completion_tokens`—
-are untouched.
+expiry, and each later observed trip appends its effective, never-shortened
+family interval. Existing fields—including per-turn `usage.prompt_tokens` and
+`usage.completion_tokens`—are untouched.
 
 ## Configuration and compatibility
 

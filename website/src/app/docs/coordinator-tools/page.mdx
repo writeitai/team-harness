@@ -25,6 +25,13 @@ Spawn and manage worker subprocesses.
 
 `spawn_agent` accepts the agent `type`, the task `prompt`, and optional overrides such as `model`, `flags`, and a `worker_label`. Every configured agent type — built-in or custom — appears automatically as a spawnable type (see [Workers](/docs/workers)).
 
+On success, `spawn_agent` returns a bare `agent_<id>` string. When an active
+hard-rate-limit circuit blocks the requested family, it instead returns a JSON
+object with `spawned: false` and `status: "rate_limited"`; no worker is created.
+Programmatic callers can use the exported Python helper
+`team_harness.parse_rate_limited_spawn_result` as a strict guard for this
+rate-limit branch.
+
 ## File system
 
 Read and edit files. Paths may be relative or absolute — the file tools are **not** sandboxed to the working directory; access is limited only by the harness process's own permissions (see the [trust model](/docs/troubleshooting#trust-model)).

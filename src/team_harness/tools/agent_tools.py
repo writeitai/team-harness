@@ -627,12 +627,19 @@ def _sync_finished_rate_limits(
     for state in manager.list_all():
         if state.exit_code is None or state.rate_limit_checked:
             continue
-        state.rate_limit_checked = True
         if not breaker.enabled:
             continue
         try:
             signal = detect_rate_limit_from_path(state.stdout_log)
         except (OSError, UnicodeError):
+            continue
+        # A transient open/read failure must remain retryable. Only a complete,
+        # successful scan (including one that finds no signal) consumes it.
+        state.rate_limit_checked = True
+        if state.exit_code == 0:
+            # Process success is an additional terminal guard. In ordinary
+            # streams the successful result already clears provisional events;
+            # this also fails closed against a truncated success record.
             continue
         if signal is None:
             continue
@@ -1102,7 +1109,11 @@ def spawn_agent_schema(
         "function": {
             "name": "spawn_agent",
             "description": (
-                "Spawn a worker agent subprocess.\n\n" + default_flags_description
+                "Spawn a worker agent subprocess. Returns a bare agent_<id> on "
+                "success. If an active hard-rate-limit circuit blocks the "
+                "family, returns JSON with spawned=false and "
+                "status=rate_limited without creating a worker.\n\n"
+                + default_flags_description
             ),
             "parameters": {
                 "type": "object",

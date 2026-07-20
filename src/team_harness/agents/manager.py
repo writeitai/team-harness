@@ -43,8 +43,8 @@ class AgentState:
     finished_at: datetime | None = None
     failure_classification: dict | None = None
     effective_model: str | None = None
-    # Terminal stdout is scanned at most once for the run-scoped rate-limit
-    # breaker, even when watcher/status/list operations race after process exit.
+    # Terminal stdout is marked checked only after a successful rate-limit scan;
+    # transient file-read errors leave it retryable on the next tool operation.
     rate_limit_checked: bool = False
     # Process-group id when spawned with start_new_session (pgid == pid); lets
     # shutdown kill the whole worker subtree, not just the leader (TH-D5).
