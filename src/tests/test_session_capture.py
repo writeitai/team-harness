@@ -42,6 +42,28 @@ def test_extract_session_id_uses_claude_result_fallback():
     )
 
 
+def test_extract_session_id_matches_grok_end_event():
+    payload = (
+        json.dumps({"type": "thought", "data": "thinking"})
+        + "\n"
+        + json.dumps({"type": "text", "data": "hello"})
+        + "\n"
+        + json.dumps(
+            {
+                "type": "end",
+                "stopReason": "EndTurn",
+                "sessionId": "019f7ed2-e43d-76b1-bfad-91b125272638",
+            }
+        )
+        + "\n"
+    ).encode()
+
+    assert (
+        extract_session_id(DEFAULT_AGENT_TEMPLATES["grok"], payload, None)
+        == "019f7ed2-e43d-76b1-bfad-91b125272638"
+    )
+
+
 def test_claude_fallback_is_limited_to_claude_templates():
     template = AgentTemplate(
         command=("not-claude",),
@@ -128,6 +150,76 @@ async def test_capture_session_id_waits_for_final_claude_result(tmp_path):
                 poll_interval_s=0.01,
             )
             == "claude-final-session"
+        )
+    finally:
+        await writer
+
+
+@pytest.mark.asyncio
+async def test_capture_session_id_reads_grok_end_from_final_tail(tmp_path):
+    stdout_path = tmp_path / "worker.log"
+    stdout_path.write_bytes(
+        b"x" * 256
+        + b"\n"
+        + json.dumps({"type": "text", "data": "partial"}).encode()
+        + b"\n"
+        + json.dumps(
+            {"type": "end", "stopReason": "EndTurn", "sessionId": "grok-tail-session"}
+        ).encode()
+        + b"\n"
+    )
+    stop_event = asyncio.Event()
+    stop_event.set()
+
+    assert (
+        await capture_session_id_from_path(
+            stdout_path=stdout_path,
+            template=DEFAULT_AGENT_TEMPLATES["grok"],
+            pre_generated_uuid=None,
+            stop_event=stop_event,
+            max_bytes=128,
+            max_wait_s=1,
+        )
+        == "grok-tail-session"
+    )
+
+
+@pytest.mark.asyncio
+async def test_capture_session_id_waits_for_final_grok_end(tmp_path):
+    stdout_path = tmp_path / "worker.log"
+    stdout_path.write_text(json.dumps({"type": "thought", "data": "start"}) + "\n")
+    stop_event = asyncio.Event()
+
+    async def finish_worker_log() -> None:
+        await asyncio.sleep(0.02)
+        with stdout_path.open("ab") as handle:
+            handle.write(b"x" * 256)
+            handle.write(b"\n")
+            handle.write(
+                json.dumps(
+                    {
+                        "type": "end",
+                        "stopReason": "EndTurn",
+                        "sessionId": "grok-final-session",
+                    }
+                ).encode()
+            )
+            handle.write(b"\n")
+        stop_event.set()
+
+    writer = asyncio.create_task(finish_worker_log())
+    try:
+        assert (
+            await capture_session_id_from_path(
+                stdout_path=stdout_path,
+                template=DEFAULT_AGENT_TEMPLATES["grok"],
+                pre_generated_uuid=None,
+                stop_event=stop_event,
+                max_bytes=128,
+                max_wait_s=1,
+                poll_interval_s=0.01,
+            )
+            == "grok-final-session"
         )
     finally:
         await writer

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-20
+
+### Added
+
+- **Grok Build CLI worker.** Built-in `grok` agent template for headless
+  unattended runs: `--always-approve`, `--output-format streaming-json`,
+  `--no-auto-update`, default model `grok-4.5`, optional
+  `--reasoning-effort`, and resume via `--resume` after capturing
+  `sessionId` from the final NDJSON `end` event. Auth is external
+  (`XAI_API_KEY` or `grok login`). Sample config, TUI color/emoji, website
+  docs, and unit tests included.
+
+### Migration
+
+- If you previously defined a custom `[agents.grok]` for an unrelated
+  binary, rename it or explicitly clear/replace inherited fields after
+  upgrading — omitted fields now inherit the built-in Grok template
+  (same class of upgrade as `openhands`).
+
 ## [0.6.0] - 2026-07-18
 
 Context economy for long coordinator runs: make the re-sent prefix cheap,

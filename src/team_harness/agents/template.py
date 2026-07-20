@@ -136,6 +136,32 @@ DEFAULT_AGENT_TEMPLATES: dict[str, AgentTemplate] = {
             field_path=("session_id",),
         ),
     ),
+    "grok": AgentTemplate(
+        command=("grok",),
+        shared_flags=(
+            "--always-approve",
+            "--output-format",
+            "streaming-json",
+            "--no-auto-update",
+        ),
+        resume_flags=("--resume", "{session_id}"),
+        prompt_flag="-p",
+        model_flag="--model",
+        default_model="grok-4.5",
+        # Grok Build CLI headless mode: reasoning effort via --reasoning-effort.
+        # Leave reasoning_effort unset so spawn_agent(effort=...) / config pins it.
+        reasoning_effort_flag=("--reasoning-effort", "{effort}"),
+        deduplicate_flags=("--always-approve", "--no-auto-update"),
+        # streaming-json emits a final NDJSON `end` event with camelCase
+        # sessionId. Do not put --session-id in shared_flags: combining -s
+        # with --resume requires --fork-session and would fork, not resume.
+        # A crash before the end event may leave no captured session id.
+        session_capture=SessionCapture(
+            strategy="stream_json_event",
+            match={"type": "end"},
+            field_path=("sessionId",),
+        ),
+    ),
     "antigravity": AgentTemplate(
         command=("agy",),
         shared_flags=(

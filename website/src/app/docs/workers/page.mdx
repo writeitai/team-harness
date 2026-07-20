@@ -61,7 +61,8 @@ team-harness ships templates for these agent types. Run `th init --force` to reg
 | `codex`       | `codex exec`                | `--model`                             |
 | `gemini`      | `gemini`                    | `--model`                             |
 | `claude`      | `claude`                    | `--model` + `ANTHROPIC_*` env vars    |
-| `antigravity` | `agy`                       | none (no model flag in `agy --help`)  |
+| `grok`        | `grok`                      | `--model` (default `grok-4.5`)        |
+| `antigravity` | `agy`                       | `--model`                             |
 | `openhands`   | `openhands`                 | `LLM_MODEL` env var                   |
 | `opencode`    | `opencode`                  | none (`model_flag = false`)           |
 | `pi`          | `pi --print --no-session`   | none (`model_flag = false`)           |
@@ -69,7 +70,8 @@ team-harness ships templates for these agent types. Run `th init --force` to reg
 
 A few worker-specific notes:
 
-- **Antigravity** runs use `agy --print` so the worker runs as a non-interactive subprocess. `agy --help` exposes no model flag, so team-harness does not inject `--model`. Print mode does not emit stream-json, so automatic session capture is not configured — callers that already know a conversation id can still use resume mode (`--conversation <id>`).
+- **Grok** runs headless with `--always-approve`, `--output-format streaming-json`, and `--no-auto-update`. Session ids are captured from the final NDJSON `end` event (`sessionId`, camelCase) and resume uses `--resume <id>`. Auth is external: set `XAI_API_KEY` or run `grok login`. Set `GROK_HOME` when CI needs an isolated Grok home; `GROK_DISABLE_AUTOUPDATER=1` is an optional environment-policy fallback to `--no-auto-update` and is not injected by the built-in template. Do not put `--session-id` in `shared_flags` for this worker — combining `-s` with `--resume` forks rather than resumes. A crash before the `end` event may leave no captured session id. Reasoning effort uses `--reasoning-effort`. If you previously defined a custom `[agents.grok]` for an unrelated binary, rename it or explicitly clear/replace inherited fields after upgrading.
+- **Antigravity** runs use `agy --print` so the worker runs as a non-interactive subprocess. Print mode does not emit stream-json, so automatic session capture is not configured — callers that already know a conversation id can still use resume mode (`--conversation <id>`).
 - **OpenHands** runs are not auto-resumable today (its `--json` output is not parseable as stream-json). `--override-with-envs` is required so `LLM_MODEL` injection works — a side effect is that any `LLM_MODEL`, `LLM_API_KEY`, or `LLM_BASE_URL` already set in your shell is picked up by the worker. Unset or override them for deterministic per-run behavior.
 
 ## Adding a custom agent type

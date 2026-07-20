@@ -144,6 +144,13 @@ def test_antigravity_resume_info_prefers_resume_mode():
     assert resume.preferred_mode == "resume"
 
 
+def test_grok_resume_info_prefers_resume_mode():
+    resume = resume_info_for_agent_type("grok")
+
+    assert resume.supported is True
+    assert resume.preferred_mode == "resume"
+
+
 def test_write_worker_sessions_manifest_records_failed_before_session_diagnostics(
     tmp_path,
 ):

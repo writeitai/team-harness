@@ -343,6 +343,52 @@ def test_build_command_default_claude_contains_verbose():
     ]
 
 
+def test_build_command_default_grok_fresh():
+    command = build_command(agent_type="grok", prompt="do thing", config=Config())
+
+    assert command == [
+        "grok",
+        "--always-approve",
+        "--output-format",
+        "streaming-json",
+        "--no-auto-update",
+        "--model",
+        "grok-4.5",
+        "-p",
+        "do thing",
+    ]
+    assert "--session-id" not in command
+
+
+def test_build_command_default_grok_resume_and_model_override():
+    command = build_command(
+        agent_type="grok",
+        prompt="continue",
+        config=Config(),
+        mode="resume",
+        resume_session_id="019f7ed2-e43d-76b1-bfad-91b125272638",
+        model="custom-grok-model",
+        effort="high",
+    )
+
+    assert command == [
+        "grok",
+        "--always-approve",
+        "--output-format",
+        "streaming-json",
+        "--no-auto-update",
+        "--model",
+        "custom-grok-model",
+        "--reasoning-effort",
+        "high",
+        "--resume",
+        "019f7ed2-e43d-76b1-bfad-91b125272638",
+        "-p",
+        "continue",
+    ]
+    assert "--session-id" not in command
+
+
 def test_build_command_default_antigravity_fresh():
     command = build_command(
         agent_type="antigravity", prompt="do thing", config=Config()
